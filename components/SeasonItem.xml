@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="SeasonItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" />
+        <field id="focusPercent" type="float" />
+    </interface>
+    <children>
+        <Rectangle id="focusBg" color="#FFFFFF" width="160" height="60" opacity="0" />
+        <Label id="titleLabel" text="" color="#C8C8C8" font="font:MediumBoldSystemFont"
+            translation="[0, 14]" width="160" horizAlign="center" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/SeasonItem.brs" />
+</component>

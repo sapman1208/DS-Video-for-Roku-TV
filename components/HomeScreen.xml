@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="HomeScreen" extends="Group">
+    <interface>
+        <field id="authData" type="assocarray" />
+        <field id="selectedCategory" type="assocarray" alwaysNotify="true" />
+        <field id="navCategories" type="array" alwaysNotify="true" />
+    </interface>
+    <children>
+        <Rectangle color="#373B3E" width="1920" height="1080" />
+        <Rectangle color="#2D3134" width="1920" height="82" />
+        <MarkupGrid id="categoryList"
+            translation="[48, 10]"
+            itemComponentName="NavItem"
+            numColumns="7"
+            itemSize="[240, 60]"
+            itemSpacing="[14, 0]"
+            numRows="1" />
+        <Timer id="navLoadTimer" repeat="false" duration="0.25" />
+
+        <Label id="categoryDesc" text="" color="#C8C8C8"
+            font="font:MediumSystemFont"
+            translation="[48, 135]" width="1600" wrap="true" />
+
+        <Label id="hintLabel" text=""
+            color="#8BAFD1" font="font:LargeBoldSystemFont"
+            translation="[48, 250]" visible="false" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/HomeScreen.brs" />
+</component>

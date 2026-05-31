@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="VideoItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" />
+        <field id="focusPercent" type="float" />
+    </interface>
+    <children>
+        <Rectangle id="bg" color="#272B2E" width="220" height="330" />
+        <Poster id="poster" uri="" width="220" height="330" loadDisplayMode="scaleToFill" />
+        <Poster id="iconPoster" uri="" width="112" height="112" translation="[54, 109]"
+            loadDisplayMode="scaleToFit" visible="false" />
+        <Label id="titleLabel" text="" color="#FFFFFF"
+            font="font:SmallSystemFont"
+            translation="[0, 342]" width="220" height="48" wrap="true" maxLines="2" />
+        <Label id="yearLabel" text="" color="#8BAFD1"
+            font="font:SmallSystemFont"
+            translation="[0, 394]" width="220" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/VideoItem.brs" />
+</component>

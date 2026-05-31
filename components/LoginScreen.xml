@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" ?>
+  <component name="LoginScreen" extends="Group">
+      <interface>
+          <field id="authSuccess" type="assocarray" alwaysNotify="true" />
+          <field id="keyInput" type="string" alwaysNotify="true" />
+          <field id="settingsMode" type="boolean" />
+      </interface>
+      <children>
+          <Rectangle color="#DF3540" width="1920" height="1080" />
+
+          <Label text="Synology DS Video"
+              font="font:LargeBoldSystemFont" color="#FFFFFF"
+              translation="[760, 86]" />
+
+          <!-- Panel -->
+          <Rectangle color="#B82330" width="760" height="780" translation="[580, 160]" opacity="0.92" />
+
+          <!-- Row highlight -->
+          <Rectangle id="rowHighlight" color="#F05A63"
+              width="760" height="84" translation="[580, 190]" />
+
+          <!-- Row 0: NAS Address -->
+          <Label text="NAS Address" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 202]" />
+          <Label id="row0value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 232]" width="700" />
+
+          <!-- Row 1: Port -->
+          <Label text="Port" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 302]" />
+          <Label id="row1value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 332]" width="700" />
+
+          <!-- Row 2: Protocol -->
+          <Label text="Protocol" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 402]" />
+          <Label id="row2value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 432]" width="700" />
+
+          <!-- Row 3: Username -->
+          <Label text="Username" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 502]" />
+          <Label id="row3value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 532]" width="700" />
+
+          <!-- Row 4: Password -->
+          <Label text="Password" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 602]" />
+          <Label id="row4value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 632]" width="700" />
+
+          <!-- Row 5: Transcode Port -->
+          <Label text="Transcode Port" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 702]" />
+          <Label id="row5value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 732]" width="700" />
+
+          <!-- Divider -->
+          <Rectangle color="#F47A82" width="760" height="2" translation="[580, 820]" opacity="0.55" />
+
+          <!-- Row 6: Login -->
+          <Label id="row6value" text="Login"
+              color="#FFFFFF" font="font:MediumBoldSystemFont"
+              translation="[930, 850]" />
+
+          <!-- Status -->
+          <Label id="statusLabel" text=""
+              color="#FF6B6B" font="font:MediumSystemFont"
+              translation="[580, 960]" width="760" wrap="true" />
+      </children>
+      <script type="text/brightscript" uri="pkg:/components/LoginScreen.brs" />
+  </component>
+  

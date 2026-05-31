@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="VideoDetail" extends="Group">
+    <interface>
+        <field id="videoData" type="assocarray" />
+        <field id="playVideo" type="assocarray" alwaysNotify="true" />
+        <field id="backPressed" type="boolean" alwaysNotify="true" />
+        <field id="listChanged" type="boolean" alwaysNotify="true" />
+    </interface>
+    <children>
+        <Rectangle color="#202326" width="1920" height="1080" />
+        <Poster id="backdrop" uri="" width="1920" height="1080" loadDisplayMode="scaleToZoom" opacity="0.34" />
+        <Rectangle color="#202326" width="1920" height="1080" opacity="0.62" />
+        <Poster id="poster" uri="" width="360" height="540" translation="[110, 150]" loadDisplayMode="scaleToFill" />
+        <Rectangle id="posterFallback" color="#303438" width="360" height="540" translation="[110, 150]" />
+        <Label id="titleLabel" text="" color="#FFFFFF" font="font:LargeBoldSystemFont"
+            translation="[540, 150]" width="1180" height="72" />
+        <Label id="metaLabel" text="" color="#C9CED3" font="font:MediumSystemFont"
+            translation="[540, 230]" width="1100" height="48" />
+        <Label id="summaryLabel" text="" color="#FFFFFF" font="font:MediumSystemFont"
+            translation="[540, 310]" width="1180" height="230" wrap="true" />
+        <MarkupGrid id="actionGrid" translation="[540, 610]" itemComponentName="DetailActionItem"
+            numColumns="4" numRows="1" itemSize="[210, 76]" itemSpacing="[18, 0]" />
+        <Label id="statusLabel" text="" color="#FFB3B8" font="font:SmallSystemFont"
+            translation="[540, 710]" width="920" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/VideoDetail.brs" />
+</component>

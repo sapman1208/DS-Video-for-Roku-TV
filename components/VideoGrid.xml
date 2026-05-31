@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="VideoGrid" extends="Group">
+    <interface>
+        <field id="authData" type="assocarray" />
+        <field id="category" type="string" />
+        <field id="libraryId" type="string" />
+        <field id="pageLabel" type="string" />
+        <field id="navCategories" type="array" />
+        <field id="focusNavCategory" type="string" alwaysNotify="true" />
+        <field id="refreshLists" type="boolean" alwaysNotify="true" />
+        <field id="selectedVideo" type="assocarray" alwaysNotify="true" />
+        <field id="selectedCategory" type="assocarray" alwaysNotify="true" />
+        <field id="artworkCacheRequest" type="assocarray" alwaysNotify="true" />
+        <field id="backPressed" type="boolean" alwaysNotify="true" />
+    </interface>
+    <children>
+        <Rectangle color="#373B3E" width="1920" height="1080" />
+        <Rectangle color="#2D3134" width="1920" height="80" />
+        <MarkupGrid id="categoryList"
+            translation="[48, 10]"
+            itemComponentName="NavItem"
+            numColumns="7"
+            itemSize="[240, 60]"
+            itemSpacing="[14, 0]"
+            numRows="1" />
+        <Timer id="navLoadTimer" repeat="false" duration="0.25" />
+
+        <Label id="pageTitleLabel" text="" color="#FFFFFF"
+            font="font:MediumBoldSystemFont"
+            translation="[48, 92]" width="900" visible="false" />
+
+        <Label id="loadingLabel" text=""
+            color="#8BAFD1" font="font:MediumSystemFont"
+            translation="[840, 530]" visible="false" />
+
+        <Label id="errorLabel" text="" color="#FF6B6B"
+            font="font:MediumSystemFont" translation="[600, 500]"
+            width="720" wrap="true" visible="false" />
+
+        <MarkupGrid id="videoGrid"
+            translation="[48, 120]"
+            itemComponentName="VideoItem"
+            numColumns="7"
+            itemSize="[220, 430]"
+            itemSpacing="[45, 22]"
+            vertFocusAnimationStyle="floatingFocus"
+            numRows="2"
+            visible="false" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/VideoGrid.brs" />
+</component>

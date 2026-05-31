@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="EpisodeItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" />
+        <field id="focusPercent" type="float" />
+    </interface>
+    <children>
+        <Rectangle id="bg" color="#1B2A40" width="1800" height="132" />
+        <Rectangle id="focusBg" color="#0070CC" width="1800" height="132" opacity="0" />
+        <Label id="titleLabel" text="" color="#FFFFFF" font="font:MediumSystemFont"
+            translation="[20, 18]" width="1760" />
+        <Label id="descLabel" text="" color="#AFC4D8" font="font:SmallSystemFont"
+            translation="[20, 62]" width="1760" height="58" wrap="true" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/EpisodeItem.brs" />
+</component>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="SettingsScreen" extends="Group">
+    <interface>
+        <field id="backPressed" type="boolean" alwaysNotify="true" />
+        <field id="settingsSaved" type="boolean" alwaysNotify="true" />
+    </interface>
+    <children>
+        <Rectangle color="#DF3540" width="1920" height="1080" />
+        <Label text="Settings" font="font:LargeBoldSystemFont" color="#FFFFFF"
+            translation="[850, 86]" />
+
+        <Rectangle color="#B82330" width="760" height="780" translation="[580, 160]" opacity="0.92" />
+        <Rectangle id="rowHighlight" color="#F05A63" width="760" height="84" translation="[580, 190]" />
+
+        <Label text="NAS Address" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 202]" />
+        <Label id="row0value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 232]" width="700" />
+        <Label text="Port" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 302]" />
+        <Label id="row1value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 332]" width="700" />
+        <Label text="Protocol" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 402]" />
+        <Label id="row2value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 432]" width="700" />
+        <Label text="Username" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 502]" />
+        <Label id="row3value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 532]" width="700" />
+        <Label text="Password" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 602]" />
+        <Label id="row4value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 632]" width="700" />
+        <Label text="Transcode Port" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 702]" />
+        <Label id="row5value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 732]" width="700" />
+
+        <Rectangle color="#F47A82" width="760" height="2" translation="[580, 820]" opacity="0.55" />
+        <Label id="row6value" text="Save" color="#FFFFFF" font="font:MediumBoldSystemFont"
+            translation="[930, 850]" />
+        <Label id="statusLabel" text="" color="#44AAFF" font="font:MediumSystemFont"
+            translation="[580, 960]" width="760" wrap="true" visible="false" />
+    </children>
+    <script type="text/brightscript" uri="pkg:/components/SettingsScreen.brs" />
+</component>

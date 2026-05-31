@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" ?>
+  <component name="VideoPlayer" extends="Group">
+      <interface>
+          <field id="authData" type="assocarray" />
+          <field id="videoData" type="assocarray" />
+          <field id="playbackDone" type="boolean" alwaysNotify="true" />
+      </interface>
+      <children>
+          <Rectangle id="backgroundRect" color="#000000" width="1920" height="1080" />
+
+          <Rectangle id="loadingOverlay" color="#000000"
+              width="1920" height="1080" />
+          <Label id="loadingLabel" text=""
+              color="#FFFFFF" font="font:MediumSystemFont"
+              translation="[820, 510]" visible="false" />
+          <Label id="videoTitle" text="" color="#8BAFD1"
+              font="font:SmallSystemFont"
+              translation="[760, 560]" width="400" visible="false" />
+
+          <!-- Full-width label at top-left so diagnostic text never gets clipped -->
+          <Label id="errorLabel" text="" color="#FFE066"
+              font="font:SmallSystemFont"
+              translation="[40, 30]"
+              width="1840"
+              wrap="true"
+              visible="false" />
+
+          <Video id="videoNode"
+              translation="[0,0]"
+              width="1920"
+              height="1080"
+              visible="false" />
+      </children>
+      <script type="text/brightscript" uri="pkg:/components/VideoPlayer.brs" />
+  </component>
+  
