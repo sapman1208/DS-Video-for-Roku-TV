@@ -1,7 +1,7 @@
 sub init()
       ' Default credentials — overridden by registry if previously saved
       m.nasAddress = ""
-      m.nasPort    = "7520"
+      m.nasPort    = "5001"
       m.useHttps   = true
       m.username   = ""
       m.password   = ""
