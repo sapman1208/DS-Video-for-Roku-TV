@@ -1,0 +1,15 @@
+title=Synology DS Video
+subtitle=Stream videos from your Synology NAS
+major_version=1
+minor_version=0
+build_version=151
+
+mm_icon_focus_hd=pkg:/images/icon-hd.png
+mm_icon_focus_sd=pkg:/images/icon-sd.png
+mm_icon_side_hd=pkg:/images/icon-side.png
+
+splash_screen_hd=pkg:/images/splash-hd.png
+splash_screen_sd=pkg:/images/splash-sd.png
+splash_color=#DF3540
+
+ui_resolutions=fhd
