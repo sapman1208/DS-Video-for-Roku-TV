@@ -52,7 +52,7 @@ curl --digest -u rokudev:YOUR_ROKU_DEV_PASSWORD \
 
 On first launch, enter:
 
-- NAS address: hostname or IP only, such as `nas.example.com` or `10.0.1.74`.
+- NAS address: hostname or IP only, such as `nas.example.com` or `10.0.1.1`.
 - Port: your DSM Video Station port, such as `5000`, `5001`, or a custom port.
 - Protocol: HTTP or HTTPS.
 - Username and password: Synology account with Video Station access.
