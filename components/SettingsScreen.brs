@@ -1,6 +1,6 @@
 sub init()
     m.nasAddress = ""
-    m.nasPort = "7520"
+    m.nasPort = "5001"
     m.useHttps = true
     m.username = ""
     m.password = ""
