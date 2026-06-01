@@ -7,6 +7,8 @@ sub init()
       m.videoNode.observeField("bufferingStatus", "onVideoBuffering")
       m.hasError = false
       m.hasPlayed = false
+      m.reportedDone = false
+      m.userStopped = false
       m.top.setFocus(true)
   end sub
 
@@ -14,8 +16,9 @@ sub init()
       videoData = event.getData()
       if videoData = invalid then return
 
-      authData = videoData.authData
       m.hasPlayed = false
+      m.reportedDone = false
+      m.userStopped = false
       requestStreamUrl()
   end sub
 
@@ -135,7 +138,9 @@ sub init()
       else if state = "finished" or state = "stopped"
           ' Only exit if no error was shown — otherwise user reads the error and presses Back.
           if not m.hasError
-              m.top.playbackDone = true
+              reason = "finished"
+              if m.userStopped then reason = "back"
+              reportPlaybackDone(reason)
           end if
       else if state = "error"
           m.hasError = true
@@ -145,7 +150,18 @@ sub init()
       end if
   end sub
 
+  sub reportPlaybackDone(reason as string)
+      if m.reportedDone then return
+      m.reportedDone = true
+      m.top.playbackResult = {
+          reason: reason,
+          videoData: m.top.videoData
+      }
+      m.top.playbackDone = true
+  end sub
+
   sub onVideoErrorDetail(event as object)
+      if event = invalid then return
       print "VIDEO_ERROR_DETAIL code="; m.videoNode.errorCode; " msg="; m.videoNode.errorMsg
   end sub
 
@@ -168,8 +184,9 @@ sub init()
   function onKeyEvent(key as string, press as boolean) as boolean
       if not press then return false
       if key = "back"
+          m.userStopped = true
           m.videoNode.control = "stop"
-          m.top.playbackDone = true
+          reportPlaybackDone("back")
           return true
       else if key = "OK" or key = "play"
           m.videoNode.setFocus(true)

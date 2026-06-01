@@ -9,12 +9,18 @@ sub init()
       m.lastKey = ""
       m.categories = []
       m.pendingNavIdx = -1
+      m.posterRetryAttempts = {}
+      m.posterRetryQueue = []
+      m.posterRetryCursor = 0
       nav = m.top.findNode("categoryList")
       nav.observeField("itemSelected", "onNavSelected")
       nav.observeField("itemFocused", "onNavFocused")
       nav.observeField("focus", "onNavFocus")
       m.top.observeField("focusNavCategory", "onFocusNavCategory")
+      m.top.observeField("refreshArtwork", "onRefreshArtwork")
       m.top.findNode("navLoadTimer").observeField("fire", "onNavLoadTimer")
+      m.top.findNode("posterRetryTimer").observeField("fire", "onPosterRetryTimer")
+      m.top.findNode("initialPosterRetryTimer").observeField("fire", "onInitialPosterRetryTimer")
       m.top.findNode("seasonGrid").observeField("itemSelected", "onSeasonSelected")
       m.top.findNode("seasonGrid").observeField("itemFocused", "onSeasonFocused")
       m.top.findNode("seasonGrid").observeField("focus", "onSeasonFocus")
@@ -119,19 +125,21 @@ sub init()
       end if
 
       m.episodes = episodes
+      resetPosterRetryState()
       m.seasons = seasonsFromEpisodes(episodes)
       if m.seasons.count() > 0 then m.currentSeason = m.seasons[0]
       populateSeasonTabs()
       populateEpisodeGrid(episodes, m.currentSeason)
-      startArtworkCache(episodes)
+      startInitialSeasonPosterRetryTimer()
+      startArtworkCache(episodes, 0)
   end sub
 
-  sub startArtworkCache(items as object)
+  sub startArtworkCache(items as object, maxItems as integer)
       if items = invalid or items.count() = 0 then return
       m.top.artworkCacheRequest = {
           items: items,
-          maxItems: 0,
-          includeBackdrops: true,
+          maxItems: maxItems,
+          includeBackdrops: false,
           source: "episodes",
           nonce: createCacheNonce()
       }
@@ -235,6 +243,19 @@ sub init()
       end if
   end sub
 
+  sub onRefreshArtwork(event as object)
+      if m.episodes = invalid or m.episodes.count() = 0 then return
+      grid = m.top.findNode("episodeGrid")
+      focused = m.episodeFocusedIndex
+      if grid <> invalid and grid.itemFocused >= 0 then focused = grid.itemFocused
+      populateEpisodeGrid(m.episodes, m.currentSeason)
+      if grid <> invalid and focused >= 0
+          grid.jumpToItem = focused
+          grid.setFocus(true)
+          m.focusArea = "episodes"
+      end if
+  end sub
+
   function seasonEpisodeCount(season as integer) as integer
       count = 0
       for each ep in m.episodes
@@ -250,6 +271,7 @@ sub init()
       m.keepSeasonFocus = true
       populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
+      startInitialSeasonPosterRetryTimer()
   end sub
 
   sub onSeasonFocused(event as object)
@@ -261,6 +283,7 @@ sub init()
       m.keepSeasonFocus = true
       populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
+      startInitialSeasonPosterRetryTimer()
   end sub
 
   function seasonIndex(season as integer) as integer
@@ -284,7 +307,139 @@ sub init()
       idx = event.getData()
       if idx < 0 then return
       m.episodeFocusedIndex = idx
+      scheduleSeasonPosterRetry()
   end sub
+
+  sub scheduleSeasonPosterRetry()
+      seasonEpisodes = episodesForCurrentSeason()
+      i = 0
+      while i < seasonEpisodes.count()
+          enqueueEpisodePosterRetry(i, seasonEpisodes)
+          i = i + 1
+      end while
+      timer = m.top.findNode("posterRetryTimer")
+      if timer = invalid then return
+      if m.posterRetryQueue.count() > 0
+          retryNextEpisodePosterBatch()
+          if m.posterRetryQueue.count() > 0 then timer.control = "start"
+      end if
+  end sub
+
+  sub startInitialSeasonPosterRetryTimer()
+      timer = m.top.findNode("initialPosterRetryTimer")
+      if timer = invalid then return
+      timer.control = "stop"
+      timer.control = "start"
+  end sub
+
+  sub onInitialPosterRetryTimer(event as object)
+      scheduleSeasonPosterRetry()
+  end sub
+
+  sub resetPosterRetryState()
+      timer = m.top.findNode("posterRetryTimer")
+      if timer <> invalid then timer.control = "stop"
+      m.posterRetryAttempts = {}
+      m.posterRetryQueue = []
+      m.posterRetryCursor = 0
+  end sub
+
+  sub enqueueEpisodePosterRetry(idx as integer, seasonEpisodes as object)
+      if not episodeArtworkNeedsRetry(idx, seasonEpisodes) then return
+      key = episodeAttemptKey(idx)
+      attempts = 0
+      existing = m.posterRetryAttempts.lookUp(key)
+      if existing <> invalid then attempts = existing
+      if attempts >= 10 then return
+      if not episodeQueueContains(idx) then m.posterRetryQueue.push(idx)
+  end sub
+
+  function episodeQueueContains(idx as integer) as boolean
+      for each queuedIdx in m.posterRetryQueue
+          if queuedIdx = idx then return true
+      end for
+      return false
+  end function
+
+  sub onPosterRetryTimer(event as object)
+      retryNextEpisodePosterBatch()
+  end sub
+
+  sub retryNextEpisodePosterBatch()
+      timer = m.top.findNode("posterRetryTimer")
+      if m.posterRetryQueue = invalid or m.posterRetryQueue.count() = 0
+          if timer <> invalid then timer.control = "stop"
+          return
+      end if
+      seasonEpisodes = episodesForCurrentSeason()
+      batchSize = 4
+      processed = 0
+      while processed < batchSize and m.posterRetryQueue.count() > 0
+          idx = m.posterRetryQueue[0]
+          if episodeArtworkNeedsRetry(idx, seasonEpisodes)
+              key = episodeAttemptKey(idx)
+              attempts = 0
+              existing = m.posterRetryAttempts.lookUp(key)
+              if existing <> invalid then attempts = existing
+              if attempts >= 10
+                  m.posterRetryQueue.delete(0)
+              else
+                  attempts = attempts + 1
+                  m.posterRetryAttempts.addReplace(key, attempts)
+                  retryEpisodePosterForIndex(idx, seasonEpisodes, attempts)
+                  m.posterRetryQueue.delete(0)
+                  if attempts < 10 then m.posterRetryQueue.push(idx)
+                  processed = processed + 1
+              end if
+          else
+              m.posterRetryQueue.delete(0)
+          end if
+      end while
+      if m.posterRetryQueue.count() = 0 and timer <> invalid then timer.control = "stop"
+  end sub
+
+  function episodeAttemptKey(idx as integer) as string
+      return stri(m.currentSeason).trim() + ":" + stri(idx).trim()
+  end function
+
+  function episodeArtworkNeedsRetry(idx as integer, seasonEpisodes as object) as boolean
+      grid = m.top.findNode("episodeGrid")
+      if grid = invalid or grid.content = invalid then return false
+      node = grid.content.getChild(idx)
+      if node = invalid then return false
+      if node.hasField("artworkLoaded") and node.artworkLoaded = "true" then return false
+      nodePoster = ""
+      if node.HDPosterUrl <> invalid then nodePoster = node.HDPosterUrl
+      if isLocalArtworkUrl(nodePoster) then return false
+
+      if idx < 0 or idx >= seasonEpisodes.count() then return false
+      ep = seasonEpisodes[idx]
+      baseUrl = remotePosterUrl(ep, m.top.authData)
+      return isHttpUrl(baseUrl)
+  end function
+
+  sub retryEpisodePosterForIndex(idx as integer, seasonEpisodes as object, attempt as integer)
+      if idx < 0 or idx >= seasonEpisodes.count() then return
+      grid = m.top.findNode("episodeGrid")
+      if grid = invalid or grid.content = invalid then return
+      node = grid.content.getChild(idx)
+      if node = invalid then return
+      if node.hasField("artworkLoaded") and node.artworkLoaded = "true" then return
+      ep = seasonEpisodes[idx]
+      baseUrl = remotePosterUrl(ep, m.top.authData)
+      if not isHttpUrl(baseUrl) then return
+      retryUrl = artworkRetryUrl(baseUrl, attempt)
+      node.HDPosterUrl = retryUrl
+      node.SDPosterUrl = retryUrl
+  end sub
+
+  function episodesForCurrentSeason() as object
+      seasonEpisodes = []
+      for each ep in m.episodes
+          if episodeSeason(ep) = m.currentSeason then seasonEpisodes.push(ep)
+      end for
+      return seasonEpisodes
+  end function
 
   ' zeroPad works with both integer and string inputs safely
   function zeroPad(n as dynamic) as string
@@ -543,7 +698,55 @@ sub init()
 
       ep = seasonEpisodes[idx]
       authData = m.top.authData
+      playlist = autoplayEpisodeList(authData)
+      selected = episodeVideoPayload(ep, authData, idx)
+      selected.autoplayEpisodes = playlist
+      selected.autoplayIndex = autoplayIndexForEpisode(selected, playlist)
+      m.top.selectedVideo = selected
+  end sub
 
+  function autoplayEpisodeList(authData as object) as object
+      playlist = []
+      if m.episodes = invalid then return playlist
+      for each season in m.seasons
+          seasonEpisodes = []
+          for each ep in m.episodes
+              if episodeSeason(ep) = season then seasonEpisodes.push(ep)
+          end for
+          seasonEpisodes = sortEpisodesForAutoplay(seasonEpisodes)
+          idx = 0
+          while idx < seasonEpisodes.count()
+              playlist.push(episodeVideoPayload(seasonEpisodes[idx], authData, idx))
+              idx = idx + 1
+          end while
+      end for
+      return playlist
+  end function
+
+  function sortEpisodesForAutoplay(episodes as object) as object
+      sorted = []
+      for each ep in episodes
+          sorted.push(ep)
+      end for
+      i = 0
+      while i < sorted.count()
+          j = i + 1
+          while j < sorted.count()
+              leftNum = episodeNumber(sorted[i])
+              rightNum = episodeNumber(sorted[j])
+              if rightNum > 0 and (leftNum <= 0 or rightNum < leftNum)
+                  tmp = sorted[i]
+                  sorted[i] = sorted[j]
+                  sorted[j] = tmp
+              end if
+              j = j + 1
+          end while
+          i = i + 1
+      end while
+      return sorted
+  end function
+
+  function episodeVideoPayload(ep as object, authData as object, fallbackIndex as integer) as object
       epId = ep.lookUp("id")
       if epId = invalid then epId = "0"
 
@@ -551,7 +754,7 @@ sub init()
       rawFileId = fileInfo.id
       if rawFileId = invalid then rawFileId = epId
       epNumber = episodeNumber(ep)
-      if epNumber <= 0 then epNumber = idx + 1
+      if epNumber <= 0 then epNumber = fallbackIndex + 1
       seasonNumber = episodeSeason(ep)
       episodeMeta = "Episode"
       if seasonNumber > 0 and epNumber > 0
@@ -560,7 +763,7 @@ sub init()
           episodeMeta = "Episode " + stri(epNumber).trim()
       end if
 
-      m.top.selectedVideo = {
+      return {
           type: "episode",
           id: epId,
           fileId: rawFileId,
@@ -578,7 +781,28 @@ sub init()
           backdropRemoteUrl: safeStr(m.top.showData, ["backdropRemoteUrl"]),
           authData: authData
       }
-  end sub
+  end function
+
+  function autoplayIndexForEpisode(selected as object, playlist as object) as integer
+      if selected = invalid or playlist = invalid then return -1
+      selectedKey = autoplayVideoKey(selected)
+      idx = 0
+      while idx < playlist.count()
+          if autoplayVideoKey(playlist[idx]) = selectedKey then return idx
+          idx = idx + 1
+      end while
+      return -1
+  end function
+
+  function autoplayVideoKey(item as object) as string
+      if item = invalid then return ""
+      if item.filePath <> invalid and item.filePath <> "" then return "path:" + item.filePath
+      if item.fileId <> invalid and item.fileId <> "" then return "file:" + safeStr({ value: item.fileId }, ["value"])
+      if item.id <> invalid and item.id <> "" then return "id:" + safeStr({ value: item.id }, ["value"])
+      season = safeStr({ value: item.seasonNumber }, ["value"])
+      episode = safeStr({ value: item.episodeNumber }, ["value"])
+      return "se:" + season + "x" + episode
+  end function
 
   function onKeyEvent(key as string, press as boolean) as boolean
       if not press then return false
@@ -601,7 +825,11 @@ sub init()
       if key = "down" and m.focusArea = "seasons"
           m.top.findNode("episodeGrid").setFocus(true)
           m.focusArea = "episodes"
+          startInitialSeasonPosterRetryTimer()
           return true
+      end if
+      if (key = "left" or key = "right") and m.focusArea = "episodes"
+          scheduleSeasonPosterRetry()
       end if
       if key = "back"
           m.top.backPressed = true
@@ -611,8 +839,10 @@ sub init()
   end function
 
   function posterUrl(item as object, authData as dynamic) as string
+	      remotePoster = item.lookUp("posterRemoteUrl")
+	      if remotePoster <> invalid and remotePoster <> "" and isHttpUrl(remotePoster) and not hasFallbackMapper(remotePoster) then return remotePoster
 	      savedPoster = item.lookUp("posterUrl")
-	      if savedPoster <> invalid and savedPoster <> "" then return savedPoster
+	      if savedPoster <> invalid and savedPoster <> "" and not hasFallbackMapper(savedPoster) then return savedPoster
 	      if authData = invalid then return ""
 	      proxyBase = authData.proxyBaseUrl
 	      if proxyBase <> invalid and proxyBase <> ""
@@ -621,13 +851,53 @@ sub init()
 	          mapper = safeStr({ value: mapperId }, ["value"])
 	          mapper = mapper.trim()
 		          if mapper <> "" and mapper <> "0"
-		              fallback = showMapperId()
-		              if fallback <> "" and fallback <> "0" then return proxyBase + "/poster?mapper_id=" + mapper + "&fallback_mapper_id=" + fallback + "&format=jpg"
 		              return proxyBase + "/poster?mapper_id=" + mapper + "&format=jpg"
 		          end if
 	      end if
 	      return synologyEpisodePosterUrl(item, authData)
 	  end function
+
+  function remotePosterUrl(item as object, authData as dynamic) as string
+      remotePoster = safeStr(item, ["posterRemoteUrl"])
+      if isHttpUrl(remotePoster) and not hasFallbackMapper(remotePoster) then return remotePoster
+      savedPoster = safeStr(item, ["posterUrl"])
+      if isHttpUrl(savedPoster) and not hasFallbackMapper(savedPoster) then return savedPoster
+      return posterUrl(item, authData)
+  end function
+
+  function hasFallbackMapper(url as dynamic) as boolean
+      if url = invalid then return false
+      if type(url) <> "roString" and type(url) <> "String" then return false
+      return instr(1, lcase(url), "fallback_mapper_id=") > 0
+  end function
+
+  function isHttpUrl(url as dynamic) as boolean
+      if url = invalid then return false
+      if type(url) <> "roString" and type(url) <> "String" then return false
+      lower = lcase(url)
+      return left(lower, 7) = "http://" or left(lower, 8) = "https://"
+  end function
+
+  function isLocalArtworkUrl(url as dynamic) as boolean
+      if url = invalid then return false
+      if type(url) <> "roString" and type(url) <> "String" then return false
+      lower = lcase(url)
+      return left(lower, 9) = "cachefs:/" or left(lower, 5) = "pkg:/" or left(lower, 5) = "tmp:/"
+  end function
+
+  function artworkRetryUrl(url as string, attempt as integer) as string
+      sep = "?"
+      if instr(1, url, "?") > 0 then sep = "&"
+      attemptText = stri(attempt)
+      attemptText = attemptText.trim()
+      return url + sep + "roku_img_retry=" + attemptText
+  end function
+
+  function retryKeyForEpisode(item as object, idx as integer) as string
+      idText = safeStr(item, ["id", "mapper_id", "mapperId", "title", "name"])
+      if idText = "" then idText = stri(idx)
+      return stri(m.currentSeason).trim() + ":" + idText.trim()
+  end function
 
   function synologyEpisodePosterUrl(item as object, authData as dynamic) as string
       if authData = invalid then return ""
@@ -682,10 +952,12 @@ sub init()
   end sub
 
   sub onNavFocused(event as object)
+      if event = invalid then return
       ' Moving across the nav should only move focus. Press OK to load a library.
   end sub
 
   sub onNavLoadTimer(event as object)
+      if event = invalid then return
       ' Kept for older component XML; nav selection is now OK-only.
   end sub
 

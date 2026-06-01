@@ -11,6 +11,7 @@
         <field id="selectedVideo" type="assocarray" alwaysNotify="true" />
         <field id="selectedCategory" type="assocarray" alwaysNotify="true" />
         <field id="artworkCacheRequest" type="assocarray" alwaysNotify="true" />
+        <field id="refreshArtwork" type="boolean" alwaysNotify="true" />
         <field id="backPressed" type="boolean" alwaysNotify="true" />
     </interface>
     <children>
@@ -24,6 +25,9 @@
             itemSpacing="[14, 0]"
             numRows="1" />
         <Timer id="navLoadTimer" repeat="false" duration="0.25" />
+        <Timer id="posterRetryTimer" repeat="true" duration="0.35" />
+        <Timer id="initialPosterRetryTimer" repeat="false" duration="0.65" />
+        <Timer id="scrollPosterRetryTimer" repeat="false" duration="0.55" />
 
         <Label id="pageTitleLabel" text="" color="#FFFFFF"
             font="font:MediumBoldSystemFont"

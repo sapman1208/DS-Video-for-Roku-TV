@@ -38,12 +38,12 @@ end sub
 
 sub loadSavedCredentials()
       reg = createObject("roRegistrySection", "DSVideo")
-      if reg.exists("nasAddress") then m.nasAddress = reg.read("nasAddress")
-      if reg.exists("nasPort") then m.nasPort = reg.read("nasPort")
+      if reg.exists("nasAddress") then m.nasAddress = readProtectedSetting(reg, "nasAddress")
+      if reg.exists("nasPort") then m.nasPort = readProtectedSetting(reg, "nasPort")
       if reg.exists("useHttps") then m.useHttps = (reg.read("useHttps") = "true")
-      if reg.exists("username") then m.username = reg.read("username")
-      if reg.exists("password") then m.password = reg.read("password")
-      if reg.exists("transcodePort") then m.transcodePort = reg.read("transcodePort")
+      if reg.exists("username") then m.username = readProtectedSetting(reg, "username")
+      if reg.exists("password") then m.password = readProtectedSetting(reg, "password")
+      if reg.exists("transcodePort") then m.transcodePort = readProtectedSetting(reg, "transcodePort")
       if reg.exists("proxyHost")
           oldProxy = reg.read("proxyHost")
           oldPort = portFromProxyUrl(oldProxy)
@@ -53,16 +53,16 @@ sub loadSavedCredentials()
 
 sub saveCredentials()
       reg = createObject("roRegistrySection", "DSVideo")
-      reg.write("nasAddress", m.nasAddress)
-      reg.write("nasPort", m.nasPort)
+      writeProtectedSetting(reg, "nasAddress", m.nasAddress)
+      writeProtectedSetting(reg, "nasPort", m.nasPort)
       if m.useHttps
           reg.write("useHttps", "true")
       else
           reg.write("useHttps", "false")
       end if
-      reg.write("username", m.username)
-      reg.write("password", m.password)
-      reg.write("transcodePort", m.transcodePort)
+      writeProtectedSetting(reg, "username", m.username)
+      writeProtectedSetting(reg, "password", m.password)
+      writeProtectedSetting(reg, "transcodePort", m.transcodePort)
       reg.flush()
   end sub
 
@@ -90,6 +90,87 @@ sub updateAllValues()
         m.top.findNode("row5value").text = m.transcodePort
     end if
 end sub
+
+function readProtectedSetting(reg as object, key as string) as string
+    if reg = invalid then return ""
+    if not reg.exists(key) then return ""
+    return unprotectSetting(reg.read(key), key)
+end function
+
+sub writeProtectedSetting(reg as object, key as string, value as string)
+    if reg = invalid then return
+    reg.write(key, protectSetting(value, key))
+end sub
+
+function protectSetting(value as dynamic, key as string) as string
+    if value = invalid then return ""
+    if type(value) <> "roString" and type(value) <> "String" then return ""
+    if value = "" then return ""
+    secret = settingSecret(key)
+    out = "enc:v1:"
+    i = 1
+    while i <= len(value)
+        code = asc(mid(value, i, 1))
+        secretIndex = ((i - 1) mod len(secret)) + 1
+        salt = asc(mid(secret, secretIndex, 1)) + ((i * 17) mod 251)
+        encoded = (code + salt) mod 256
+        out = out + hexByte(encoded)
+        i = i + 1
+    end while
+    return out
+end function
+
+function unprotectSetting(value as dynamic, key as string) as string
+    if value = invalid then return ""
+    if type(value) <> "roString" and type(value) <> "String" then return ""
+    prefix = "enc:v1:"
+    if left(value, len(prefix)) <> prefix then return value
+    hexText = mid(value, len(prefix) + 1)
+    secret = settingSecret(key)
+    out = ""
+    i = 1
+    charIndex = 1
+    while i <= len(hexText) - 1
+        encoded = hexPairValue(mid(hexText, i, 2))
+        secretIndex = ((charIndex - 1) mod len(secret)) + 1
+        salt = asc(mid(secret, secretIndex, 1)) + ((charIndex * 17) mod 251)
+        decoded = encoded - (salt mod 256)
+        while decoded < 0
+            decoded = decoded + 256
+        end while
+        out = out + chr(decoded)
+        i = i + 2
+        charIndex = charIndex + 1
+    end while
+    return out
+end function
+
+function settingSecret(key as string) as string
+    return "DSVideo:Roku:" + key + ":2026"
+end function
+
+function hexByte(value as integer) as string
+    high = int(value / 16)
+    low = value - (high * 16)
+    return hexDigit(high) + hexDigit(low)
+end function
+
+function hexDigit(value as integer) as string
+    digits = "0123456789abcdef"
+    return mid(digits, value + 1, 1)
+end function
+
+function hexPairValue(pair as string) as integer
+    if len(pair) < 2 then return 0
+    return hexDigitValue(left(pair, 1)) * 16 + hexDigitValue(mid(pair, 2, 1))
+end function
+
+function hexDigitValue(ch as string) as integer
+    code = asc(lcase(ch))
+    if code >= 48 and code <= 57 then return code - 48
+    if code >= 97 and code <= 102 then return code - 87
+    return 0
+end function
 
 sub setHighlight(idx as integer)
     m.focusIndex = idx
@@ -233,8 +314,6 @@ sub doLogin()
     else
         baseUrl = "http://" + host + ":" + port
     end if
-    proxyBaseUrl = proxyBaseUrlForHost(host, m.transcodePort, m.useHttps)
-
     showStatus("Connecting to " + host + " ...", false)
 
     task = createObject("roSGNode", "APITask")

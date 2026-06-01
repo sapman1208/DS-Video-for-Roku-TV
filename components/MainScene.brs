@@ -27,14 +27,14 @@ sub init()
 
   sub autoLogin()
       reg = createObject("roRegistrySection", "DSVideo")
-      host = reg.read("nasAddress")
-      port = reg.read("nasPort")
-      username = reg.read("username")
-      password = reg.read("password")
+      host = readProtectedSetting(reg, "nasAddress")
+      port = readProtectedSetting(reg, "nasPort")
+      username = readProtectedSetting(reg, "username")
+      password = readProtectedSetting(reg, "password")
       useHttps = true
       if reg.exists("useHttps") then useHttps = (reg.read("useHttps") = "true")
       transcodePort = "8099"
-      if reg.exists("transcodePort") then transcodePort = reg.read("transcodePort")
+      if reg.exists("transcodePort") then transcodePort = readProtectedSetting(reg, "transcodePort")
 
       task = createObject("roSGNode", "APITask")
       task.request = {
@@ -49,12 +49,58 @@ sub init()
       m.savedLogin = { host: host, transcodePort: transcodePort, useHttps: useHttps }
   end sub
 
+  function readProtectedSetting(reg as object, key as string) as string
+      if reg = invalid then return ""
+      if not reg.exists(key) then return ""
+      return unprotectSetting(reg.read(key), key)
+  end function
+
+  function unprotectSetting(value as dynamic, key as string) as string
+      if value = invalid then return ""
+      if type(value) <> "roString" and type(value) <> "String" then return ""
+      prefix = "enc:v1:"
+      if left(value, len(prefix)) <> prefix then return value
+      hexText = mid(value, len(prefix) + 1)
+      secret = settingSecret(key)
+      out = ""
+      i = 1
+      charIndex = 1
+      while i <= len(hexText) - 1
+          encoded = hexPairValue(mid(hexText, i, 2))
+          secretIndex = ((charIndex - 1) mod len(secret)) + 1
+          salt = asc(mid(secret, secretIndex, 1)) + ((charIndex * 17) mod 251)
+          decoded = encoded - (salt mod 256)
+          while decoded < 0
+              decoded = decoded + 256
+          end while
+          out = out + chr(decoded)
+          i = i + 2
+          charIndex = charIndex + 1
+      end while
+      return out
+  end function
+
+  function settingSecret(key as string) as string
+      return "DSVideo:Roku:" + key + ":2026"
+  end function
+
+  function hexPairValue(pair as string) as integer
+      if len(pair) < 2 then return 0
+      return hexDigitValue(left(pair, 1)) * 16 + hexDigitValue(mid(pair, 2, 1))
+  end function
+
+  function hexDigitValue(ch as string) as integer
+      code = asc(lcase(ch))
+      if code >= 48 and code <= 57 then return code - 48
+      if code >= 97 and code <= 102 then return code - 87
+      return 0
+  end function
+
   sub onAutoLoginResponse(event as object)
       response = event.getData()
       if response <> invalid and response.success = true
           m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, proxyBaseUrl: savedProxyBaseUrl(m.savedLogin.host, m.savedLogin.transcodePort, m.savedLogin.useHttps) }
           showHomeScreen(m.authData)
-          startPrecacheAllArtwork()
       else
           showLoginScreen()
       end if
@@ -152,6 +198,7 @@ sub init()
   end sub
 
   sub onLoginKey(event as object)
+      if event = invalid then return
   end sub
 
   sub onAuthSuccess(event as object)
@@ -165,7 +212,6 @@ sub init()
       m.currentScreen = invalid
       m.screenStack = []
       showHomeScreen(authData)
-      startPrecacheAllArtwork()
   end sub
 
   sub startPrecacheAllArtwork()
@@ -271,7 +317,7 @@ sub init()
   sub showVideoDetail(videoData as object)
       if videoData <> invalid
           print "SHOW_DETAIL type="; videoData.lookUp("type"); " title="; videoData.lookUp("title")
-          startArtworkCacheJob([videoData], 0, true)
+          startArtworkCacheJob([videoData], 0, true, "detail")
       end if
       detail = createObject("roSGNode", "VideoDetail")
       detail.observeField("playVideo", "onDetailPlay")
@@ -295,7 +341,7 @@ sub init()
       player = createObject("roSGNode", "VideoPlayer")
       player.authData = m.authData
       player.videoData = videoData
-      player.observeField("playbackDone", "onPlaybackDone")
+      player.observeField("playbackResult", "onPlaybackDone")
       m.top.appendChild(player)
       player.setFocus(true)
       m.screenStack.push(player)
@@ -305,6 +351,12 @@ sub init()
   sub onPlaybackDone(event as object)
       if m.currentScreen = invalid then return
       if m.currentScreen.findNode("videoNode") = invalid then return
+      result = event.getData()
+      nextVideo = invalid
+      if result <> invalid and result.lookUp("reason") = "finished"
+          playedVideo = result.lookUp("videoData")
+          nextVideo = nextAutoplayEpisode(playedVideo)
+      end if
       doBack()
       if m.playStartedFromDetail = true
           if m.currentScreen <> invalid and m.currentScreen.subtype() = "VideoDetail"
@@ -312,13 +364,61 @@ sub init()
           end if
           m.playStartedFromDetail = false
       end if
+      if nextVideo <> invalid
+          playVideo(nextVideo)
+      end if
   end sub
 
+  function nextAutoplayEpisode(videoData as dynamic) as dynamic
+      if videoData = invalid then return invalid
+      if videoData.lookUp("type") <> "episode" then return invalid
+      episodes = videoData.lookUp("autoplayEpisodes")
+      if episodes = invalid or episodes.count() = 0 then return invalid
+      idx = -1
+      if videoData.lookUp("autoplayIndex") <> invalid then idx = int(videoData.lookUp("autoplayIndex"))
+      if idx < 0 then idx = autoplayIndexForVideo(videoData, episodes)
+      nextIdx = idx + 1
+      if nextIdx < 0 or nextIdx >= episodes.count() then return invalid
+      nextVideo = episodes[nextIdx]
+      nextVideo.autoplayEpisodes = episodes
+      nextVideo.autoplayIndex = nextIdx
+      return nextVideo
+  end function
+
+  function autoplayIndexForVideo(videoData as object, episodes as object) as integer
+      key = autoplayVideoKey(videoData)
+      idx = 0
+      while idx < episodes.count()
+          if autoplayVideoKey(episodes[idx]) = key then return idx
+          idx = idx + 1
+      end while
+      return -1
+  end function
+
+  function autoplayVideoKey(item as object) as string
+      if item = invalid then return ""
+      if item.filePath <> invalid and item.filePath <> "" then return "path:" + item.filePath
+      if item.fileId <> invalid and item.fileId <> "" then return "file:" + safeDynamicString(item.fileId)
+      if item.id <> invalid and item.id <> "" then return "id:" + safeDynamicString(item.id)
+      return "se:" + safeDynamicString(item.lookUp("seasonNumber")) + "x" + safeDynamicString(item.lookUp("episodeNumber"))
+  end function
+
+  function safeDynamicString(value as dynamic) as string
+      if value = invalid then return ""
+      t = type(value)
+      if t = "roString" or t = "String" then return value
+      if t = "roInteger" or t = "Integer" then return stri(value).trim()
+      if t = "roFloat" or t = "Float" then return stri(int(value)).trim()
+      return ""
+  end function
+
   sub onBackPressed(event as object)
+      if event = invalid then return
       doBack()
   end sub
 
   sub onDetailListChanged(event as object)
+      if event = invalid then return
       m.listsChanged = true
   end sub
 
@@ -328,17 +428,20 @@ sub init()
       items = req.lookUp("items")
       if items = invalid or items.count() = 0 then return
 
-      startArtworkCacheJob(items, req.lookUp("maxItems"), req.lookUp("includeBackdrops"))
+      startArtworkCacheJob(items, req.lookUp("maxItems"), req.lookUp("includeBackdrops"), req.lookUp("source"))
   end sub
 
-  sub startArtworkCacheJob(items as object, maxItems as dynamic, includeBackdrops as dynamic)
+  sub startArtworkCacheJob(items as object, maxItems as dynamic, includeBackdrops as dynamic, source as dynamic)
       if items = invalid or items.count() = 0 then return
+      sourceText = ""
+      if source <> invalid then sourceText = source
       task = createObject("roSGNode", "APITask")
       task.request = {
           action: "cacheArtwork",
           items: items,
           maxItems: maxItems,
-          includeBackdrops: includeBackdrops
+          includeBackdrops: includeBackdrops,
+          source: sourceText
       }
       task.observeField("response", "onArtworkCacheDone")
       task.control = "RUN"
@@ -347,7 +450,13 @@ sub init()
   end sub
 
   sub onArtworkCacheDone(event as object)
+      response = event.getData()
       pruneArtworkCacheTasks()
+      if response <> invalid and response.lookUp("action") = "cacheArtwork" and response.lookUp("source") = "episodes"
+          if m.currentScreen <> invalid and m.currentScreen.subtype() = "EpisodeList"
+              m.currentScreen.refreshArtwork = true
+          end if
+      end if
   end sub
 
   sub pruneArtworkCacheTasks()
@@ -358,7 +467,7 @@ sub init()
               kept.push(task)
           end if
       end for
-      while kept.count() > 12
+      while kept.count() > 2
           oldTask = kept[0]
           if oldTask <> invalid then oldTask.control = "STOP"
           kept.delete(0)

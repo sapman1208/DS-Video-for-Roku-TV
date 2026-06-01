@@ -16,10 +16,55 @@ const AUDIO_CODEC = process.env.ROKU_HLS_AUDIO_CODEC || "libmp3lame";
 const HTTPS_KEY = process.env.ROKU_HLS_HTTPS_KEY || "";
 const HTTPS_CERT = process.env.ROKU_HLS_HTTPS_CERT || "";
 const START_SEGMENTS = Number(process.env.ROKU_HLS_START_SEGMENTS || 6);
+const IDLE_MS = Number(process.env.ROKU_HLS_IDLE_MS || 45000);
+const CLEANUP_INTERVAL_MS = Number(process.env.ROKU_HLS_CLEANUP_INTERVAL_MS || 10000);
 
 fs.mkdirSync(ROOT, { recursive: true });
 
 const sessions = new Map();
+
+function touchSession(session) {
+  if (session) session.lastAccessAt = Date.now();
+}
+
+function stopSession(id, reason = "idle") {
+  const session = sessions.get(id);
+  if (!session) return;
+  sessions.delete(id);
+  console.log(`[proxy] stop ${id} reason=${reason}`);
+  try {
+    if (session.child && !session.exited) {
+      session.child.kill("SIGTERM");
+      setTimeout(() => {
+        try {
+          if (!session.exited) session.child.kill("SIGKILL");
+        } catch {
+          // Process already exited.
+        }
+      }, 5000).unref?.();
+    }
+  } catch (err) {
+    console.log(`[proxy] stop error ${id} ${err.message}`);
+  }
+  setTimeout(() => {
+    try {
+      fs.rmSync(session.dir, { recursive: true, force: true });
+    } catch {
+      // Best-effort temp cleanup.
+    }
+  }, 30000).unref?.();
+}
+
+function cleanupIdleSessions() {
+  const now = Date.now();
+  for (const [id, session] of sessions) {
+    if (session.exited) {
+      stopSession(id, "exited");
+    } else if (now - (session.lastAccessAt || session.createdAt || now) > IDLE_MS) {
+      stopSession(id, "idle");
+    }
+  }
+}
 
 function send(res, status, headers, body) {
   res.writeHead(status, headers);
@@ -343,7 +388,7 @@ function sessionFor(src) {
     }
   });
 
-  session = { id, src, dir, playlist, child, createdAt: Date.now(), exited: false };
+  session = { id, src, dir, playlist, child, createdAt: Date.now(), lastAccessAt: Date.now(), exited: false };
   sessions.set(id, session);
   return session;
 }
@@ -490,6 +535,7 @@ async function handleRequest(req, res) {
     const src = url.searchParams.get("src");
     if (!src) return send(res, 400, { "content-type": "text/plain" }, "missing src");
     const session = sessionFor(src);
+    touchSession(session);
     const ready = await waitForPlaylist(session.playlist, 20000);
     if (!ready) return send(res, 504, { "content-type": "text/plain" }, "playlist not ready");
     const segmentsReady = await waitForInitialSegments(session, 30000);
@@ -506,6 +552,7 @@ async function handleRequest(req, res) {
     const [, id, name] = match;
     const session = sessions.get(id);
     if (!session) return send(res, 404, { "content-type": "text/plain" }, "unknown session");
+    touchSession(session);
     const file = path.join(session.dir, path.basename(name));
     if (!fs.existsSync(file)) return send(res, 404, { "content-type": "text/plain" }, "not ready");
     console.log(`[proxy] segment ${id}/${path.basename(name)}`);
@@ -531,6 +578,8 @@ function createServer() {
 
 const server = createServer();
 
+setInterval(cleanupIdleSessions, CLEANUP_INTERVAL_MS).unref?.();
+
 server.listen(PORT, HOST, () => {
   if (HTTPS_KEY && HTTPS_CERT) {
     console.log(`[proxy] listening on https://127.0.0.1:${PORT}`);
@@ -538,4 +587,5 @@ server.listen(PORT, HOST, () => {
     console.log(`[proxy] listening on ${BASE_URL}`);
   }
   console.log(`[proxy] temp root ${ROOT}`);
+  console.log(`[proxy] idle cleanup ${IDLE_MS}ms`);
 });

@@ -4,6 +4,7 @@
           <field id="authData" type="assocarray" />
           <field id="videoData" type="assocarray" />
           <field id="playbackDone" type="boolean" alwaysNotify="true" />
+          <field id="playbackResult" type="assocarray" alwaysNotify="true" />
       </interface>
       <children>
           <Rectangle id="backgroundRect" color="#000000" width="1920" height="1080" />

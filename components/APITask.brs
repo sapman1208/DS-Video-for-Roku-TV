@@ -1232,8 +1232,10 @@ sub init()
       if req.maxItems <> invalid then maxItems = int(req.maxItems)
       includeBackdrops = false
       if req.includeBackdrops <> invalid then includeBackdrops = req.includeBackdrops
+      source = ""
+      if req.source <> invalid then source = req.source
       downloaded = downloadMissingArtworkForItems(items, maxItems, includeBackdrops)
-      m.top.response = { success: true, action: "cacheArtwork", downloaded: downloaded }
+      m.top.response = { success: true, action: "cacheArtwork", downloaded: downloaded, source: source }
   end sub
 
   sub precacheAllArtwork(req as object)
@@ -1752,9 +1754,7 @@ sub init()
           mapper = idToStr(item.lookUp("mapper_id"))
           if mapper <> "" and mapper <> "0"
               item.addReplace("mapperId", mapper)
-              poster = proxyBaseUrl + "/poster?mapper_id=" + mapper
-              if showMapper <> "" and showMapper <> "0" then poster = poster + "&fallback_mapper_id=" + showMapper
-              item.addReplace("posterUrl", poster + "&format=jpg")
+              item.addReplace("posterUrl", proxyBaseUrl + "/poster?mapper_id=" + mapper + "&format=jpg")
           end if
       end for
       return items
@@ -2375,7 +2375,7 @@ sub init()
                                               if isVideoFile(fname) and titleMatch(title, fname)
                                                   print "FIND_MOVIE searchMatch="; fpath
                                                   cleanUrl = baseUrl + "/webapi/entry.cgi?api=SYNO.FileStation.Search&version=2&method=clean&taskid=" + enc.escape(taskid) + "&_sid=" + sid
-                                                  ignore = httpGet(cleanUrl)
+                                                  httpGet(cleanUrl)
                                                   return fpath
                                               end if
                                           end if
@@ -2388,7 +2388,7 @@ sub init()
                           poll = poll + 1
                       end while
                       cleanUrl = baseUrl + "/webapi/entry.cgi?api=SYNO.FileStation.Search&version=2&method=clean&taskid=" + enc.escape(taskid) + "&_sid=" + sid
-                      ignore = httpGet(cleanUrl)
+                      httpGet(cleanUrl)
                   end if
               end if
           end if
