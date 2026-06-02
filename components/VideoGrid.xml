@@ -10,7 +10,6 @@
         <field id="refreshLists" type="boolean" alwaysNotify="true" />
         <field id="selectedVideo" type="assocarray" alwaysNotify="true" />
         <field id="selectedCategory" type="assocarray" alwaysNotify="true" />
-        <field id="artworkCacheRequest" type="assocarray" alwaysNotify="true" />
         <field id="refreshArtwork" type="boolean" alwaysNotify="true" />
         <field id="backPressed" type="boolean" alwaysNotify="true" />
     </interface>

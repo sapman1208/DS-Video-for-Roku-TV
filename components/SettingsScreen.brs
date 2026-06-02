@@ -7,11 +7,20 @@ sub init()
     m.transcodePort = "8099"
     m.activeField = ""
     m.focusIndex = 0
+    m.focusArea = "settings"
+    m.categories = []
     m.rowYs = [190, 290, 390, 490, 590, 690, 825]
+
+    nav = m.top.findNode("categoryList")
+    nav.observeField("itemSelected", "onNavSelected")
+    nav.observeField("focus", "onNavFocus")
+    m.top.observeField("navCategories", "onNavCategoriesSet")
+    m.top.observeField("focusNavCategory", "onFocusNavCategory")
 
     loadSavedCredentials()
     updateAllValues()
     setHighlight(0)
+    loadNavCategories()
 end sub
 
 sub loadSavedCredentials()
@@ -147,6 +156,8 @@ end function
 
 sub setHighlight(idx as integer)
     m.focusIndex = idx
+    m.focusArea = "settings"
+    m.top.findNode("rowHighlight").visible = true
     m.top.findNode("rowHighlight").translation = [580, m.rowYs[idx]]
     if idx = 6
         m.top.findNode("rowHighlight").color = "#A91F2A"
@@ -158,20 +169,112 @@ end sub
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if key = "back"
+        if m.focusArea = "settings"
+            nav = m.top.findNode("categoryList")
+            nav.setFocus(true)
+            m.focusArea = "nav"
+            m.top.findNode("rowHighlight").visible = false
+            return true
+        end if
+        if m.focusArea = "nav" then return false
         m.top.backPressed = true
         return true
     else if key = "down"
+        if m.focusArea = "nav"
+            setHighlight(0)
+            m.top.setFocus(true)
+            return true
+        end if
         if m.focusIndex < 6 then setHighlight(m.focusIndex + 1)
         return true
     else if key = "up"
+        if m.focusArea = "settings" and m.focusIndex = 0
+            nav = m.top.findNode("categoryList")
+            nav.setFocus(true)
+            m.focusArea = "nav"
+            m.top.findNode("rowHighlight").visible = false
+            return true
+        end if
         if m.focusIndex > 0 then setHighlight(m.focusIndex - 1)
         return true
     else if key = "OK"
+        if m.focusArea = "nav" then return false
         activateRow(m.focusIndex)
         return true
     end if
     return true
 end function
+
+sub loadNavCategories()
+    if m.top.navCategories <> invalid and m.top.navCategories.count() > 0
+        m.categories = m.top.navCategories
+        populateNavCategories()
+    end if
+end sub
+
+sub onNavCategoriesSet(event as object)
+    if event = invalid then return
+    loadNavCategories()
+end sub
+
+sub populateNavCategories()
+    contentNode = createObject("roSGNode", "ContentNode")
+    for each cat in m.categories
+        item = contentNode.createChild("ContentNode")
+        item.title = cat.title
+    end for
+    nav = m.top.findNode("categoryList")
+    nav.content = contentNode
+    nav.numColumns = m.categories.count()
+    focusSettingsNav()
+end sub
+
+sub focusSettingsNav()
+    nav = m.top.findNode("categoryList")
+    idx = settingsCategoryIndex()
+    if idx >= 0 then nav.jumpToItem = idx
+    nav.setFocus(true)
+    m.focusArea = "nav"
+    m.top.findNode("rowHighlight").visible = false
+end sub
+
+function settingsCategoryIndex() as integer
+    i = 0
+    while i < m.categories.count()
+        cat = m.categories[i]
+        if cat.lookUp("category") = "settings" then return i
+        i = i + 1
+    end while
+    return m.categories.count() - 1
+end function
+
+sub onNavFocus(event as object)
+    if event.getData() = true
+        m.focusArea = "nav"
+        m.top.findNode("rowHighlight").visible = false
+    end if
+end sub
+
+sub onNavSelected(event as object)
+    idx = event.getData()
+    if idx >= 0 and idx < m.categories.count() then m.top.selectedCategory = categoryPayload(idx)
+end sub
+
+function categoryPayload(idx as integer) as object
+    return {
+        category: m.categories[idx].category,
+        title: m.categories[idx].title,
+        libraryId: m.categories[idx].lookUp("libraryId")
+    }
+end function
+
+sub onFocusNavCategory(event as object)
+    if event.getData() = "settings"
+        focusSettingsNav()
+        m.top.findNode("categoryList").setFocus(true)
+        m.focusArea = "nav"
+    end if
+end sub
 
 sub activateRow(idx as integer)
     if idx = 0

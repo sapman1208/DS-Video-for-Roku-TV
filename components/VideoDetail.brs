@@ -58,10 +58,11 @@ sub onVideoDataSet(event as object)
     if summary = "" then summary = "No description available."
     m.top.findNode("summaryLabel").text = summary
     poster = ""
-    if data.posterUrl <> invalid then poster = data.posterUrl
-    backdrop = ""
-    if data.backdropUrl <> invalid then backdrop = data.backdropUrl
-    configurePosterFrame(data)
+	    if data.posterUrl <> invalid then poster = data.posterUrl
+	    backdrop = ""
+	    if data.backdropUrl <> invalid then backdrop = data.backdropUrl
+	    print "DETAIL_ARTWORK type="; data.lookUp("type"); " title="; title; " posterSource="; artworkSourceFromUrl(poster); " backdropSource="; artworkSourceFromUrl(backdrop); " backdropUrl="; left(backdrop, 120)
+	    configurePosterFrame(data)
     if poster <> ""
         m.top.findNode("poster").uri = poster
         m.top.findNode("poster").visible = true
@@ -89,6 +90,18 @@ function episodeMetaText(data as object) as string
     end if
     if episodeText <> "" and episodeText <> "0" then return "Episode " + episodeText
     return "Episode"
+end function
+
+function artworkSourceFromUrl(url as dynamic) as string
+    if url = invalid or url = "" then return "none"
+    if type(url) <> "roString" and type(url) <> "String" then return "none"
+    lower = lcase(url)
+    if left(lower, 9) = "cachefs:/" then return "cachefs"
+    if instr(1, lower, "syno.videostation2.backdrop") > 0 then return "synology-backdrop"
+    if instr(1, lower, "syno.videostation2.poster") > 0 then return "synology-v2-poster"
+    if instr(1, lower, "poster.cgi") > 0 then return "synology-poster"
+    if left(lower, 7) = "http://" or left(lower, 8) = "https://" then return "remote"
+    return "saved"
 end function
 
 function firstIntText(item as object, keys as object) as string

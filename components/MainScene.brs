@@ -1,6 +1,6 @@
 sub init()
       m.screenStack = []
-      m.artworkCacheTasks = []
+      m.top.findNode("playbackFocusTimer").observeField("fire", "onPlaybackFocusTimer")
       if hasSavedCredentials()
           autoLogin()
       else
@@ -122,6 +122,7 @@ sub init()
 
       ' Back from any screen except login — pop the stack
       if key = "back"
+          if isTopNavFocused() then return false
           if m.screenStack.count() > 1
               doBack()
               return true
@@ -142,6 +143,14 @@ sub init()
       end if
 
       return false
+  end function
+
+  function isTopNavFocused() as boolean
+      if m.currentScreen = invalid then return false
+      if m.currentScreen.findNode("videoNode") <> invalid then return false
+      nav = m.currentScreen.findNode("categoryList")
+      if nav = invalid then return false
+      return nav.hasFocus()
   end function
 
   function focusTopNavIfAvailable() as boolean
@@ -214,26 +223,6 @@ sub init()
       showHomeScreen(authData)
   end sub
 
-  sub startPrecacheAllArtwork()
-      if m.authData = invalid then return
-      if m.precacheAllTask <> invalid then return
-      task = createObject("roSGNode", "APITask")
-      task.request = {
-          action: "precacheAllArtwork",
-          proxyBaseUrl: m.authData.proxyBaseUrl
-      }
-      task.observeField("response", "onPrecacheAllDone")
-      task.control = "RUN"
-      m.precacheAllTask = task
-  end sub
-
-  sub onPrecacheAllDone(event as object)
-      response = event.getData()
-      if response <> invalid
-          print "PRECACHE_ALL done downloaded="; response.lookUp("downloaded"); " totalItems="; response.lookUp("totalItems")
-      end if
-  end sub
-
   sub showHomeScreen(authData as object)
       homeScreen = createObject("roSGNode", "HomeScreen")
       homeScreen.authData = authData
@@ -260,7 +249,6 @@ sub init()
       videoGrid.category = data.category
       videoGrid.observeField("selectedVideo", "onVideoSelected")
       videoGrid.observeField("selectedCategory", "onCategorySelected")
-      videoGrid.observeField("artworkCacheRequest", "onArtworkCacheRequest")
       videoGrid.observeField("backPressed", "onBackPressed")
       keepCurrent = false
       if data.category <> invalid and left(data.category, 6) = "local_" and m.currentScreen <> invalid and m.currentScreen.subtype() = "VideoGrid"
@@ -284,6 +272,9 @@ sub init()
 
   sub showSettingsScreen()
       settingsScreen = createObject("roSGNode", "SettingsScreen")
+      settingsScreen.authData = m.authData
+      if m.navCategories <> invalid then settingsScreen.navCategories = m.navCategories
+      settingsScreen.observeField("selectedCategory", "onCategorySelected")
       settingsScreen.observeField("backPressed", "onBackPressed")
       m.top.appendChild(settingsScreen)
       settingsScreen.setFocus(true)
@@ -297,11 +288,10 @@ sub init()
       if data.type = "tvshow"
           episodeList = createObject("roSGNode", "EpisodeList")
           episodeList.authData = m.authData
-          episodeList.showData = data
           if m.navCategories <> invalid then episodeList.navCategories = m.navCategories
+          episodeList.showData = data
           episodeList.observeField("selectedVideo", "onVideoSelected")
           episodeList.observeField("selectedCategory", "onCategorySelected")
-          episodeList.observeField("artworkCacheRequest", "onArtworkCacheRequest")
           episodeList.observeField("backPressed", "onBackPressed")
           m.top.appendChild(episodeList)
           episodeList.setFocus(true)
@@ -317,7 +307,6 @@ sub init()
   sub showVideoDetail(videoData as object)
       if videoData <> invalid
           print "SHOW_DETAIL type="; videoData.lookUp("type"); " title="; videoData.lookUp("title")
-          startArtworkCacheJob([videoData], 0, true, "detail")
       end if
       detail = createObject("roSGNode", "VideoDetail")
       detail.observeField("playVideo", "onDetailPlay")
@@ -338,9 +327,28 @@ sub init()
   end sub
 
   sub playVideo(videoData as object)
+      resumePosition = savedResumePosition(videoData)
+      if shouldRefreshResumePosition(videoData)
+          startResumeRefresh(videoData)
+          return
+      end if
+      if resumePosition > 30 and videoData.lookUp("resumeChoice") = invalid
+          showResumePrompt(videoData, resumePosition)
+          return
+      end if
       player = createObject("roSGNode", "VideoPlayer")
       player.authData = m.authData
+      if videoData.lookUp("resumeChoice") = "resume"
+          videoData.resumePosition = resumePosition
+      else
+          videoData.resumePosition = 0
+      end if
+      if videoData.lookUp("resumeChoice") <> invalid then videoData.delete("resumeChoice")
+      player.resumePosition = videoData.resumePosition
       player.videoData = videoData
+      if videoData <> invalid and videoData.lookUp("type") = "episode"
+          m.lastPlaybackVideo = videoData
+      end if
       player.observeField("playbackResult", "onPlaybackDone")
       m.top.appendChild(player)
       player.setFocus(true)
@@ -348,14 +356,158 @@ sub init()
       m.currentScreen = player
   end sub
 
+  function shouldRefreshResumePosition(videoData as object) as boolean
+      if videoData = invalid then return false
+      if videoData.lookUp("type") <> "episode" then return false
+      if videoData.lookUp("resumeChoice") <> invalid then return false
+      if videoData.lookUp("resumeRefreshDone") = true then return false
+      if m.authData = invalid then return false
+      if m.authData.proxyBaseUrl = invalid or m.authData.proxyBaseUrl = "" then return false
+      if videoData.lookUp("filePath") = invalid or videoData.lookUp("filePath") = "" then return false
+      return true
+  end function
+
+  sub startResumeRefresh(videoData as object)
+      videoData.resumeRefreshDone = true
+      task = createObject("roSGNode", "APITask")
+      task.request = {
+          action: "latestResume",
+          proxyBaseUrl: m.authData.proxyBaseUrl,
+          filePath: videoData.lookUp("filePath"),
+          showTitle: videoData.lookUp("showTitle"),
+          showMapperId: videoData.lookUp("showMapperId")
+      }
+      task.observeField("response", "onResumeRefreshDone")
+      task.control = "RUN"
+      m.resumeRefreshVideo = videoData
+      m.resumeRefreshTask = task
+  end sub
+
+  sub onResumeRefreshDone(event as object)
+      response = event.getData()
+      videoData = m.resumeRefreshVideo
+      m.resumeRefreshVideo = invalid
+      m.resumeRefreshTask = invalid
+      if videoData = invalid then return
+      if response <> invalid and response.success = true
+          latest = 0
+          if response.position <> invalid then latest = int(response.position)
+          current = itemResumePosition(videoData)
+          if latest > current then videoData.addReplace("resumePosition", latest)
+          print "RESUME_REFRESH file="; videoData.lookUp("filePath"); " latest="; latest; " current="; current
+      end if
+      playVideo(videoData)
+  end sub
+
+  sub showResumePrompt(videoData as object, position as integer)
+      dialog = createObject("roSGNode", "Dialog")
+      dialog.title = "Resume Playback"
+      dialog.message = "Resume from " + formatResumeTime(position) + "?"
+      dialog.buttons = ["Resume", "Start Over"]
+      dialog.observeField("buttonSelected", "onResumeDialogSelected")
+      m.pendingResumeVideo = videoData
+      m.pendingResumePosition = position
+      m.top.dialog = dialog
+  end sub
+
+  sub onResumeDialogSelected(event as object)
+      idx = event.getData()
+      videoData = m.pendingResumeVideo
+      m.pendingResumeVideo = invalid
+      m.top.dialog = invalid
+      if videoData = invalid then return
+      print "RESUME_DIALOG idx="; idx; " saved="; m.pendingResumePosition
+      if idx = 0
+          videoData.resumeChoice = "resume"
+          videoData.resumePosition = m.pendingResumePosition
+      else
+          clearResumePosition(videoData)
+          videoData.resumeChoice = "start"
+          videoData.resumePosition = 0
+      end if
+      playVideo(videoData)
+  end sub
+
+  function savedResumePosition(videoData as object) as integer
+      key = resumeKeyForVideo(videoData)
+      itemPosition = itemResumePosition(videoData)
+      if key = "" then return itemPosition
+      reg = createObject("roRegistrySection", "DSVideoResume")
+      if reg.exists(key)
+          localPosition = val(reg.read(key))
+          if itemPosition > localPosition then return itemPosition
+          return localPosition
+      end if
+      return itemPosition
+  end function
+
+  function itemResumePosition(videoData as object) as integer
+      if videoData = invalid then return 0
+      fields = ["resumePosition", "watch_position", "position"]
+      for each field in fields
+          value = videoData.lookUp(field)
+          if value <> invalid
+              t = type(value)
+              if t = "roInteger" or t = "Integer" then return value
+              if t = "roFloat" or t = "Float" then return int(value)
+              if t = "roString" or t = "String" then return val(value)
+          end if
+      end for
+      return 0
+  end function
+
+  sub clearResumePosition(videoData as object)
+      key = resumeKeyForVideo(videoData)
+      if key = "" then return
+      reg = createObject("roRegistrySection", "DSVideoResume")
+      if reg.exists(key)
+          reg.delete(key)
+          reg.flush()
+      end if
+  end sub
+
+  function resumeKeyForVideo(videoData as object) as string
+      if videoData = invalid then return ""
+      if videoData.filePath <> invalid and videoData.filePath <> "" then return "path:" + videoData.filePath
+      if videoData.fileId <> invalid and videoData.fileId <> "" then return "file:" + safeDynamicString(videoData.fileId)
+      if videoData.id <> invalid and videoData.id <> "" then return "id:" + safeDynamicString(videoData.id)
+      return ""
+  end function
+
+  function formatResumeTime(seconds as integer) as string
+      total = int(seconds)
+      hours = int(total / 3600)
+      minutes = int((total - (hours * 3600)) / 60)
+      secs = total - (hours * 3600) - (minutes * 60)
+      if hours > 0
+          return stri(hours).trim() + ":" + twoDigit(minutes) + ":" + twoDigit(secs)
+      end if
+      return stri(minutes).trim() + ":" + twoDigit(secs)
+  end function
+
+  function twoDigit(value as integer) as string
+      text = stri(value).trim()
+      if value < 10 then return "0" + text
+      return text
+  end function
+
   sub onPlaybackDone(event as object)
       if m.currentScreen = invalid then return
       if m.currentScreen.findNode("videoNode") = invalid then return
       result = event.getData()
+      playedVideo = invalid
       nextVideo = invalid
-      if result <> invalid and result.lookUp("reason") = "finished"
+      if result <> invalid
           playedVideo = result.lookUp("videoData")
+      end if
+      if playedVideo = invalid and m.lastPlaybackVideo <> invalid
+          playedVideo = m.lastPlaybackVideo
+      end if
+      if result <> invalid and result.lookUp("reason") = "finished"
           nextVideo = nextAutoplayEpisode(playedVideo)
+      end if
+      if playedVideo <> invalid and playedVideo.lookUp("type") = "episode"
+          m.lastPlayedEpisode = playedVideo
       end if
       doBack()
       if m.playStartedFromDetail = true
@@ -364,9 +516,37 @@ sub init()
           end if
           m.playStartedFromDetail = false
       end if
+      if nextVideo = invalid
+          focusVideo = playedVideo
+          if focusVideo = invalid and m.lastPlayedEpisode <> invalid then focusVideo = m.lastPlayedEpisode
+          if focusVideo <> invalid then requestEpisodePlaybackFocus(focusVideo)
+      end if
       if nextVideo <> invalid
           playVideo(nextVideo)
       end if
+  end sub
+
+  sub requestEpisodePlaybackFocus(videoData as object)
+      if videoData = invalid then return
+      print "PLAYBACK_FOCUS_REQUEST season="; safeDynamicString(videoData.lookUp("seasonNumber")); " episode="; safeDynamicString(videoData.lookUp("episodeNumber")); " title="; safeDynamicString(videoData.lookUp("title"))
+      m.pendingPlaybackFocusVideo = videoData
+      applyEpisodePlaybackFocus()
+      timer = m.top.findNode("playbackFocusTimer")
+      if timer <> invalid then timer.control = "start"
+  end sub
+
+  sub onPlaybackFocusTimer(event as object)
+      if event = invalid then return
+      applyEpisodePlaybackFocus()
+  end sub
+
+  sub applyEpisodePlaybackFocus()
+      if m.pendingPlaybackFocusVideo = invalid then return
+      if m.currentScreen = invalid then return
+      if m.currentScreen.subtype() <> "EpisodeList" then return
+      print "PLAYBACK_FOCUS_APPLY season="; safeDynamicString(m.pendingPlaybackFocusVideo.lookUp("seasonNumber")); " episode="; safeDynamicString(m.pendingPlaybackFocusVideo.lookUp("episodeNumber"))
+      m.currentScreen.playbackFocusVideo = m.pendingPlaybackFocusVideo
+      m.pendingPlaybackFocusVideo = invalid
   end sub
 
   function nextAutoplayEpisode(videoData as dynamic) as dynamic
@@ -421,57 +601,3 @@ sub init()
       if event = invalid then return
       m.listsChanged = true
   end sub
-
-  sub onArtworkCacheRequest(event as object)
-      req = event.getData()
-      if req = invalid then return
-      items = req.lookUp("items")
-      if items = invalid or items.count() = 0 then return
-
-      startArtworkCacheJob(items, req.lookUp("maxItems"), req.lookUp("includeBackdrops"), req.lookUp("source"))
-  end sub
-
-  sub startArtworkCacheJob(items as object, maxItems as dynamic, includeBackdrops as dynamic, source as dynamic)
-      if items = invalid or items.count() = 0 then return
-      sourceText = ""
-      if source <> invalid then sourceText = source
-      task = createObject("roSGNode", "APITask")
-      task.request = {
-          action: "cacheArtwork",
-          items: items,
-          maxItems: maxItems,
-          includeBackdrops: includeBackdrops,
-          source: sourceText
-      }
-      task.observeField("response", "onArtworkCacheDone")
-      task.control = "RUN"
-      m.artworkCacheTasks.push(task)
-      pruneArtworkCacheTasks()
-  end sub
-
-  sub onArtworkCacheDone(event as object)
-      response = event.getData()
-      pruneArtworkCacheTasks()
-      if response <> invalid and response.lookUp("action") = "cacheArtwork" and response.lookUp("source") = "episodes"
-          if m.currentScreen <> invalid and m.currentScreen.subtype() = "EpisodeList"
-              m.currentScreen.refreshArtwork = true
-          end if
-      end if
-  end sub
-
-  sub pruneArtworkCacheTasks()
-      if m.artworkCacheTasks = invalid then m.artworkCacheTasks = []
-      kept = []
-      for each task in m.artworkCacheTasks
-          if task <> invalid and task.state <> "done" and task.state <> "stop"
-              kept.push(task)
-          end if
-      end for
-      while kept.count() > 2
-          oldTask = kept[0]
-          if oldTask <> invalid then oldTask.control = "STOP"
-          kept.delete(0)
-      end while
-      m.artworkCacheTasks = kept
-  end sub
-  

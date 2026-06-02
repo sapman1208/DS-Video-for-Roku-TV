@@ -2,9 +2,9 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-PROXY_JS="${ROKU_HLS_PROXY_JS:-$SCRIPT_DIR/ffmpeg-hls-proxy.js}"
-LOG_FILE="${ROKU_HLS_LOG:-/tmp/roku-hls-proxy.log}"
-PID_FILE="${ROKU_HLS_PID:-/tmp/roku-hls-proxy.pid}"
+CONVERTER_JS="${ROKU_CONVERTER_JS:-$SCRIPT_DIR/library-converter.js}"
+LOG_FILE="${ROKU_CONVERT_LOG:-/tmp/roku-library-converter.log}"
+PID_FILE="${ROKU_CONVERT_PID:-/tmp/roku-library-converter.pid}"
 
 if [ -f "$SCRIPT_DIR/.env" ]; then
   set -a
@@ -12,13 +12,8 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
   set +a
 fi
 
-export ROKU_HLS_HOST="${ROKU_HLS_HOST:-0.0.0.0}"
-export ROKU_HLS_PORT="${ROKU_HLS_PORT:-8099}"
-export ROKU_HLS_ROOT="${ROKU_HLS_ROOT:-/volume1/@tmp/roku-hls-proxy}"
-export ROKU_HLS_SAVE_MP4="${ROKU_HLS_SAVE_MP4:-1}"
-export ROKU_HLS_REPLACE_ORIGINAL="${ROKU_HLS_REPLACE_ORIGINAL:-1}"
-export ROKU_HLS_DELETE_REPLACED_ORIGINAL="${ROKU_HLS_DELETE_REPLACED_ORIGINAL:-1}"
-export ROKU_HLS_MP4_DIR="${ROKU_HLS_MP4_DIR:-/volume1/video/@roku-transcodes}"
+export ROKU_CONVERT_POLL_SECONDS="${ROKU_CONVERT_POLL_SECONDS:-900}"
+export ROKU_CONVERT_DELETE_ORIGINAL="${ROKU_CONVERT_DELETE_ORIGINAL:-1}"
 
 # Optional subtitles. Set OPEN_SUBTITLES_API_KEY, and optionally
 # OPEN_SUBTITLES_USERNAME/OPEN_SUBTITLES_PASSWORD, before starting.
@@ -52,22 +47,18 @@ if [ -z "${NODE_BIN:-}" ]; then
 fi
 
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-  echo "roku-hls-proxy already running with pid $(cat "$PID_FILE")"
+  echo "roku-library-converter already running with pid $(cat "$PID_FILE")"
   exit 0
 fi
 
-if [ ! -f "$PROXY_JS" ]; then
-  echo "Cannot find ffmpeg-hls-proxy.js at: $PROXY_JS" >&2
-  echo "Copy the whole tools folder so the layout is:" >&2
-  echo "  tools/ffmpeg-hls-proxy.js" >&2
-  echo "  tools/nas/start-hls-proxy.sh" >&2
+if [ ! -f "$CONVERTER_JS" ]; then
+  echo "Cannot find library-converter.js at: $CONVERTER_JS" >&2
   exit 1
 fi
 
-mkdir -p "$ROKU_HLS_ROOT"
-nohup "$NODE_BIN" "$PROXY_JS" >>"$LOG_FILE" 2>&1 &
+nohup "$NODE_BIN" "$CONVERTER_JS" --watch --delete-original >>"$LOG_FILE" 2>&1 &
 echo $! >"$PID_FILE"
-echo "started roku-hls-proxy pid $(cat "$PID_FILE") on port $ROKU_HLS_PORT"
+echo "started roku-library-converter pid $(cat "$PID_FILE")"
 echo "ffmpeg: $FFMPEG"
 echo "node: $NODE_BIN"
 echo "log: $LOG_FILE"

@@ -1,11 +1,23 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <component name="SettingsScreen" extends="Group">
     <interface>
+        <field id="authData" type="assocarray" />
+        <field id="navCategories" type="array" />
+        <field id="focusNavCategory" type="string" alwaysNotify="true" />
+        <field id="selectedCategory" type="assocarray" alwaysNotify="true" />
         <field id="backPressed" type="boolean" alwaysNotify="true" />
         <field id="settingsSaved" type="boolean" alwaysNotify="true" />
     </interface>
     <children>
         <Rectangle color="#DF3540" width="1920" height="1080" />
+        <Rectangle color="#B82330" width="1920" height="80" opacity="0.95" />
+        <MarkupGrid id="categoryList"
+            translation="[48, 10]"
+            itemComponentName="NavItem"
+            numColumns="7"
+            itemSize="[240, 60]"
+            itemSpacing="[14, 0]"
+            numRows="1" />
         <Label text="Settings" font="font:LargeBoldSystemFont" color="#FFFFFF"
             translation="[850, 86]" />
 

@@ -4,7 +4,7 @@ sub init()
       m.viewMode = "episodes"
       m.seasons = []
       m.currentSeason = -1
-      m.focusArea = "episodes"
+      m.focusArea = "seasons"
       m.episodeFocusedIndex = 0
       m.lastKey = ""
       m.categories = []
@@ -16,8 +16,10 @@ sub init()
       nav.observeField("itemSelected", "onNavSelected")
       nav.observeField("itemFocused", "onNavFocused")
       nav.observeField("focus", "onNavFocus")
+      m.top.observeField("navCategories", "onNavCategoriesSet")
       m.top.observeField("focusNavCategory", "onFocusNavCategory")
       m.top.observeField("refreshArtwork", "onRefreshArtwork")
+      m.top.observeField("playbackFocusVideo", "onPlaybackFocusVideo")
       m.top.findNode("navLoadTimer").observeField("fire", "onNavLoadTimer")
       m.top.findNode("posterRetryTimer").observeField("fire", "onPosterRetryTimer")
       m.top.findNode("initialPosterRetryTimer").observeField("fire", "onInitialPosterRetryTimer")
@@ -95,6 +97,7 @@ sub init()
           synoToken: authData.synoToken,
           tvshowId: showData.id,
           tvshowIdCandidates: showData.idCandidates,
+          libraryId: showData.libraryId,
           showTitle: showData.title
       }
       task.observeField("response", "onEpisodesLoaded")
@@ -127,30 +130,11 @@ sub init()
       m.episodes = episodes
       resetPosterRetryState()
       m.seasons = seasonsFromEpisodes(episodes)
-      if m.seasons.count() > 0 then m.currentSeason = m.seasons[0]
+      if m.seasons.count() > 0 then m.currentSeason = initialSeason(m.seasons)
       populateSeasonTabs()
       populateEpisodeGrid(episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
-      startArtworkCache(episodes, 0)
   end sub
-
-  sub startArtworkCache(items as object, maxItems as integer)
-      if items = invalid or items.count() = 0 then return
-      m.top.artworkCacheRequest = {
-          items: items,
-          maxItems: maxItems,
-          includeBackdrops: false,
-          source: "episodes",
-          nonce: createCacheNonce()
-      }
-  end sub
-
-  function createCacheNonce() as string
-      dt = createObject("roDateTime")
-      stamp = stri(dt.asSeconds()).trim()
-      randomPart = stri(rnd(1000000000)).trim()
-      return stamp + "-" + randomPart
-  end function
 
   sub populateSeasonTabs()
       grid = m.top.findNode("seasonGrid")
@@ -210,10 +194,15 @@ sub init()
           else
               node.description = ""
           end if
-          poster = posterUrl(ep, m.top.authData)
-          if poster <> ""
-              node.HDPosterUrl = poster
-              node.SDPosterUrl = poster
+          if shouldAssignEpisodePosterInitially(idx)
+              poster = posterUrl(ep, m.top.authData)
+              if poster <> ""
+                  print "ARTWORK_PICK surface=episode-grid category=episodes source="; episodePosterSource(ep, m.top.authData); " title="; episodeDisplayTitle(ep); " id="; safeStr(ep, ["id", "posterId", "videoStationId"]); " mapper="; safeStr(ep, ["mapper_id", "mapperId"])
+                  ep.addReplace("posterRemoteUrl", poster)
+                  ep.addReplace("posterUrl", poster)
+                  node.HDPosterUrl = poster
+                  node.SDPosterUrl = poster
+              end if
           end if
           preventDown = "false"
           if idx + 3 >= totalSeasonEpisodes then preventDown = "true"
@@ -243,18 +232,135 @@ sub init()
       end if
   end sub
 
+  function shouldAssignEpisodePosterInitially(idx as integer) as boolean
+      return idx < 6
+  end function
+
   sub onRefreshArtwork(event as object)
+      if event = invalid then return
       if m.episodes = invalid or m.episodes.count() = 0 then return
       grid = m.top.findNode("episodeGrid")
+      previousFocusArea = m.focusArea
       focused = m.episodeFocusedIndex
       if grid <> invalid and grid.itemFocused >= 0 then focused = grid.itemFocused
       populateEpisodeGrid(m.episodes, m.currentSeason)
-      if grid <> invalid and focused >= 0
+      if previousFocusArea = "episodes" and grid <> invalid and focused >= 0
           grid.jumpToItem = focused
+          grid.setFocus(true)
+          m.focusArea = "episodes"
+      else if previousFocusArea = "nav"
+          nav = m.top.findNode("categoryList")
+          if nav <> invalid then nav.setFocus(true)
+          m.focusArea = "nav"
+      else
+          seasonGrid = m.top.findNode("seasonGrid")
+          if seasonGrid <> invalid
+              seasonGrid.jumpToItem = seasonIndex(m.currentSeason)
+              seasonGrid.setFocus(true)
+          end if
+          m.focusArea = "seasons"
+      end if
+  end sub
+
+  sub onPlaybackFocusVideo(event as object)
+      videoData = event.getData()
+      if videoData = invalid or m.episodes = invalid or m.episodes.count() = 0 then return
+      targetSeason = numberValue(videoData.lookUp("seasonNumber"))
+      targetEpisode = numberValue(videoData.lookUp("episodeNumber"))
+      resolved = playbackFocusTarget(videoData)
+      resolvedIdx = -1
+      if resolved <> invalid
+          targetSeason = resolved.season
+          resolvedIdx = resolved.idx
+      end if
+      if targetSeason < 0 then targetSeason = m.currentSeason
+      if targetSeason <> m.currentSeason
+          m.currentSeason = targetSeason
+          populateSeasonTabs()
+          populateEpisodeGrid(m.episodes, m.currentSeason)
+      end if
+
+      seasonEpisodes = episodesForCurrentSeason()
+      idx = resolvedIdx
+      if idx < 0 then idx = episodeIndexForVideo(videoData, seasonEpisodes)
+      if idx < 0 and targetEpisode > 0
+          scan = 0
+          while scan < seasonEpisodes.count()
+              if episodeNumber(seasonEpisodes[scan]) = targetEpisode then idx = scan
+              scan = scan + 1
+          end while
+      end if
+      if idx < 0 then return
+
+      grid = m.top.findNode("episodeGrid")
+      if grid <> invalid
+          m.episodeFocusedIndex = idx
+          grid.jumpToItem = idx
           grid.setFocus(true)
           m.focusArea = "episodes"
       end if
   end sub
+
+  function playbackFocusTarget(videoData as object) as dynamic
+      if videoData = invalid then return invalid
+      targetKey = episodeVideoKey(videoData)
+      targetTitle = lcase(safeStr(videoData, ["title", "name"]))
+      for each season in m.seasons
+          seasonEpisodes = episodesForSeason(season)
+          idx = 0
+          while idx < seasonEpisodes.count()
+              ep = seasonEpisodes[idx]
+              matched = false
+              if targetKey <> "" and episodeRawKey(ep) = targetKey then matched = true
+              if not matched and targetTitle <> ""
+                  epTitle = lcase(episodeDisplayTitle(ep))
+                  rawTitle = lcase(safeStr(ep, ["title", "name"]))
+                  if epTitle = targetTitle or rawTitle = targetTitle then matched = true
+              end if
+              if matched then return { season: season, idx: idx }
+              idx = idx + 1
+          end while
+      end for
+      return invalid
+  end function
+
+  function episodesForSeason(season as integer) as object
+      seasonEpisodes = []
+      for each ep in m.episodes
+          if episodeSeason(ep) = season then seasonEpisodes.push(ep)
+      end for
+      return seasonEpisodes
+  end function
+
+  function episodeIndexForVideo(videoData as object, seasonEpisodes as object) as integer
+      if videoData = invalid or seasonEpisodes = invalid then return -1
+      targetKey = episodeVideoKey(videoData)
+      idx = 0
+      while idx < seasonEpisodes.count()
+          candidate = seasonEpisodes[idx]
+          if episodeRawKey(candidate) = targetKey then return idx
+          idx = idx + 1
+      end while
+      return -1
+  end function
+
+  function episodeRawKey(ep as object) as string
+      if ep = invalid then return ""
+      fileInfo = fileInfoFromItem(ep)
+      if fileInfo.path <> invalid and fileInfo.path <> "" then return "path:" + fileInfo.path
+      if fileInfo.id <> invalid and fileInfo.id <> "" then return "file:" + safeStr({ value: fileInfo.id }, ["value"])
+      epId = ep.lookUp("id")
+      if epId <> invalid and epId <> "" then return "id:" + safeStr({ value: epId }, ["value"])
+      return "se:" + stri(episodeSeason(ep)).trim() + "x" + stri(episodeNumber(ep)).trim()
+  end function
+
+  function episodeVideoKey(item as object) as string
+      if item = invalid then return ""
+      if item.filePath <> invalid and item.filePath <> "" then return "path:" + item.filePath
+      if item.fileId <> invalid and item.fileId <> "" then return "file:" + safeStr({ value: item.fileId }, ["value"])
+      if item.id <> invalid and item.id <> "" then return "id:" + safeStr({ value: item.id }, ["value"])
+      return "se:" + safeStr({ value: item.seasonNumber }, ["value"]) + "x" + safeStr({ value: item.episodeNumber }, ["value"])
+  end function
 
   function seasonEpisodeCount(season as integer) as integer
       count = 0
@@ -312,8 +418,24 @@ sub init()
 
   sub scheduleSeasonPosterRetry()
       seasonEpisodes = episodesForCurrentSeason()
-      i = 0
-      while i < seasonEpisodes.count()
+      if seasonEpisodes.count() = 0 then return
+
+      cols = 3
+      focused = m.episodeFocusedIndex
+      if focused < 0 then focused = 0
+      row = int(focused / cols)
+      startRow = row - 2
+      endRow = row + 2
+      if startRow < 0 then startRow = 0
+      maxRow = int((seasonEpisodes.count() - 1) / cols)
+      if endRow > maxRow then endRow = maxRow
+
+      startIdx = startRow * cols
+      endIdx = ((endRow + 1) * cols) - 1
+      if endIdx >= seasonEpisodes.count() then endIdx = seasonEpisodes.count() - 1
+
+      i = startIdx
+      while i <= endIdx
           enqueueEpisodePosterRetry(i, seasonEpisodes)
           i = i + 1
       end while
@@ -333,6 +455,7 @@ sub init()
   end sub
 
   sub onInitialPosterRetryTimer(event as object)
+      if event = invalid then return
       scheduleSeasonPosterRetry()
   end sub
 
@@ -350,7 +473,7 @@ sub init()
       attempts = 0
       existing = m.posterRetryAttempts.lookUp(key)
       if existing <> invalid then attempts = existing
-      if attempts >= 10 then return
+      if attempts >= maxEpisodePosterRetryAttempts() then return
       if not episodeQueueContains(idx) then m.posterRetryQueue.push(idx)
   end sub
 
@@ -362,6 +485,7 @@ sub init()
   end function
 
   sub onPosterRetryTimer(event as object)
+      if event = invalid then return
       retryNextEpisodePosterBatch()
   end sub
 
@@ -381,14 +505,14 @@ sub init()
               attempts = 0
               existing = m.posterRetryAttempts.lookUp(key)
               if existing <> invalid then attempts = existing
-              if attempts >= 10
+              if attempts >= maxEpisodePosterRetryAttempts()
                   m.posterRetryQueue.delete(0)
               else
                   attempts = attempts + 1
                   m.posterRetryAttempts.addReplace(key, attempts)
                   retryEpisodePosterForIndex(idx, seasonEpisodes, attempts)
                   m.posterRetryQueue.delete(0)
-                  if attempts < 10 then m.posterRetryQueue.push(idx)
+                  if attempts < maxEpisodePosterRetryAttempts() then m.posterRetryQueue.push(idx)
                   processed = processed + 1
               end if
           else
@@ -400,6 +524,10 @@ sub init()
 
   function episodeAttemptKey(idx as integer) as string
       return stri(m.currentSeason).trim() + ":" + stri(idx).trim()
+  end function
+
+  function maxEpisodePosterRetryAttempts() as integer
+      return 3
   end function
 
   function episodeArtworkNeedsRetry(idx as integer, seasonEpisodes as object) as boolean
@@ -429,6 +557,7 @@ sub init()
       baseUrl = remotePosterUrl(ep, m.top.authData)
       if not isHttpUrl(baseUrl) then return
       retryUrl = artworkRetryUrl(baseUrl, attempt)
+      print "ARTWORK_PICK surface=episode-retry category=episodes source="; episodePosterSource(ep, m.top.authData); " title="; safeStr(ep, ["title", "name"]); " id="; safeStr(ep, ["id", "posterId", "videoStationId"]); " mapper="; safeStr(ep, ["mapper_id", "mapperId"])
       node.HDPosterUrl = retryUrl
       node.SDPosterUrl = retryUrl
   end sub
@@ -492,10 +621,26 @@ sub init()
       return sorted
   end function
 
+  function initialSeason(seasons as object) as integer
+      if seasons = invalid or seasons.count() = 0 then return 0
+      for each season in seasons
+          if season = 1 then return 1
+      end for
+      for each season in seasons
+          if season > 0 then return season
+      end for
+      return seasons[0]
+  end function
+
   function episodeSeason(ep as object) as integer
       value = firstNumber(ep, ["seasonText", "seasonNumber", "season_number", "season", "season_num", "season_index"])
       if value > 0 then return value
       info = episodeInfoFromEpisode(ep)
+      if info.season > 0
+          ep.addReplace("season", info.season)
+          ep.addReplace("season_number", info.season)
+          ep.addReplace("seasonNumber", info.season)
+      end if
       return info.season
   end function
 
@@ -503,6 +648,11 @@ sub init()
       value = firstNumber(ep, ["episodeText", "episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"])
       if value > 0 then return value
       info = episodeInfoFromEpisode(ep)
+      if info.episode > 0
+          ep.addReplace("episode", info.episode)
+          ep.addReplace("episode_number", info.episode)
+          ep.addReplace("episodeNumber", info.episode)
+      end if
       return info.episode
   end function
 
@@ -763,22 +913,29 @@ sub init()
           episodeMeta = "Episode " + stri(epNumber).trim()
       end if
 
+      summary = episodeSummaryText(ep)
+      detailPoster = posterUrl(ep, authData)
+      detailBackdrop = showBackdropUrl(authData)
+      backdropSource = showBackdropSource(authData)
+      print "DETAIL_HANDOFF type=episode title="; safeStr(ep, ["title", "name"]); " posterSource="; episodePosterSource(ep, authData); " backdropSource="; backdropSource; " summaryLen="; len(summary)
       return {
           type: "episode",
           id: epId,
           fileId: rawFileId,
           mapperId: ep.lookUp("mapper_id"),
           showMapperId: m.top.showData.lookUp("mapperId"),
+          showTitle: safeStr(m.top.showData, ["title", "name"]),
           filePath: fileInfo.path,
           seasonNumber: seasonNumber,
           episodeNumber: epNumber,
           episodeMeta: episodeMeta,
+          resumePosition: firstNumber(ep, ["resumePosition", "watch_position", "position"]),
           title: safeStr(ep, ["title", "name"]),
-          summary: safeStr(ep, ["summary", "description", "tagline"]),
-          posterUrl: posterUrl(ep, authData),
+          summary: summary,
+          posterUrl: detailPoster,
           posterRemoteUrl: safeStr(ep, ["posterRemoteUrl"]),
-          backdropUrl: showBackdropUrl(authData),
-          backdropRemoteUrl: safeStr(m.top.showData, ["backdropRemoteUrl"]),
+          backdropUrl: detailBackdrop,
+          backdropRemoteUrl: detailBackdrop,
           authData: authData
       }
   end function
@@ -832,32 +989,80 @@ sub init()
           scheduleSeasonPosterRetry()
       end if
       if key = "back"
-          m.top.backPressed = true
+          if m.focusArea = "episodes"
+              m.top.findNode("seasonGrid").setFocus(true)
+              m.focusArea = "seasons"
+              return true
+          end if
+          if m.focusArea = "seasons"
+              m.top.backPressed = true
+              return true
+          end if
+          if m.focusArea = "nav" then return false
           return true
       end if
       return false
   end function
 
+  function episodeSummaryText(item as object) as string
+      summary = summaryTextFromValue(item.lookUp("summary"))
+      if summary <> "" then return summary
+      summary = summaryTextFromValue(item.lookUp("description"))
+      if summary <> "" then return summary
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          summary = summaryTextFromValue(additional.lookUp("summary"))
+          if summary <> "" then return summary
+          summary = summaryTextFromValue(additional.lookUp("description"))
+          if summary <> "" then return summary
+          extra = additional.lookUp("extra")
+          if extra <> invalid
+              summary = summaryTextFromValue(extra.lookUp("summary"))
+              if summary <> "" then return summary
+              summary = summaryTextFromValue(extra.lookUp("description"))
+              if summary <> "" then return summary
+          end if
+      end if
+      return ""
+  end function
+
+  function summaryTextFromValue(value as dynamic) as string
+      if value = invalid then return ""
+      t = type(value)
+      if t = "roAssociativeArray"
+          summary = safeStr(value, ["summary", "description"])
+          if summary <> "" then return summary
+          return ""
+      end if
+      return safeStr({ value: value }, ["value"])
+  end function
+
   function posterUrl(item as object, authData as dynamic) as string
+	      if authData = invalid then return ""
+	      savedPoster = item.lookUp("posterUrl")
+	      if isLocalArtworkUrl(savedPoster) then return savedPoster
+	      synologyPoster = synologyEpisodePosterUrl(item, authData)
+	      if synologyPoster <> "" then return synologyPoster
 	      remotePoster = item.lookUp("posterRemoteUrl")
 	      if remotePoster <> invalid and remotePoster <> "" and isHttpUrl(remotePoster) and not hasFallbackMapper(remotePoster) then return remotePoster
-	      savedPoster = item.lookUp("posterUrl")
 	      if savedPoster <> invalid and savedPoster <> "" and not hasFallbackMapper(savedPoster) then return savedPoster
-	      if authData = invalid then return ""
-	      proxyBase = authData.proxyBaseUrl
-	      if proxyBase <> invalid and proxyBase <> ""
-	          mapperId = item.lookUp("mapper_id")
-	          if mapperId = invalid then mapperId = item.lookUp("id")
-	          mapper = safeStr({ value: mapperId }, ["value"])
-	          mapper = mapper.trim()
-		          if mapper <> "" and mapper <> "0"
-		              return proxyBase + "/poster?mapper_id=" + mapper + "&format=jpg"
-		          end if
-	      end if
-	      return synologyEpisodePosterUrl(item, authData)
+	      return ""
 	  end function
 
+  function episodePosterSource(item as object, authData as dynamic) as string
+      if authData = invalid then return "none"
+      savedPoster = item.lookUp("posterUrl")
+      if isLocalArtworkUrl(savedPoster) then return "cachefs"
+      if synologyEpisodePosterUrl(item, authData) <> "" then return "synology-poster"
+      remotePoster = item.lookUp("posterRemoteUrl")
+      if remotePoster <> invalid and remotePoster <> "" and isHttpUrl(remotePoster) and not hasFallbackMapper(remotePoster) then return "remote"
+      if savedPoster <> invalid and savedPoster <> "" and not hasFallbackMapper(savedPoster) then return "saved"
+      return "none"
+  end function
+
   function remotePosterUrl(item as object, authData as dynamic) as string
+      synologyPoster = synologyEpisodePosterUrl(item, authData)
+      if synologyPoster <> "" then return synologyPoster
       remotePoster = safeStr(item, ["posterRemoteUrl"])
       if isHttpUrl(remotePoster) and not hasFallbackMapper(remotePoster) then return remotePoster
       savedPoster = safeStr(item, ["posterUrl"])
@@ -904,10 +1109,40 @@ sub init()
       baseUrl = authData.baseUrl
       sid = authData.sid
       if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = "" then return ""
-      id = safeStr(item, ["id"])
+      token = ""
+      if authData.synoToken <> invalid then token = authData.synoToken
+      id = safeStr(item, ["posterId", "videoStationId", "id"])
+      if id = "" or id = "0" then id = safeStr(item, ["mapper_id", "mapperId"])
       id = id.trim()
       if id = "" or id = "0" then return ""
-      return baseUrl + "/webapi/VideoStation/poster.cgi?api=SYNO.VideoStation.Poster&version=2&method=getimage&_sid=" + sid + "&id=" + id + "&type=tvshow_episode&poster_mtime=" + posterMtime(item)
+      url = baseUrl + "/webapi/entry.cgi?api=SYNO.VideoStation2.Poster&version=1&method=get&_sid=" + sid + "&id=" + id + "&type=tvshow_episode"
+      mtime = posterMtime(item)
+      if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)
+      if token <> "" then url = url + "&SynoToken=" + token
+      return url
+  end function
+
+  function escapeQueryValue(value as string) as string
+      out = ""
+      idx = 1
+      while idx <= len(value)
+          ch = mid(value, idx, 1)
+          if ch = " "
+              out = out + "%20"
+          else if ch = ":"
+              out = out + "%3A"
+          else if ch = "+"
+              out = out + "%2B"
+          else if ch = "#"
+              out = out + "%23"
+          else if ch = "%"
+              out = out + "%25"
+          else
+              out = out + ch
+          end if
+          idx = idx + 1
+      end while
+      return out
   end function
 
   function posterMtime(item as object) as string
@@ -921,24 +1156,34 @@ sub init()
       return ""
   end function
 
-  function showBackdropUrl(authData as dynamic) as string
+	  function showBackdropUrl(authData as dynamic) as string
+	      if m.top.showData <> invalid
+	          savedBackdrop = m.top.showData.lookUp("backdropUrl")
+	          if savedBackdrop <> invalid and savedBackdrop <> "" then return savedBackdrop
+      end if
+      return ""
+		  end function
+
+  function showBackdropSource(authData as dynamic) as string
       if m.top.showData <> invalid
           savedBackdrop = m.top.showData.lookUp("backdropUrl")
-          if savedBackdrop <> invalid and savedBackdrop <> "" then return savedBackdrop
+          if isLocalArtworkUrl(savedBackdrop) then return "cachefs"
+          if savedBackdrop <> invalid and savedBackdrop <> "" then return backdropSourceFromUrl(savedBackdrop)
       end if
-      if authData = invalid then return ""
-      proxyBase = authData.proxyBaseUrl
-      if proxyBase = invalid or proxyBase = "" then return ""
-	      mapper = showMapperId()
-	      if mapper = "" or mapper = "0" then return ""
-	      return proxyBase + "/backdrop?mapper_id=" + mapper + "&format=jpg"
-	  end function
+      return "none"
+  end function
+
+  function backdropSourceFromUrl(url as dynamic) as string
+      if url = invalid then return "none"
+      if type(url) <> "roString" and type(url) <> "String" then return "saved"
+      lower = lcase(url)
+      if instr(1, lower, "syno.videostation2.backdrop") > 0 then return "synology-backdrop"
+      return "saved"
+  end function
 
 	  function showMapperId() as string
 	      if m.top.showData = invalid then return ""
-	      mapperId = m.top.showData.lookUp("mapperId")
-	      if mapperId = invalid then mapperId = m.top.showData.lookUp("mapper_id")
-	      mapper = safeStr({ value: mapperId }, ["value"])
+	      mapper = safeStr(m.top.showData, ["mapperId", "mapper_id", "showMapperId", "show_mapper_id"])
 	      return mapper.trim()
 	  end function
 
@@ -996,6 +1241,13 @@ sub init()
       if items = invalid then return
       m.categories = orderedCategories(items)
       m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login and transcode settings" })
+      populateNavCategories()
+  end sub
+
+  sub onNavCategoriesSet(event as object)
+      cats = event.getData()
+      if cats = invalid or cats.count() = 0 then return
+      m.categories = cats
       populateNavCategories()
   end sub
 

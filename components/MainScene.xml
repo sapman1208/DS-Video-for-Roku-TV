@@ -2,6 +2,7 @@
 <component name="MainScene" extends="Scene">
     <children>
         <Rectangle id="background" color="#DF3540" width="1920" height="1080" />
+        <Timer id="playbackFocusTimer" repeat="false" duration="0.15" />
     </children>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 </component>

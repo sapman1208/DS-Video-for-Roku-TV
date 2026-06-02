@@ -1,104 +1,96 @@
-# Roku HLS Proxy on Synology NAS
+# Roku DS Video NAS Services
 
-This runs the FFmpeg HLS proxy on the NAS, so AVI/MKV transcoding does not use the Mac.
+These scripts run the NAS-side helper services for the Roku channel.
 
-## Requirements
+## Modes
 
-- Node.js installed on DSM.
-- FFmpeg installed on DSM. The launcher checks common Synology package paths and also honors `FFMPEG=/path/to/ffmpeg`.
-- Firewall allows Roku to reach TCP port `8099` on the NAS.
+### On-Demand
 
-## Install
-
-Copy the whole `tools` folder to the NAS. The expected layout is:
-
-```sh
-/volume1/docker/roku-ds-video-tools
-/volume1/docker/roku-ds-video-tools/ffmpeg-hls-proxy.js
-/volume1/docker/roku-ds-video-tools/nas/start-hls-proxy.sh
-```
-
-Start the proxy:
+Downloads missing subtitles on first start and as new files are indexed. Transcodes only when Roku plays an incompatible file.
 
 ```sh
 cd /volume1/docker/roku-ds-video-tools
-chmod +x nas/start-hls-proxy.sh nas/stop-hls-proxy.sh
+nas/start-on-demand.sh
+```
+
+Stop:
+
+```sh
+nas/stop-on-demand.sh
+```
+
+### Full Automation
+
+Downloads missing subtitles and converts incompatible videos in the background. The converter scans on first start, then polls for newly indexed files.
+
+```sh
+cd /volume1/docker/roku-ds-video-tools
+nas/start-full-automation.sh
+```
+
+Stop:
+
+```sh
+nas/stop-full-automation.sh
+```
+
+## Individual Services
+
+Start only the playback/transcode proxy:
+
+```sh
 nas/start-hls-proxy.sh
 ```
 
-Check it from another machine on the LAN:
+Start only the subtitle watcher:
 
 ```sh
-curl http://NAS_HOST_OR_IP:8099/health
+nas/start-subtitle-watcher.sh
 ```
 
-Expected response:
+Start only the background converter:
 
-```json
-{"ok":true,"sessions":0}
+```sh
+nas/start-library-converter.sh
+```
+
+## Environment
+
+Scripts read `/volume1/docker/roku-ds-video-tools/.env`.
+
+Useful settings:
+
+```sh
+OPEN_SUBTITLES_API_KEY=your-api-key
+OPEN_SUBTITLES_LANGUAGE=en
+ROKU_HLS_PORT=8099
+ROKU_HLS_BASE_URL=https://your-hostname:8099
+ROKU_SUBTITLE_POLL_SECONDS=900
+ROKU_CONVERT_POLL_SECONDS=900
+```
+
+The subtitle watcher scans movie and TV libraries by default. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
+
+## Logs
+
+```text
+/tmp/roku-hls-proxy.log
+/tmp/roku-subtitle-watcher.log
+/tmp/roku-library-converter.log
 ```
 
 ## DSM Task Scheduler
 
-Create a triggered task that runs as root at boot:
+Create a triggered task as root.
+
+On-demand:
 
 ```sh
-cd /volume1/docker/roku-ds-video-tools && nas/start-hls-proxy.sh
+cd /volume1/docker/roku-ds-video-tools && nas/start-on-demand.sh
 ```
 
-Stop it manually:
+Full automation:
 
 ```sh
-cd /volume1/docker/roku-ds-video-tools && nas/stop-hls-proxy.sh
+cd /volume1/docker/roku-ds-video-tools && nas/start-full-automation.sh
 ```
-
-Logs default to:
-
-```sh
-/tmp/roku-hls-proxy.log
-```
-
-## HTTPS Reverse Proxy
-
-For offsite Roku playback, put this proxy behind DSM Reverse Proxy or another HTTPS proxy.
-
-Example:
-
-- Source protocol: HTTPS
-- Source hostname: your public hostname
-- Source path: `/roku-hls`
-- Destination protocol: HTTP
-- Destination hostname: `127.0.0.1`
-- Destination port: `8099`
-
-Start the proxy with the same path prefix:
-
-```sh
-ROKU_HLS_PATH_PREFIX=/roku-hls nas/start-hls-proxy.sh
-```
-
-Then set the Roku app `Transcode URL` field to:
-
-```text
-https://your-public-hostname/roku-hls
-```
-
-If your reverse proxy does not pass `X-Forwarded-Proto` and `X-Forwarded-Host`, set `ROKU_HLS_BASE_URL` instead:
-
-```sh
-ROKU_HLS_BASE_URL=https://your-public-hostname/roku-hls ROKU_HLS_PATH_PREFIX=/roku-hls nas/start-hls-proxy.sh
-```
-
-## Native HTTPS on Port 8099
-
-The proxy can also serve HTTPS directly if you point it at a certificate and key:
-
-```sh
-ROKU_HLS_PORT=8099 \
-ROKU_HLS_HTTPS_CERT=/path/to/fullchain.pem \
-ROKU_HLS_HTTPS_KEY=/path/to/privkey.pem \
-ROKU_HLS_BASE_URL=https://your-public-hostname:8099 \
-nas/start-hls-proxy.sh
-```
-
-Use this only if you can safely reference your Let's Encrypt certificate files from the start task.

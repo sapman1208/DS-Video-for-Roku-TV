@@ -117,6 +117,6 @@ function categoryPayload(idx as integer) as object
 end function
 
 function onKeyEvent(key as string, press as boolean) as boolean
-    if press and key = "back" then return true
+    if press and key = "back" then return false
     return false
 end function

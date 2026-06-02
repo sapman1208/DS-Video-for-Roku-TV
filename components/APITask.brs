@@ -33,11 +33,27 @@ sub init()
       if action = "listPlaylists" then listPlaylists(req)
       if action = "listCollectionVideos" then listCollectionVideos(req)
       if action = "toggleCollectionVideo" then toggleCollectionVideo(req)
+      if action = "updateWatchStatus" then updateWatchStatus(req)
       if action = "listLibraries" then listLibraries(req)
       if action = "listEpisodes" then listEpisodes(req)
+      if action = "latestResume" then latestResume(req)
       if action = "getStreamUrl" then getStreamUrl(req)
-      if action = "cacheArtwork" then cacheArtwork(req)
-      if action = "precacheAllArtwork" then precacheAllArtwork(req)
+      if action = "fetchTextUrl" then fetchTextUrl(req)
+  end sub
+
+  sub fetchTextUrl(req as object)
+      url = ""
+      if req.url <> invalid then url = req.url
+      if url = ""
+          m.top.response = { success: false, error: "missing url" }
+          return
+      end if
+      result = httpGet(url)
+      if result = invalid
+          m.top.response = { success: false, error: "fetch failed", url: url }
+          return
+      end if
+      m.top.response = { success: true, text: result, url: url }
   end sub
 
   ' ── Authentication ────────────────────────────────────────────────────────────
@@ -83,6 +99,7 @@ sub init()
       proxyBaseUrl = invalid
       if req.proxyBaseUrl <> invalid then proxyBaseUrl = req.proxyBaseUrl
       m.currentProxyBaseUrl = proxyBaseUrl
+      m.skipProxyArtworkAttach = false
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
@@ -91,24 +108,32 @@ sub init()
       if libraryParam <> ""
           proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "movie")
           if proxyItems.count() > 0
+              proxyItems = sortBrowseItems(proxyItems)
               resolveCachedArtworkForItems(proxyItems, 1500)
+              print "GRID_SOURCE category=movies source=proxy-db count="; proxyItems.count()
               m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid }
               return
           end if
       end if
-      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movie", "movies"])
       if key <> ""
+          m.skipProxyArtworkAttach = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.skipProxyArtworkAttach = false
+          print "GRID_SOURCE category=movies source=synology2 count="; m.top.response.items.count()
           return
       end if
 
-      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movies", "movie"])
       if key <> ""
+          m.skipProxyArtworkAttach = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.skipProxyArtworkAttach = false
+          print "GRID_SOURCE category=movies source=synology1 count="; m.top.response.items.count()
           return
       end if
 
@@ -122,29 +147,26 @@ sub init()
       proxyBaseUrl = invalid
       if req.proxyBaseUrl <> invalid then proxyBaseUrl = req.proxyBaseUrl
       m.currentProxyBaseUrl = proxyBaseUrl
+      m.skipProxyArtworkAttach = false
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
 
       libraryParam = libraryParamFromReq(req)
-      proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "tvshow")
-      if proxyItems.count() > 0
-          resolveCachedArtworkForItems(proxyItems, 1500)
-          firstTitle = ""
-          firstMapper = ""
-          if proxyItems.count() > 0
-              firstTitle = idToStr(proxyItems[0].lookUp("title"))
-              firstMapper = idToStr(proxyItems[0].lookUp("mapper_id"))
-          end if
-          m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid, detail: "proxy tvshow count=" + stri(proxyItems.count()).trim() + " first=" + firstTitle + " mapper=" + firstMapper }
-          return
-      end if
+      gridCategory = "tvshows"
+      if libraryParam <> "" then gridCategory = "ians-shows"
+
       url = apiUrl(baseUrl, "SYNO.VideoStation2.TVShow", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["tvshow", "tvshows"])
       if key <> ""
+          m.skipProxyArtworkAttach = true
+          m.currentProxyPosterFallbackOnly = libraryParam = ""
           parseAndRespond(result, key, baseUrl, sid)
-          m.top.response.detail = "synology2 tvshow"
+          m.skipProxyArtworkAttach = false
+          m.currentProxyPosterFallbackOnly = false
+          m.top.response.detail = "synology2 tvshow direct poster count=" + stri(m.top.response.items.count()).trim()
+          print "GRID_SOURCE category="; gridCategory; " source=synology2 libraryParam="; libraryParam; " count="; m.top.response.items.count()
           return
       end if
 
@@ -152,8 +174,29 @@ sub init()
       result = httpGet(url)
       key = firstValidKey(result, ["tvshows", "tvshow"])
       if key <> ""
+          m.skipProxyArtworkAttach = true
+          m.currentProxyPosterFallbackOnly = libraryParam = ""
           parseAndRespond(result, key, baseUrl, sid)
-          m.top.response.detail = "synology1 tvshow"
+          m.skipProxyArtworkAttach = false
+          m.currentProxyPosterFallbackOnly = false
+          m.top.response.detail = "synology1 tvshow direct poster count=" + stri(m.top.response.items.count()).trim()
+          print "GRID_SOURCE category="; gridCategory; " source=synology1 libraryParam="; libraryParam; " count="; m.top.response.items.count()
+          return
+      end if
+
+      proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "tvshow")
+      if proxyItems.count() > 0
+          proxyItems = sortBrowseItems(proxyItems)
+          addDirectPosterIds(proxyItems)
+          resolveCachedArtworkForItems(proxyItems, 1500)
+          firstTitle = ""
+          firstMapper = ""
+          if proxyItems.count() > 0
+              firstTitle = idToStr(proxyItems[0].lookUp("title"))
+              firstMapper = idToStr(proxyItems[0].lookUp("mapper_id"))
+          end if
+          print "GRID_SOURCE category="; gridCategory; " source=proxy-db libraryParam="; libraryParam; " count="; proxyItems.count()
+          m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid, detail: "proxy tvshow fallback count=" + stri(proxyItems.count()).trim() + " first=" + firstTitle + " mapper=" + firstMapper }
           return
       end if
 
@@ -166,6 +209,7 @@ sub init()
       proxyBaseUrl = invalid
       if req.proxyBaseUrl <> invalid then proxyBaseUrl = req.proxyBaseUrl
       m.currentProxyBaseUrl = proxyBaseUrl
+      m.skipProxyArtworkAttach = false
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
@@ -174,7 +218,9 @@ sub init()
       if libraryParam <> ""
           proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "homevideo")
           if proxyItems.count() > 0
+              proxyItems = sortBrowseItems(proxyItems)
               resolveCachedArtworkForItems(proxyItems, 1500)
+              print "GRID_SOURCE category=homevideos source=proxy-db count="; proxyItems.count()
               m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid }
               return
           end if
@@ -183,7 +229,10 @@ sub init()
       result = httpGet(url)
       key = firstValidKey(result, ["video", "videos"])
       if key <> ""
+          m.skipProxyArtworkAttach = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.skipProxyArtworkAttach = false
+          print "GRID_SOURCE category=homevideos source=synology2 count="; m.top.response.items.count()
           return
       end if
 
@@ -191,7 +240,10 @@ sub init()
       result = httpGet(url)
       key = firstValidKey(result, ["video", "videos"])
       if key <> ""
+          m.skipProxyArtworkAttach = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.skipProxyArtworkAttach = false
+          print "GRID_SOURCE category=homevideos source=synology1 count="; m.top.response.items.count()
           return
       end if
 
@@ -203,6 +255,7 @@ sub init()
       proxyBaseUrl = invalid
       if req.proxyBaseUrl <> invalid then proxyBaseUrl = req.proxyBaseUrl
       m.currentProxyBaseUrl = proxyBaseUrl
+      m.skipProxyArtworkAttach = true
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
@@ -211,6 +264,8 @@ sub init()
       key = firstValidKey(result, ["records", "record", "tv_record", "videos", "video"])
       if key <> ""
           parseAndRespond(result, key, baseUrl, sid)
+          m.skipProxyArtworkAttach = false
+          print "GRID_SOURCE category=tvrecordings source=synology1 count="; m.top.response.items.count()
           return
       end if
       m.top.response = { success: true, items: [], total: 0, baseUrl: baseUrl, sid: sid }
@@ -249,7 +304,7 @@ sub init()
       params = "id=" + collectionId + "&offset=0&limit=500&sort_by=title&sort_direction=asc&additional=" + additional
       url = apiUrl(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "2", "video_list", params, sid, token)
       result = httpGet(url)
-      respondWithCollectionVideos(result, baseUrl, sid, req.proxyBaseUrl)
+      respondWithCollectionVideos(result, baseUrl, sid)
   end sub
 
   sub toggleCollectionVideo(req as object)
@@ -281,6 +336,53 @@ sub init()
           m.top.response = { success: true, result: json }
       else
           m.top.response = { success: false, error: "Synology collection update failed", detail: left(result, 300) }
+      end if
+  end sub
+
+  sub updateWatchStatus(req as object)
+      baseUrl = req.baseUrl
+      sid = req.sid
+      token = ""
+      if req.synoToken <> invalid then token = req.synoToken
+      videoId = idToStr(req.videoId)
+      videoType = collectionVideoType(idToStr(req.videoType))
+      position = 0
+      if req.position <> invalid then position = int(req.position)
+      if req.proxyBaseUrl <> invalid and req.filePath <> invalid
+          proxyResult = updateProxyWatchStatus(req.proxyBaseUrl, req.filePath, position)
+          if proxyResult <> invalid and proxyResult.success = true
+              m.top.response = { success: true, result: proxyResult, source: "proxy" }
+              return
+          end if
+          m.top.response = { success: true, result: proxyResult, source: "proxy-skip" }
+          return
+      end if
+      if (videoId = "" or videoId = "0") and req.proxyBaseUrl <> invalid and req.filePath <> invalid
+          resolved = resolveVideoStationItem(req.proxyBaseUrl, req.filePath)
+          if resolved <> invalid
+              resolvedId = idToStr(resolved.lookUp("id"))
+              resolvedType = idToStr(resolved.lookUp("type"))
+              if resolvedId <> "" and resolvedId <> "0" then videoId = resolvedId
+              if resolvedType <> "" and resolvedType <> "0" then videoType = collectionVideoType(resolvedType)
+          end if
+      end if
+      if videoId = "" or videoId = "0" or position < 0
+          m.top.response = { success: false, error: "Missing watch status id" }
+          return
+      end if
+
+      url = apiEndpoint(baseUrl, "SYNO.VideoStation.WatchStatus", "VideoStation/watchstatus.cgi", sid, token)
+      body = "api=SYNO.VideoStation.WatchStatus&version=1&method=setinfo&id=" + videoId + "&video_type=" + videoType + "&position=" + stri(position).trim()
+      result = httpPostForm(url, body)
+      if result = invalid or result = ""
+          m.top.response = { success: false, error: "No response from Synology watch status API" }
+          return
+      end if
+      json = parseJSON(result)
+      if json <> invalid and json.success = true
+          m.top.response = { success: true, result: json }
+      else
+          m.top.response = { success: false, error: "Synology watch status update failed", detail: left(result, 300) }
       end if
   end sub
 
@@ -323,70 +425,71 @@ sub init()
               if not exists then candidates.push(cStr)
           end for
       end if
+      libraryId = ""
+      if req.libraryId <> invalid then libraryId = idToStr(req.libraryId)
+      if libraryId = "0" then libraryId = ""
 
-      proxyEpisodes = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
-      if proxyEpisodes.count() > 0
-          proxyEpisodes = uniqueEpisodeItems(proxyEpisodes)
-          resolveCachedArtworkForItems(proxyEpisodes, 1500)
-          m.top.response = { success: true, items: proxyEpisodes, total: proxyEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "Video Station database episodes" }
-          return
-      end if
-
-      proxyMetadata = fetchProxyTvMetadata(proxyBaseUrl, showTitle)
-      playableProxyMetadata = playableEpisodeMetadata(proxyMetadata)
-      if playableProxyMetadata.count() > 0
-          playableProxyMetadata = uniqueEpisodeItems(playableProxyMetadata)
-          resolveCachedArtworkForItems(playableProxyMetadata, 1500)
-          m.top.response = { success: true, items: playableProxyMetadata, total: playableProxyMetadata.count(), baseUrl: baseUrl, sid: sid, detail: "Video Station metadata episodes" }
-          return
-      end if
+      proxyMetadata = []
+      playableProxyMetadata = []
+      proxyEpisodes = []
 
       lastResult = invalid
       lastUrl = ""
       bestEpisodes = []
       bestMetadata = []
-      episodeAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22%5D"
       for each candidateId in candidates
-          url = apiUrl(baseUrl, "SYNO.VideoStation.TVShowEpisode", "VideoStation/tvshow_episode.cgi", "1", "list", "tvshow_id=" + candidateId + "&offset=0&limit=500&sort_by=ep_num&sort_direction=asc&additional=" + episodeAdditional, sid, token)
-          lastUrl = url
-          result = httpGet(url)
-          lastResult = result
-          key = firstValidKey(result, ["episodes", "episode"])
-          if key <> ""
-              meta = parseEpisodeMetadata(result, key, candidateId, showTitle)
-              if meta.count() > bestMetadata.count() then bestMetadata = meta
-              parsed = parseEpisodes(result, key, candidateId, showTitle)
-              if parsed.count() > bestEpisodes.count() then bestEpisodes = parsed
-          end if
-
-          url = apiUrl(baseUrl, "SYNO.VideoStation2.TVShowEpisode", "entry.cgi", "1", "list", "tvshow_id=" + candidateId + "&offset=0&limit=500&sort_by=ep_num&sort_direction=asc&additional=" + episodeAdditional, sid, token)
-          lastUrl = url
-          result = httpGet(url)
-          lastResult = result
-          key = firstValidKey(result, ["episode", "episodes"])
-          if key <> ""
-              meta = parseEpisodeMetadata(result, key, candidateId, showTitle)
-              if meta.count() > bestMetadata.count() then bestMetadata = meta
-              parsed = parseEpisodes(result, key, candidateId, showTitle)
-              if parsed.count() > bestEpisodes.count() then bestEpisodes = parsed
-          end if
+          direct = directEpisodeListResult(baseUrl, sid, token, candidateId, showTitle, libraryId <> "")
+          if direct.url <> "" then lastUrl = direct.url
+          if direct.result <> invalid then lastResult = direct.result
+          if direct.metadata.count() > bestMetadata.count() then bestMetadata = direct.metadata
+          if direct.episodes.count() > bestEpisodes.count() then bestEpisodes = direct.episodes
+          if direct.episodes.count() > 0 then exit for
+          if libraryId <> "" and direct.metadata.count() > 0 then exit for
       end for
 
-      if proxyMetadata.count() > bestMetadata.count() then bestMetadata = proxyMetadata
+      if bestEpisodes.count() > 0
+          if bestMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, bestMetadata)
+          normalizeEpisodeItems(bestEpisodes)
+          enrichEpisodeSummariesFromVsmeta(bestEpisodes, baseUrl, sid, token)
+          addDirectPosterIds(bestEpisodes)
+          bestEpisodes = uniqueEpisodeItems(bestEpisodes)
+          print "EPISODE_SOURCE title="; showTitle; " source=synology-direct count="; bestEpisodes.count()
+          m.top.response = { success: true, items: bestEpisodes, total: bestEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "Synology episode records" }
+          return
+      end if
 
       fallbackEpisodes = findEpisodesByShowTitle(baseUrl, sid, token, showTitle)
       if fallbackEpisodes.count() > 0
           if bestMetadata.count() > 0 then fallbackEpisodes = mergeEpisodeMetadata(fallbackEpisodes, bestMetadata)
+          normalizeEpisodeItems(fallbackEpisodes)
+          enrichEpisodeSummariesFromVsmeta(fallbackEpisodes, baseUrl, sid, token)
+          addDirectPosterIds(fallbackEpisodes)
           fallbackEpisodes = uniqueEpisodeItems(fallbackEpisodes)
-          resolveCachedArtworkForItems(fallbackEpisodes, 1500)
+          print "EPISODE_SOURCE title="; showTitle; " source=filestation-scan count="; fallbackEpisodes.count()
           m.top.response = { success: true, items: fallbackEpisodes, total: fallbackEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "FileStation episode fallback" }
           return
       end if
 
-      if bestEpisodes.count() > 0
-          bestEpisodes = uniqueEpisodeItems(bestEpisodes)
-          resolveCachedArtworkForItems(bestEpisodes, 1500)
-          m.top.response = { success: true, items: bestEpisodes, total: bestEpisodes.count(), baseUrl: baseUrl, sid: sid }
+      proxyMetadata = fetchProxyTvMetadata(proxyBaseUrl, showTitle)
+      playableProxyMetadata = playableEpisodeMetadata(proxyMetadata)
+      proxyEpisodes = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
+      if proxyMetadata.count() > bestMetadata.count() then bestMetadata = proxyMetadata
+
+      if proxyEpisodes.count() > 0
+          normalizeEpisodeItems(proxyEpisodes)
+          addDirectPosterIds(proxyEpisodes)
+          proxyEpisodes = uniqueEpisodeItems(proxyEpisodes)
+          print "EPISODE_SOURCE title="; showTitle; " source=proxy-db count="; proxyEpisodes.count()
+          m.top.response = { success: true, items: proxyEpisodes, total: proxyEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "Video Station database episodes" }
+          return
+      end if
+
+      if playableProxyMetadata.count() > 0
+          normalizeEpisodeItems(playableProxyMetadata)
+          addDirectPosterIds(playableProxyMetadata)
+          playableProxyMetadata = uniqueEpisodeItems(playableProxyMetadata)
+          print "EPISODE_SOURCE title="; showTitle; " source=proxy-metadata count="; playableProxyMetadata.count()
+          m.top.response = { success: true, items: playableProxyMetadata, total: playableProxyMetadata.count(), baseUrl: baseUrl, sid: sid, detail: "Video Station metadata episodes" }
           return
       end if
 
@@ -394,6 +497,56 @@ sub init()
       if lastResult <> invalid then detail = detail + chr(10) + "Last response: " + left(lastResult, 900)
       m.top.response = { success: true, items: [], total: 0, baseUrl: baseUrl, sid: sid, detail: detail }
   end sub
+
+  sub latestResume(req as object)
+      proxyBaseUrl = invalid
+      if req.proxyBaseUrl <> invalid then proxyBaseUrl = req.proxyBaseUrl
+      filePath = ""
+      if req.filePath <> invalid then filePath = idToStr(req.filePath)
+      showTitle = ""
+      if req.showTitle <> invalid then showTitle = idToStr(req.showTitle)
+      candidates = []
+      if req.showMapperId <> invalid then candidates.push(idToStr(req.showMapperId))
+      if req.tvshowId <> invalid then candidates.push(idToStr(req.tvshowId))
+
+      position = 0
+      if proxyBaseUrl <> invalid and proxyBaseUrl <> "" and filePath <> ""
+          episodes = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
+          for each ep in episodes
+              epPath = episodePathForResume(ep)
+              if pathsMatchForResume(epPath, filePath)
+                  position = firstNumericField(ep, ["resumePosition", "watch_position", "position"])
+                  exit for
+              end if
+          end for
+      end if
+
+      m.top.response = { success: true, action: "latestResume", position: position, filePath: filePath }
+  end sub
+
+  function episodePathForResume(item as object) as string
+      if item = invalid then return ""
+      path = firstTextField(item, ["path", "filePath"])
+      if path <> "" then return path
+      info = itemFileInfo(item)
+      return info.path
+  end function
+
+  function pathsMatchForResume(leftPath as string, rightPath as string) as boolean
+      a = normalizedResumePath(leftPath)
+      b = normalizedResumePath(rightPath)
+      if a = "" or b = "" then return false
+      return a = b
+  end function
+
+  function normalizedResumePath(path as string) as string
+      p = lcase(path)
+      if left(p, 8) = "/volume"
+          slash = instr(9, p, "/")
+          if slash > 0 then p = mid(p, slash)
+      end if
+      return p
+  end function
 
   ' ── Streaming ─────────────────────────────────────────────────────────────────
   ' ── Fetch the true file ID for a video record ───────────────────────────────
@@ -581,6 +734,7 @@ sub init()
       if right(lp, 4) = ".avi" then return true
       if right(lp, 4) = ".mkv" then return true
       if right(lp, 5) = ".webm" then return true
+      if right(lp, 5) = ".m2ts" then return true
       return false
   end function
 
@@ -595,7 +749,7 @@ sub init()
       return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(filePath)) + "&mode=open", sid, token)
   end function
 
-  function ffmpegProxyStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, sid as string, token as string, filePath as string) as string
+  function ffmpegProxyStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, sid as string, token as string, filePath as string, resumePosition as integer) as string
       enc = createObject("roUrlTransfer")
       src = fileStationStreamUrl(baseUrl, sid, token, filePath)
       nonceClock = createObject("roDateTime")
@@ -609,7 +763,31 @@ sub init()
       else
           src = src + "?roku_cache=" + nonce
       end if
-      return ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/transcode?src=" + enc.escape(src)
+      url = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/transcode?src=" + enc.escape(src)
+      if resumePosition > 0 then url = url + "&resume=" + stri(resumePosition).trim()
+      return url
+  end function
+
+  function proxyDirectStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, filePath as string) as string
+      enc = createObject("roUrlTransfer")
+      return ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/file.mp4?path=" + enc.escape(filePath)
+  end function
+
+  function subtitlePathForVideo(filePath as string) as string
+      lower = lcase(filePath)
+      extensions = [".mkv", ".mp4", ".avi", ".m4v", ".mov", ".webm", ".m2ts"]
+      for each ext in extensions
+          if right(lower, len(ext)) = ext
+              return left(filePath, len(filePath) - len(ext)) + ".en.srt"
+          end if
+      end for
+      return filePath + ".en.srt"
+  end function
+
+  function fileStationSubtitleUrl(baseUrl as string, sid as string, token as string, filePath as string) as string
+      if filePath = "" then return ""
+      enc = createObject("roUrlTransfer")
+      return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(subtitlePathForVideo(filePath))) + "&mode=open", sid, token)
   end function
 
   function ffmpegProxyBaseUrl(baseUrl as string, proxyBaseUrl as dynamic) as string
@@ -625,7 +803,7 @@ sub init()
       colonPos = instr(1, withoutScheme, ":")
       if colonPos > 0 then withoutScheme = left(withoutScheme, colonPos - 1)
 
-      return "http://" + withoutScheme + ":8099"
+      return "https://" + withoutScheme + ":8099"
   end function
 
   function libraryParamFromReq(req as object) as string
@@ -667,7 +845,7 @@ sub init()
       for each item in items
           mapper = idToStr(item.lookUp("mapper_id"))
           if mapper <> "" and mapper <> "0"
-              item.addReplace("posterUrl", proxyBaseUrl + "/poster?mapper_id=" + mapper + "&format=jpg")
+              item.addReplace("mapperId", mapper)
           end if
       end for
       return items
@@ -689,11 +867,78 @@ sub init()
           mapper = idToStr(item.lookUp("mapper_id"))
           if mapper <> "" and mapper <> "0"
               item.addReplace("mapperId", mapper)
-              item.addReplace("posterUrl", proxyBaseUrl + "/poster?mapper_id=" + mapper + "&format=jpg")
-              item.addReplace("backdropUrl", proxyBaseUrl + "/backdrop?mapper_id=" + mapper + "&format=jpg")
           end if
       end for
       return items
+  end function
+
+  sub enrichTvShowsWithProxyItems(items as dynamic, proxyItems as object)
+      if items = invalid or proxyItems = invalid then return
+      for each item in items
+          title = idToStr(item.lookUp("title"))
+          if title = "" then title = idToStr(item.lookUp("name"))
+          match = proxyTvShowByTitle(proxyItems, title)
+          if match = invalid
+              mapper = idToStr(item.lookUp("mapper_id"))
+              if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+              match = proxyTvShowByMapper(proxyItems, mapper)
+          end if
+          if match <> invalid
+              matchId = idToStr(match.lookUp("id"))
+              currentId = idToStr(item.lookUp("id"))
+              if matchId <> "" and matchId <> "0" and (currentId = "" or currentId = "0")
+                  item.addReplace("id", matchId)
+              end if
+              if matchId <> "" and matchId <> "0"
+                  item.addReplace("posterId", matchId)
+                  item.addReplace("videoStationId", matchId)
+              end if
+              mapper = idToStr(match.lookUp("mapper_id"))
+              if mapper = "" or mapper = "0" then mapper = idToStr(match.lookUp("mapperId"))
+              if mapper <> "" and mapper <> "0"
+                  item.addReplace("mapper_id", mapper)
+                  item.addReplace("mapperId", mapper)
+              end if
+              candidates = match.lookUp("idCandidates")
+              if candidates <> invalid then item.addReplace("idCandidates", candidates)
+              episodeCount = match.lookUp("episode_count")
+              if episodeCount <> invalid then item.addReplace("episode_count", episodeCount)
+          end if
+      end for
+  end sub
+
+  sub addDirectPosterIds(items as object)
+      if items = invalid then return
+      for each item in items
+          directId = idToStr(item.lookUp("id"))
+          if directId <> "" and directId <> "0"
+              item.addReplace("id", directId)
+              item.addReplace("posterId", directId)
+              item.addReplace("videoStationId", directId)
+          end if
+          mapper = idToStr(item.lookUp("mapper_id"))
+          if mapper <> "" and mapper <> "0" then item.addReplace("mapperId", mapper)
+      end for
+  end sub
+
+  function proxyTvShowByTitle(proxyItems as object, title as string) as dynamic
+      key = normalizedTitleKey(title)
+      for each item in proxyItems
+          candidate = idToStr(item.lookUp("title"))
+          if candidate = "" then candidate = idToStr(item.lookUp("name"))
+          if normalizedTitleKey(candidate) = key then return item
+      end for
+      return invalid
+  end function
+
+  function proxyTvShowByMapper(proxyItems as object, mapper as string) as dynamic
+      if mapper = "" or mapper = "0" then return invalid
+      for each item in proxyItems
+          candidate = idToStr(item.lookUp("mapper_id"))
+          if candidate = "" or candidate = "0" then candidate = idToStr(item.lookUp("mapperId"))
+          if candidate = mapper then return item
+      end for
+      return invalid
   end function
 
   function respondWithFileStationStream(baseUrl as string, sid as string, token as string, filePath as string, diag as object) as boolean
@@ -710,6 +955,7 @@ sub init()
   end function
 
   function apiPath(baseUrl as string, apiName as string, fallback as string) as string
+      if fallback <> "" then return fallback
       enc = createObject("roUrlTransfer")
       url = baseUrl + "/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=" + enc.escape(apiName)
       r = httpGet(url)
@@ -1028,6 +1274,8 @@ sub init()
       originalAvailable = ""
       if req.originalAvailable <> invalid then originalAvailable = req.originalAvailable
       if fileId = "" or fileId = "0" then fileId = videoId
+      resumePosition = 0
+      if req.resumePosition <> invalid then resumePosition = int(req.resumePosition)
 
       diag = []
       diag.push("type=" + mediaType + " vid=" + videoId + " fid=" + fileId + " mapper=" + mapperId)
@@ -1075,7 +1323,7 @@ sub init()
           streamUrl = fileStationStreamUrl(baseUrl, sid, token, filePath)
           fsPath = fileStationPath(filePath)
           print "FILESTATION_PLAY path="; fsPath
-          m.top.response = { success: true, streamUrl: streamUrl, streamFormat: streamFormatForPath(filePath), debugInfo: "FileStation " + left(fsPath, 120) }
+          m.top.response = { success: true, streamUrl: streamUrl, streamFormat: streamFormatForPath(filePath), subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FileStation " + left(fsPath, 120) }
           return
       else if filePath <> ""
           diag.push("direct deferred for transcode:" + filePath)
@@ -1083,10 +1331,10 @@ sub init()
 
       if filePath <> ""
           if shouldTryVideoStationTranscode(filePath)
-              streamUrl = ffmpegProxyStreamUrl(baseUrl, proxyBaseUrl, sid, token, filePath)
+              streamUrl = ffmpegProxyStreamUrl(baseUrl, proxyBaseUrl, sid, token, filePath, resumePosition)
               fsPath = fileStationPath(filePath)
-              print "FFMPEG_PROXY_PLAY path="; fsPath
-              m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, debugInfo: "FFmpeg proxy " + left(fsPath, 120) }
+              print "FFMPEG_PROXY_PLAY path="; fsPath; " resume="; resumePosition
+              m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FFmpeg proxy " + left(fsPath, 120) }
               return
           end if
           m.top.response = { success: false, error: "This file needs transcoding. Direct Roku playback is disabled for this container while we stabilize MP4 playback.", detail: "Path: " + fileStationPath(filePath) + chr(10) + "Type: " + mediaType }
@@ -1225,147 +1473,13 @@ sub init()
       return ""
   end function
 
-  sub cacheArtwork(req as object)
-      items = []
-      if req.items <> invalid then items = req.items
-      maxItems = 220
-      if req.maxItems <> invalid then maxItems = int(req.maxItems)
-      includeBackdrops = false
-      if req.includeBackdrops <> invalid then includeBackdrops = req.includeBackdrops
-      source = ""
-      if req.source <> invalid then source = req.source
-      downloaded = downloadMissingArtworkForItems(items, maxItems, includeBackdrops)
-      m.top.response = { success: true, action: "cacheArtwork", downloaded: downloaded, source: source }
-  end sub
-
-  sub precacheAllArtwork(req as object)
-      proxyBaseUrl = invalid
-      if req.proxyBaseUrl <> invalid then proxyBaseUrl = req.proxyBaseUrl
-      if proxyBaseUrl = invalid or proxyBaseUrl = ""
-          m.top.response = { success: false, action: "precacheAllArtwork", error: "Missing proxy URL", downloaded: 0 }
-          return
-      end if
-
-      totalItems = 0
-      downloaded = 0
-      seenUrls = {}
-      libraries = fetchProxyLibraries(proxyBaseUrl)
-      scopes = [{ id: invalid, type: "movie" }, { id: invalid, type: "tvshow" }, { id: invalid, type: "homevideo" }, { id: invalid, type: "tvrecord" }]
-      for each lib in libraries
-          libType = idToStr(lib.lookUp("type"))
-          mapped = proxyMediaTypeForLibraryType(libType)
-          libId = idToStr(lib.lookUp("id"))
-          if mapped <> "" and libId <> "" and libId <> "0"
-              scopes.push({ id: libId, type: mapped })
-          end if
-      end for
-
-      for each scope in scopes
-          items = fetchProxyLibraryItems(proxyBaseUrl, scope.id, scope.type)
-          downloaded = downloaded + downloadUniqueArtwork(items, seenUrls, true)
-          totalItems = totalItems + items.count()
-
-          if scope.type = "tvshow"
-              for each show in items
-                  showId = idToStr(show.lookUp("id"))
-                  showTitle = idToStr(show.lookUp("title"))
-                  candidates = [showId]
-                  mapper = idToStr(show.lookUp("mapper_id"))
-                  if mapper <> "" and mapper <> "0" then candidates.push(mapper)
-                  episodes = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
-                  downloaded = downloaded + downloadUniqueArtwork(episodes, seenUrls, true)
-                  totalItems = totalItems + episodes.count()
-              end for
-          end if
-      end for
-
-      m.top.response = { success: true, action: "precacheAllArtwork", downloaded: downloaded, totalItems: totalItems }
-  end sub
-
-  function proxyMediaTypeForLibraryType(value as string) as string
-      t = lcase(value)
-      if t = "movie" then return "movie"
-      if t = "tvshow" then return "tvshow"
-      if t = "home_video" or t = "homevideo" then return "homevideo"
-      if t = "tv_record" or t = "tvrecord" then return "tvrecord"
-      return ""
-  end function
-
-  function imageCacheDir() as string
-      return "cachefs:/ds_video_image_cache"
-  end function
-
-  sub ensureImageCacheDir()
-      fs = createObject("roFileSystem")
-      dir = imageCacheDir()
-      if not fs.exists(dir) then fs.createDirectory(dir)
-  end sub
-
-  function cacheFileForUrl(url as string) as string
-      hash = 5381
-      idx = 1
-      while idx <= len(url)
-          hash = hash * 33 + asc(mid(url, idx, 1))
-          while hash > 1000000000
-              hash = hash - 1000000000
-          end while
-          idx = idx + 1
-      end while
-      key = stri(hash)
-      key = key.trim()
-      return imageCacheDir() + "/" + key + ".jpg"
-  end function
-
-  function cachedImagePathIfPresent(url as dynamic) as string
-      if url = invalid then return ""
-      if type(url) <> "roString" and type(url) <> "String" then return ""
-      if url = "" then return ""
-      if left(url, 9) = "cachefs:/" or left(url, 5) = "tmp:/" or left(url, 5) = "pkg:/" then return url
-      if left(lcase(url), 7) <> "http://" and left(lcase(url), 8) <> "https://" then return url
-      path = cacheFileForUrl(url)
-      fs = createObject("roFileSystem")
-      if fs.exists(path) then return path
-      return url
-  end function
-
-  function downloadImageIfMissing(url as dynamic) as boolean
-      if url = invalid then return false
-      if type(url) <> "roString" and type(url) <> "String" then return false
-      if url = "" then return false
-      if left(url, 9) = "cachefs:/" or left(url, 5) = "tmp:/" or left(url, 5) = "pkg:/" then return false
-      if left(lcase(url), 7) <> "http://" and left(lcase(url), 8) <> "https://" then return false
-
-      ensureImageCacheDir()
-      path = cacheFileForUrl(url)
-      fs = createObject("roFileSystem")
-      if fs.exists(path) then return false
-
-      http = createObject("roUrlTransfer")
-      http.setUrl(url)
-      http.setCertificatesFile("common:/certs/ca-bundle.crt")
-      http.enableHostVerification(false)
-      http.enablePeerVerification(false)
-      ok = http.getToFile(path)
-      if ok = true or ok = 200
-          if fs.exists(path) then return true
-      end if
-      return false
-  end function
-
   sub attachProxyArtworkForItems(items as object, proxyBaseUrl as dynamic)
       if items = invalid then return
-      if proxyBaseUrl = invalid or proxyBaseUrl = "" then return
       for each item in items
           mapper = idToStr(item.lookUp("mapper_id"))
           if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
           if mapper <> "" and mapper <> "0"
               item.addReplace("mapperId", mapper)
-              if item.lookUp("posterUrl") = invalid or item.lookUp("posterUrl") = ""
-                  item.addReplace("posterUrl", proxyBaseUrl + "/poster?mapper_id=" + mapper + "&format=jpg")
-              end if
-              if item.lookUp("backdropUrl") = invalid or item.lookUp("backdropUrl") = ""
-                  item.addReplace("backdropUrl", proxyBaseUrl + "/backdrop?mapper_id=" + mapper + "&format=jpg")
-              end if
           end if
       end for
   end sub
@@ -1378,66 +1492,14 @@ sub init()
           poster = item.lookUp("posterUrl")
           if poster <> invalid and poster <> ""
               item.addReplace("posterRemoteUrl", poster)
-              item.addReplace("posterUrl", cachedImagePathIfPresent(poster))
           end if
           backdrop = item.lookUp("backdropUrl")
           if backdrop <> invalid and backdrop <> ""
               item.addReplace("backdropRemoteUrl", backdrop)
-              item.addReplace("backdropUrl", cachedImagePathIfPresent(backdrop))
           end if
           idx = idx + 1
       end for
   end sub
-
-  function downloadMissingArtworkForItems(items as object, maxItems as integer, includeBackdrops as boolean) as integer
-      if items = invalid then return 0
-      idx = 0
-      count = 0
-      for each item in items
-          if maxItems > 0 and idx >= maxItems then return count
-          poster = item.lookUp("posterRemoteUrl")
-          if poster = invalid or poster = "" then poster = item.lookUp("posterUrl")
-          if downloadImageIfMissing(poster) then count = count + 1
-          if includeBackdrops
-              backdrop = item.lookUp("backdropRemoteUrl")
-              if backdrop = invalid or backdrop = "" then backdrop = item.lookUp("backdropUrl")
-              if downloadImageIfMissing(backdrop) then count = count + 1
-          end if
-          idx = idx + 1
-      end for
-      return count
-  end function
-
-  function downloadUniqueArtwork(items as object, seenUrls as object, includeBackdrops as boolean) as integer
-      if items = invalid then return 0
-      count = 0
-      for each item in items
-          poster = item.lookUp("posterRemoteUrl")
-          if poster = invalid or poster = "" then poster = item.lookUp("posterUrl")
-          if shouldDownloadArtworkUrl(poster, seenUrls)
-              if downloadImageIfMissing(poster) then count = count + 1
-          end if
-          if includeBackdrops
-              backdrop = item.lookUp("backdropRemoteUrl")
-              if backdrop = invalid or backdrop = "" then backdrop = item.lookUp("backdropUrl")
-              if shouldDownloadArtworkUrl(backdrop, seenUrls)
-                  if downloadImageIfMissing(backdrop) then count = count + 1
-              end if
-          end if
-      end for
-      return count
-  end function
-
-  function shouldDownloadArtworkUrl(url as dynamic, seenUrls as object) as boolean
-      if url = invalid then return false
-      if type(url) <> "roString" and type(url) <> "String" then return false
-      if url = "" then return false
-      if left(url, 9) = "cachefs:/" or left(url, 5) = "tmp:/" or left(url, 5) = "pkg:/" then return false
-      if left(lcase(url), 7) <> "http://" and left(lcase(url), 8) <> "https://" then return false
-      if seenUrls.doesExist(url) then return false
-      seenUrls.addReplace(url, true)
-      return true
-  end function
 
   sub parseAndRespond(result as dynamic, dataKey as string, baseUrl as string, sid as string)
       if result = invalid or result = ""
@@ -1461,8 +1523,12 @@ sub init()
       end if
       items = json.data.lookUp(dataKey)
       if items = invalid then items = []
-      attachProxyArtworkForItems(items, m.currentProxyBaseUrl)
-      resolveCachedArtworkForItems(items, 1500)
+      skipProxyArtwork = false
+      if m.skipProxyArtworkAttach <> invalid and m.skipProxyArtworkAttach = true then skipProxyArtwork = true
+      if not skipProxyArtwork then attachProxyArtworkForItems(items, m.currentProxyBaseUrl)
+      addDirectPosterIds(items)
+      items = sortBrowseItems(items)
+      if not skipProxyArtwork then resolveCachedArtworkForItems(items, 1500)
       total = 0
       if json.data.total <> invalid
         t = json.data.total
@@ -1558,7 +1624,29 @@ sub init()
       return "movie"
   end function
 
-  sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string, proxyBaseUrl as dynamic)
+  function resolveVideoStationItem(proxyBaseUrl as dynamic, filePath as dynamic) as dynamic
+      if proxyBaseUrl = invalid or proxyBaseUrl = "" then return invalid
+      if filePath = invalid or filePath = "" then return invalid
+      enc = createObject("roUrlTransfer")
+      result = httpGet(proxyBaseUrl + "/resolve?path=" + enc.escape(filePath))
+      if result = invalid or result = "" then return invalid
+      json = parseJSON(result)
+      if json = invalid or json.success <> true then return invalid
+      return json.lookUp("item")
+  end function
+
+  function updateProxyWatchStatus(proxyBaseUrl as dynamic, filePath as dynamic, position as integer) as dynamic
+      if proxyBaseUrl = invalid or proxyBaseUrl = "" then return invalid
+      if filePath = invalid or filePath = "" then return invalid
+      enc = createObject("roUrlTransfer")
+      url = proxyBaseUrl + "/watchstatus?path=" + enc.escape(filePath) + "&position=" + stri(position).trim()
+      result = httpGet(url)
+      if result = invalid or result = "" then return invalid
+      json = parseJSON(result)
+      return json
+  end function
+
+  sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string)
       if result = invalid or result = ""
           m.top.response = { success: false, error: "No response from Synology collection API", items: [] }
           return
@@ -1578,12 +1666,47 @@ sub init()
       mediaType = collectionItemTypeForKey(dataKey)
       normalized = []
       for each item in items
-          normalizeCollectionVideo(item, mediaType, proxyBaseUrl)
+          normalizeCollectionVideo(item, mediaType)
           normalized.push(item)
       end for
+      normalized = sortBrowseItems(normalized)
       resolveCachedArtworkForItems(normalized, 1500)
       m.top.response = { success: true, items: normalized, total: normalized.count(), baseUrl: baseUrl, sid: sid }
   end sub
+
+  function sortBrowseItems(items as object) as object
+      if items = invalid then return []
+      sorted = []
+      for each item in items
+          sorted.push(item)
+      end for
+      i = 0
+      while i < sorted.count()
+          j = i + 1
+          while j < sorted.count()
+              if browseSortKey(sorted[j]) < browseSortKey(sorted[i])
+                  tmp = sorted[i]
+                  sorted[i] = sorted[j]
+                  sorted[j] = tmp
+              end if
+              j = j + 1
+          end while
+          i = i + 1
+      end while
+      return sorted
+  end function
+
+  function browseSortKey(item as object) as string
+      title = idToStr(item.lookUp("sort_title"))
+      if title = "" or title = "0" then title = idToStr(item.lookUp("title"))
+      if title = "" or title = "0" then title = idToStr(item.lookUp("name"))
+      if title = "" or title = "0" then title = idToStr(item.lookUp("file_name"))
+      normalized = lcase(title).trim()
+      if left(normalized, 4) = "the " then normalized = mid(normalized, 5)
+      if left(normalized, 3) = "an " then normalized = mid(normalized, 4)
+      if left(normalized, 2) = "a " then normalized = mid(normalized, 3)
+      return normalized + chr(0) + lcase(title)
+  end function
 
   function firstCollectionVideoKey(data as object) as string
       keys = ["movies", "episodes", "videos", "tvshows", "recordings", "movie", "episode", "video", "tvshow", "recording"]
@@ -1603,7 +1726,54 @@ sub init()
       return "movie"
   end function
 
-  sub normalizeCollectionVideo(item as object, mediaType as string, proxyBaseUrl as dynamic)
+  function directEpisodeListResult(baseUrl as string, sid as string, token as string, candidateId as string, showTitle as string, stopOnMetadata as boolean) as object
+      emptyResult = { episodes: [], metadata: [], result: invalid, url: "", source: "" }
+      id = idToStr(candidateId)
+      if id = "" or id = "0" then return emptyResult
+
+      richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22%5D"
+      simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22%5D"
+      attempts = [
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "tvshow_id", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "tvshow_id", keys: ["episode", "episodes"] },
+          { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "1", idParam: "tvshow_id", keys: ["episode", "episodes"] },
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", idParam: "tvshow_id", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "id", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "id", keys: ["episode", "episodes"] },
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "", keys: ["episode", "episodes"] }
+      ]
+      additionals = [richAdditional, simpleAdditional, ""]
+
+      best = emptyResult
+      for each attempt in attempts
+          for each additional in additionals
+              limit = "500"
+              if attempt.idParam = "" then limit = "10000"
+              params = "offset=0&limit=" + limit + "&sort_by=ep_num&sort_direction=asc"
+              if attempt.idParam <> "" then params = attempt.idParam + "=" + id + "&" + params
+              if additional <> "" then params = params + "&additional=" + additional
+              url = apiUrl(baseUrl, attempt.api, attempt.path, attempt.version, "list", params, sid, token)
+              result = httpGet(url)
+              key = firstValidKey(result, attempt.keys)
+              if key <> ""
+                  meta = parseEpisodeMetadata(result, key, id, showTitle)
+                  parsed = parseEpisodes(result, key, id, showTitle)
+                  source = attempt.api + "/" + attempt.version + "/" + attempt.idParam
+                  print "EPISODE_DIRECT title="; showTitle; " source="; source; " metadata="; meta.count(); " playable="; parsed.count()
+                  candidate = { episodes: parsed, metadata: meta, result: result, url: url, source: source }
+                  if parsed.count() > best.episodes.count() then best = candidate
+                  if best.episodes.count() = 0 and meta.count() > best.metadata.count() then best = candidate
+                  if parsed.count() > 0 then return candidate
+                  if stopOnMetadata and meta.count() > 0 then return candidate
+              end if
+              if best.url = "" then best = { episodes: [], metadata: [], result: result, url: url, source: "" }
+          end for
+      end for
+      return best
+  end function
+
+  sub normalizeCollectionVideo(item as object, mediaType as string)
       savedType = idToStr(item.lookUp("type"))
       if savedType <> "0" and savedType <> ""
           mediaType = normalizedAppVideoType(savedType)
@@ -1614,10 +1784,6 @@ sub init()
       if mapper <> "0"
           item.addReplace("mapperId", mapper)
           item.addReplace("mapper_id", mapper)
-      end if
-      if proxyBaseUrl <> invalid and proxyBaseUrl <> "" and mapper <> "0"
-          item.addReplace("posterUrl", proxyBaseUrl + "/poster?mapper_id=" + mapper + "&format=jpg")
-          item.addReplace("backdropUrl", proxyBaseUrl + "/backdrop?mapper_id=" + mapper + "&format=jpg")
       end if
       additional = item.lookUp("additional")
       if additional <> invalid
@@ -1700,6 +1866,167 @@ sub init()
       return filtered
   end function
 
+  sub normalizeEpisodeItems(items as object)
+      if items = invalid then return
+      for each item in items
+          normalizeEpisodeItem(item)
+      end for
+  end sub
+
+  sub normalizeEpisodeItem(item as object)
+      if item = invalid then return
+
+      episodeTitle = idToStr(item.lookUp("tag_line"))
+      if episodeTitle = "" or episodeTitle = "0" then episodeTitle = idToStr(item.lookUp("tagline"))
+      if episodeTitle <> "" and episodeTitle <> "0"
+          item.addReplace("title", episodeTitle)
+          item.addReplace("name", episodeTitle)
+      end if
+
+      season = itemInt(item, ["season", "season_number", "season_num", "season_index"])
+      episode = itemInt(item, ["episode", "episode_number", "episode_num", "ep_num", "ep_index"])
+      if season > 0
+          item.addReplace("season", season)
+          item.addReplace("season_number", season)
+          item.addReplace("seasonNumber", season)
+      end if
+      if episode > 0
+          item.addReplace("episode", episode)
+          item.addReplace("episode_number", episode)
+          item.addReplace("episodeNumber", episode)
+          item.addReplace("episodeText", stri(episode).trim())
+      end if
+
+      summary = episodeSummaryText(item)
+      if summary <> ""
+          item.addReplace("summary", summary)
+          item.addReplace("description", summary)
+      end if
+
+      directId = idToStr(item.lookUp("id"))
+      if directId <> "" and directId <> "0"
+          item.addReplace("posterId", directId)
+          item.addReplace("videoStationId", directId)
+      end if
+      mapper = idToStr(item.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+      if mapper <> "" and mapper <> "0"
+          item.addReplace("mapperId", mapper)
+          item.addReplace("mapper_id", mapper)
+      end if
+      item.addReplace("type", "episode")
+  end sub
+
+  function episodeSummaryText(item as object) as string
+      if item = invalid then return ""
+      summary = summaryTextFromValue(item.lookUp("summary"))
+      if summary <> "" then return summary
+      summary = summaryTextFromValue(item.lookUp("description"))
+      if summary <> "" then return summary
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          summary = summaryTextFromValue(additional.lookUp("summary"))
+          if summary <> "" then return summary
+          extra = additional.lookUp("extra")
+          if extra <> invalid
+              summary = summaryTextFromValue(extra.lookUp("summary"))
+              if summary <> "" then return summary
+              summary = summaryTextFromValue(extra.lookUp("description"))
+              if summary <> "" then return summary
+          end if
+      end if
+      return ""
+  end function
+
+  function summaryTextFromValue(value as dynamic) as string
+      if value = invalid then return ""
+      t = type(value)
+      if t = "roAssociativeArray"
+          summary = idToStr(value.lookUp("summary"))
+          if summary <> "" and summary <> "0" then return summary
+          summary = idToStr(value.lookUp("description"))
+          if summary <> "" and summary <> "0" then return summary
+          return ""
+      end if
+      summary = idToStr(value)
+      if summary = "" or summary = "0" then return ""
+      return summary
+  end function
+
+  sub enrichEpisodeSummariesFromVsmeta(items as object, baseUrl as string, sid as string, token as string)
+      if items = invalid then return
+      checked = 0
+      for each item in items
+          if checked >= 16 then return
+          if episodeSummaryText(item) = ""
+              fileInfo = itemFileInfo(item)
+              if fileInfo.path <> ""
+                  summary = fetchVsmetaSummary(baseUrl, sid, token, fileInfo.path, idToStr(item.lookUp("title")))
+                  if summary <> ""
+                      item.addReplace("summary", summary)
+                      item.addReplace("description", summary)
+                  end if
+                  checked = checked + 1
+              end if
+          end if
+      end for
+  end sub
+
+  function fetchVsmetaSummary(baseUrl as string, sid as string, token as string, filePath as string, episodeTitle as string) as string
+      if filePath = "" then return ""
+      url = fileStationStreamUrl(baseUrl, sid, token, filePath + ".vsmeta")
+      blob = httpGet(url)
+      if blob = invalid or blob = "" then return ""
+      summary = vsmetaSummaryFromBlob(blob, episodeTitle)
+      if summary <> "" then print "VSMETA_SUMMARY title="; episodeTitle; " len="; len(summary)
+      return summary
+  end function
+
+  function vsmetaSummaryFromBlob(blob as string, episodeTitle as string) as string
+      if blob = "" then return ""
+      searchStart = 1
+      if episodeTitle <> ""
+          found = instr(1, blob, episodeTitle)
+          if found > 0 then searchStart = found + len(episodeTitle)
+      end if
+
+      jpgStart = instr(searchStart, blob, "/9j/")
+      stopAt = len(blob)
+      if jpgStart > 0 then stopAt = jpgStart - 1
+
+      best = ""
+      current = ""
+      idx = searchStart
+      while idx <= stopAt
+          ch = asc(mid(blob, idx, 1))
+          if ch >= 32 and ch <= 126
+              current = current + mid(blob, idx, 1)
+          else
+              if len(cleanVsmetaSummary(current)) > len(best) then best = cleanVsmetaSummary(current)
+              current = ""
+          end if
+          idx = idx + 1
+      end while
+      if len(cleanVsmetaSummary(current)) > len(best) then best = cleanVsmetaSummary(current)
+      return best
+  end function
+
+  function cleanVsmetaSummary(value as string) as string
+      text = value.trim()
+      while len(text) > 0
+          first = left(text, 1)
+          code = asc(first)
+          if (code >= 65 and code <= 90) or (code >= 97 and code <= 122) or (code >= 48 and code <= 57)
+              exit while
+          end if
+          text = mid(text, 2).trim()
+      end while
+      if len(text) < 12 then return ""
+      if instr(1, text, "JFIF") > 0 then return ""
+      if instr(1, text, "Exif") > 0 then return ""
+      return text
+  end function
+
   function fetchProxyTvMetadata(proxyBaseUrl as dynamic, showTitle as string) as object
       if proxyBaseUrl = invalid or proxyBaseUrl = "" or showTitle = "" then return []
       enc = createObject("roUrlTransfer")
@@ -1724,10 +2051,6 @@ sub init()
       if json = invalid or json.success <> true then return []
       items = json.lookUp("items")
       if items = invalid then return []
-      showMapper = ""
-      if items.count() > 0
-          showMapper = idToStr(items[0].lookUp("show_mapper_id"))
-      end if
       for each item in items
           season = itemInt(item, ["season", "season_number", "season_num", "season_index"])
           episode = itemInt(item, ["episode", "episode_number", "episode_num", "ep_index"])
@@ -1754,7 +2077,6 @@ sub init()
           mapper = idToStr(item.lookUp("mapper_id"))
           if mapper <> "" and mapper <> "0"
               item.addReplace("mapperId", mapper)
-              item.addReplace("posterUrl", proxyBaseUrl + "/poster?mapper_id=" + mapper + "&format=jpg")
           end if
       end for
       return items
@@ -1765,15 +2087,63 @@ sub init()
       for each candidateId in candidates
           id = idToStr(candidateId)
           if id <> "" and id <> "0"
-              items = fetchProxyEpisodes(proxyBaseUrl, id, "")
-              if items.count() > best.count() then best = items
+              items = fetchProxyEpisodes(proxyBaseUrl, id, showTitle)
+              if isBetterProxyEpisodeList(items, best) then best = items
           end if
       end for
-      if best.count() > 0 then return best
       if showTitle <> ""
-          return fetchProxyEpisodes(proxyBaseUrl, "", showTitle)
+          titleItems = fetchProxyEpisodes(proxyBaseUrl, "", showTitle)
+          if isBetterProxyEpisodeList(titleItems, best) then best = titleItems
       end if
       return best
+  end function
+
+  function isBetterProxyEpisodeList(candidate as object, current as object) as boolean
+      if candidate = invalid or candidate.count() = 0 then return false
+      if current = invalid or current.count() = 0 then return true
+      if candidate.count() > current.count() then return true
+      if candidate.count() < current.count() then return false
+      return proxyEpisodeListScore(candidate) > proxyEpisodeListScore(current)
+  end function
+
+  function proxyEpisodeListScore(items as object) as integer
+      score = 0
+      for each item in items
+          if firstNumericField(item, ["resumePosition", "watch_position", "position"]) > 0 then score = score + 100
+          if idToStr(item.lookUp("mapper_id")) <> "" then score = score + 8
+          if idToStr(item.lookUp("show_mapper_id")) <> "" then score = score + 4
+          if firstTextField(item, ["summary", "description"]) <> "" then score = score + 2
+          path = firstTextField(item, ["path"])
+          if left(path, 9) = "/volume1/" then score = score + 6
+          if idToStr(item.lookUp("id")) <> "" and val(idToStr(item.lookUp("id"))) > 0 then score = score + 3
+      end for
+      return score
+  end function
+
+  function firstNumericField(item as object, keys as object) as integer
+      if item = invalid then return 0
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid
+              t = type(value)
+              if t = "roInteger" or t = "Integer" then return value
+              if t = "roFloat" or t = "Float" then return int(value)
+              if t = "roString" or t = "String" then return int(val(value))
+          end if
+      end for
+      return 0
+  end function
+
+  function firstTextField(item as object, keys as object) as string
+      if item = invalid then return ""
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid
+              text = idToStr(value)
+              if text <> "" then return text
+          end if
+      end for
+      return ""
   end function
 
   function playableEpisodeMetadata(items as object) as object
@@ -1865,9 +2235,17 @@ sub init()
               copyEpisodeMetadataField(meta, item, "description")
               copyEpisodeMetadataField(meta, item, "original_available")
               copyEpisodeMetadataField(meta, item, "additional")
+              summary = episodeSummaryText(meta)
+              if summary <> ""
+                  item.addReplace("summary", summary)
+                  item.addReplace("description", summary)
+              end if
               fallbackFile = itemFileInfo(playable)
               if fallbackFile.path <> ""
-                  item.additional = { file: [ { id: fallbackFile.id, path: fallbackFile.path } ] }
+                  mergedAdditional = item.lookUp("additional")
+                  if mergedAdditional = invalid then mergedAdditional = {}
+                  mergedAdditional.addReplace("file", [ { id: fallbackFile.id, path: fallbackFile.path } ])
+                  item.addReplace("additional", mergedAdditional)
               end if
               merged.push(item)
           else
@@ -2091,6 +2469,7 @@ sub init()
   end function
 
   function normalizedTitleKey(value as string) as string
+      value = lcase(value)
       out = ""
       idx = 1
       while idx <= len(value)
@@ -2125,11 +2504,11 @@ sub init()
           if mid(lower, idx, 1) = "s" and mid(lower, idx + 3, 1) = "e"
               season = int(val(mid(lower, idx + 1, 2)))
               episode = int(val(mid(lower, idx + 4, 2)))
-              if season > 0 or episode > 0 then return { season: season, episode: episode, title: "Episode " + mid(lower, idx + 4, 2) }
+              if season > 0 or episode > 0 then return { season: season, episode: episode, title: episodeTitleFromName(name, idx + 6, episode) }
           else if mid(lower, idx, 1) = "s" and mid(lower, idx + 4, 1) = "e"
               season = int(val(mid(lower, idx + 1, 2)))
               episode = int(val(mid(lower, idx + 5, 2)))
-              if season > 0 or episode > 0 then return { season: season, episode: episode, title: "Episode " + mid(lower, idx + 5, 2) }
+              if season > 0 or episode > 0 then return { season: season, episode: episode, title: episodeTitleFromName(name, idx + 7, episode) }
           end if
           idx = idx + 1
       end while
@@ -2141,7 +2520,7 @@ sub init()
           if code >= 48 and code <= 57 and mid(lower, idx + 2, 1) = "x"
               season = int(val(ch))
               episode = int(val(mid(lower, idx + 3, 2)))
-              if season > 0 or episode > 0 then return { season: season, episode: episode, title: "Episode " + mid(lower, idx + 3, 2) }
+              if season > 0 or episode > 0 then return { season: season, episode: episode, title: episodeTitleFromName(name, idx + 5, episode) }
           end if
           idx = idx + 1
       end while
@@ -2149,10 +2528,53 @@ sub init()
       return { season: 0, episode: 0, title: name }
   end function
 
+  function episodeTitleFromName(name as string, titleStart as integer, episode as integer) as string
+      title = ""
+      if titleStart <= len(name) then title = mid(name, titleStart)
+      title = cleanFilenameTitle(title)
+      if title <> "" then return title
+      epText = stri(episode).trim()
+      if episode < 10 then epText = "0" + epText
+      return "Episode " + epText
+  end function
+
+  function cleanFilenameTitle(value as string) as string
+      title = value
+      while len(title) > 0
+          ch = left(title, 1)
+          if ch = " " or ch = "-" or ch = "_" or ch = "."
+              title = mid(title, 2)
+          else
+              exit while
+          end if
+      end while
+      title = title.trim()
+      title = replaceAll(title, ".", " ")
+      title = replaceAll(title, "_", " ")
+      return title.trim()
+  end function
+
+  function replaceAll(value as string, findText as string, replacement as string) as string
+      if findText = "" then return value
+      output = ""
+      idx = 1
+      findLen = len(findText)
+      while idx <= len(value)
+          if mid(value, idx, findLen) = findText
+              output = output + replacement
+              idx = idx + findLen
+          else
+              output = output + mid(value, idx, 1)
+              idx = idx + 1
+          end if
+      end while
+      return output
+  end function
+
   function episodeItemFromFile(fpath as string) as object
       info = episodeInfoFromPath(fpath)
       return {
-          id: fpath,
+          id: "0",
           title: info.title,
           season_number: info.season,
           episode_number: info.episode,
@@ -2237,14 +2659,14 @@ sub init()
       if title = "" then return results
       print "FIND_EPISODES title="; title
 
-      directPaths = ["/video/TV Shows/" + title, "/video/TV/" + title, "/video/Series/" + title]
+      directPaths = ["/video/TV Shows/" + title, "/video/Ian's Shows/" + title, "/video/TV/" + title, "/video/Series/" + title]
       for each directPath in directPaths
           print "FIND_EPISODES direct="; directPath
           collectEpisodeFiles(baseUrl, sid, token, directPath, 2, results)
           if results.count() > 0 then return results
       end for
 
-      searchPaths = ["/video/TV Shows", "/video/TV", "/video/Series"]
+      searchPaths = ["/video/TV Shows", "/video/Ian's Shows", "/video/TV", "/video/Series"]
       for each basePath in searchPaths
           showDir = findShowDirInTree(baseUrl, sid, token, title, basePath, 1)
           if showDir <> ""

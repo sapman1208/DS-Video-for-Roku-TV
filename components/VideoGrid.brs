@@ -78,6 +78,9 @@ sub init()
   end function
 
   sub onDataReady(event as object)
+      if event = invalid
+          ' Manual refresh path.
+      end if
       if m.top.authData = invalid then return
       if m.top.category = invalid then return
       if m.top.category = "" then return
@@ -160,12 +163,12 @@ sub init()
           populateGrid(m.items)
           if m.category <> "playlists"
               startInitialPosterRetryTimer()
-              startArtworkCache(m.items, 0)
           end if
       end if
   end sub
 
   sub onRefreshLists(event as object)
+      if event = invalid then return
       if m.top.authData = invalid then return
       category = m.top.category
       if category = invalid then return
@@ -201,27 +204,8 @@ sub init()
       populateGrid(items)
       if m.category <> "playlists"
           startInitialPosterRetryTimer()
-          startArtworkCache(items, 0)
       end if
   end sub
-
-  sub startArtworkCache(items as object, maxItems as integer)
-      if items = invalid or items.count() = 0 then return
-      m.top.artworkCacheRequest = {
-          items: items,
-          maxItems: maxItems,
-          includeBackdrops: false,
-          source: m.category,
-          nonce: createCacheNonce()
-      }
-  end sub
-
-  function createCacheNonce() as string
-      dt = createObject("roDateTime")
-      stamp = stri(dt.asSeconds()).trim()
-      randomPart = stri(rnd(1000000000)).trim()
-      return stamp + "-" + randomPart
-  end function
 
   sub applyGridLayout(category as string)
       grid = m.top.findNode("videoGrid")
@@ -301,9 +285,12 @@ sub init()
           else
               node.description = safeStr(item, ["create_time", "date"])
           end if
-          if iconUrl = ""
+          if iconUrl = "" and shouldAssignPosterInitially(category, idx, cols)
               poster = posterUrl(item, m.top.authData, category)
               if poster <> ""
+                  printArtworkPick("grid", categoryLabel(category), item, posterSource(item, m.top.authData, category))
+                  item.addReplace("posterRemoteUrl", poster)
+                  item.addReplace("posterUrl", poster)
                   node.HDPosterUrl = poster
                   node.SDPosterUrl = poster
               end if
@@ -322,7 +309,33 @@ sub init()
       grid.observeField("itemSelected", "onItemSelected")
   end sub
 
+  function shouldAssignPosterInitially(category as string, idx as integer, cols as integer) as boolean
+      if shouldDeferArtworkCache(category) then return idx < cols * 2
+      return true
+  end function
+
+  function shouldDeferArtworkCache(category as string) as boolean
+      return category = "movies" or category = "tvshows" or category = "homevideos" or category = "tvrecordings"
+  end function
+
+  function shouldCacheIanShowGridArtwork(category as string) as boolean
+      return category = "ians-shows" or (category = "tvshows" and tvShowProxyPosterAllowed(category))
+  end function
+
+  function categoryLabel(category as string) as string
+      if category = "tvshows" and tvShowProxyPosterAllowed(category) then return "ians-shows"
+      return category
+  end function
+
+  sub printArtworkPick(surface as string, category as string, item as object, source as string)
+      title = safeStr(item, ["title", "name", "file_name"])
+      idText = safeStr(item, ["id", "videoStationId", "posterId"])
+      mapper = safeStr(item, ["mapper_id", "mapperId"])
+      print "ARTWORK_PICK surface="; surface; " category="; category; " source="; source; " title="; title; " id="; idText; " mapper="; mapper
+  end sub
+
   sub onRefreshArtwork(event as object)
+      if event = invalid then return
       if m.items = invalid or m.items.count() = 0 then return
       grid = m.top.findNode("videoGrid")
       focused = m.focusedIndex
@@ -340,11 +353,11 @@ sub init()
       if idx < 0 then return
       m.focusedIndex = idx
       if m.category = "playlists" then return
-      schedulePosterRows(idx, m.lastKey)
+      schedulePosterRows(idx)
       startScrollPosterRetryTimer()
   end sub
 
-  sub schedulePosterRows(idx as integer, direction as string)
+  sub schedulePosterRows(idx as integer)
       if m.category = "playlists" then return
       if m.items = invalid or m.items.count() = 0 then return
       cols = columnsForCategory(m.category)
@@ -360,7 +373,7 @@ sub init()
       if endIdx >= m.items.count() then endIdx = m.items.count() - 1
       i = startIdx
       while i <= endIdx
-          enqueuePosterRetry(i, true)
+          enqueuePosterRetry(i, false)
           i = i + 1
       end while
 
@@ -381,7 +394,7 @@ sub init()
 
       i = 0
       while i <= endIdx
-          enqueuePosterRetry(i, true)
+          enqueuePosterRetry(i, false)
           i = i + 1
       end while
 
@@ -402,10 +415,11 @@ sub init()
   end sub
 
   sub onInitialPosterRetryTimer(event as object)
+      if event = invalid then return
       m.initialPosterRetryPass = m.initialPosterRetryPass + 1
       scheduleInitialPosterRows()
-      schedulePosterRows(m.focusedIndex, "")
-      if m.initialPosterRetryPass < 4
+      schedulePosterRows(m.focusedIndex)
+      if m.initialPosterRetryPass < 2
           timer = m.top.findNode("initialPosterRetryTimer")
           if timer <> invalid
               timer.control = "stop"
@@ -422,7 +436,8 @@ sub init()
   end sub
 
   sub onScrollPosterRetryTimer(event as object)
-      schedulePosterRows(m.focusedIndex, m.lastKey)
+      if event = invalid then return
+      schedulePosterRows(m.focusedIndex)
   end sub
 
   sub resetPosterRetryState()
@@ -443,7 +458,7 @@ sub init()
           attempts = 0
           m.posterRetryAttempts.addReplace(key, attempts)
       end if
-      if attempts >= 10 then return
+      if attempts >= maxPosterRetryAttempts() then return
       if not posterQueueContains(idx) then m.posterRetryQueue.push(idx)
   end sub
 
@@ -455,6 +470,7 @@ sub init()
   end function
 
   sub onPosterRetryTimer(event as object)
+      if event = invalid then return
       retryNextPosterBatch()
   end sub
 
@@ -474,14 +490,14 @@ sub init()
               attempts = 0
               existing = m.posterRetryAttempts.lookUp(key)
               if existing <> invalid then attempts = existing
-              if attempts >= 10
+              if attempts >= maxPosterRetryAttempts()
                   m.posterRetryQueue.delete(0)
               else
                   attempts = attempts + 1
                   m.posterRetryAttempts.addReplace(key, attempts)
                   retryPosterForIndex(idx, attempts)
                   m.posterRetryQueue.delete(0)
-                  if attempts < 10 then m.posterRetryQueue.push(idx)
+                  if attempts < maxPosterRetryAttempts() then m.posterRetryQueue.push(idx)
                   processed = processed + 1
               end if
           else
@@ -493,6 +509,10 @@ sub init()
 
   function posterAttemptKey(idx as integer) as string
       return stri(idx).trim()
+  end function
+
+  function maxPosterRetryAttempts() as integer
+      return 3
   end function
 
   function artworkNeedsRetry(idx as integer) as boolean
@@ -523,6 +543,7 @@ sub init()
       baseUrl = remotePosterUrl(item, m.top.authData, m.category)
       if not isHttpUrl(baseUrl) then return
       retryUrl = artworkRetryUrl(baseUrl, attempt)
+      printArtworkPick("grid-retry", categoryLabel(m.category), item, posterSource(item, m.top.authData, m.category))
       node.HDPosterUrl = retryUrl
       node.SDPosterUrl = retryUrl
   end sub
@@ -567,27 +588,33 @@ sub init()
       if category = "tvshows"
           idCandidates = []
           idCandidates.push(rawId)
-          mapperId = item.lookUp("mapper_id")
-          if mapperId <> invalid then idCandidates.push(mapperId)
+          savedCandidates = item.lookUp("idCandidates")
+          if savedCandidates <> invalid
+              for each candidate in savedCandidates
+                  idCandidates.push(candidate)
+              end for
+          end if
+          mapperId = safeStr(item, ["mapper_id", "mapperId"])
+          if mapperId <> "" and mapperId <> "0" then idCandidates.push(mapperId)
           tvshowId = item.lookUp("tvshow_id")
           if tvshowId <> invalid then idCandidates.push(tvshowId)
-
 	          m.top.selectedVideo = {
 	              type: "tvshow",
 	              id: rawId,
 	              idCandidates: idCandidates,
 	              title: safeStr(item, ["title", "name"]),
-	              mapperId: item.lookUp("mapper_id"),
+	              mapperId: mapperId,
 	              libraryId: m.top.libraryId,
 	              posterUrl: posterUrl(item, authData, category),
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
 	              backdropUrl: backdropUrl(item, authData),
 	              backdropRemoteUrl: safeStr(item, ["backdropRemoteUrl"]),
-	              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
-	              authData: authData
-	          }
-          return
-      end if
+		              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
+		              authData: authData
+		          }
+              print "DETAIL_HANDOFF type=tvshow category="; categoryLabel(category); " title="; safeStr(item, ["title", "name"]); " posterSource="; posterSource(item, authData, category); " backdropSource="; backdropSource(item, authData)
+	          return
+	      end if
 
       fileInfo = fileInfoFromItem(item)
       rawFileId = fileInfo.id
@@ -620,10 +647,11 @@ sub init()
 	              episodeNumber: safeStr(item, ["episodeNumber", "episode_number", "episodeText", "episode", "episode_num", "ep_num", "ep_index"]),
 	              episodeMeta: safeStr(item, ["episodeMeta"]),
 	              sourceListKey: sourceListKey,
-	              sourceItemKey: sourceItemKey,
-	              authData: authData
-	          }
-  end sub
+		              sourceItemKey: sourceItemKey,
+		              authData: authData
+		          }
+              print "DETAIL_HANDOFF type="; itemType; " category="; categoryLabel(category); " title="; safeStr(item, ["title", "name", "file_name"]); " posterSource="; posterSource(item, authData, category); " backdropSource="; backdropSource(item, authData)
+      end sub
 
   function localListKeyForCategory(category as string) as string
       if category = "local_favorites" then return "favorites"
@@ -733,29 +761,51 @@ sub init()
   end function
 
 	  function posterUrl(item as object, authData as dynamic, category as string) as string
-	      remotePoster = item.lookUp("posterRemoteUrl")
-	      if remotePoster <> invalid and remotePoster <> "" and isHttpUrl(remotePoster) then return remotePoster
-	      savedPoster = item.lookUp("posterUrl")
-	      if savedPoster <> invalid and savedPoster <> "" then return savedPoster
 	      if authData = invalid then return ""
-	      proxyBase = authData.proxyBaseUrl
-	      if proxyBase <> invalid and proxyBase <> ""
-	          mapperId = item.lookUp("mapper_id")
-	          if mapperId = invalid then mapperId = item.lookUp("mapperId")
-	          if mapperId = invalid then mapperId = item.lookUp("id")
-	          mapper = safeStr({ value: mapperId }, ["value"])
-	          mapper = mapper.trim()
-	          if mapper <> "" and mapper <> "0" then return proxyBase + "/poster?mapper_id=" + mapper + "&format=jpg"
+	      savedPoster = item.lookUp("posterUrl")
+	      remotePoster = item.lookUp("posterRemoteUrl")
+	      if isLocalArtworkUrl(savedPoster)
+	          return savedPoster
 	      end if
-	      return synologyPosterUrl(item, authData, category)
+	      synologyPoster = synologyPosterUrl(item, authData, category)
+	      if synologyPoster <> ""
+	          return synologyPoster
+	      end if
+	      if remotePoster <> invalid and remotePoster <> "" and isHttpUrl(remotePoster)
+	          return remotePoster
+	      end if
+	      if savedPoster <> invalid and savedPoster <> ""
+	          return savedPoster
+	      end if
+	      return ""
 	  end function
 
+      function posterSource(item as object, authData as dynamic, category as string) as string
+          savedPoster = item.lookUp("posterUrl")
+          if isLocalArtworkUrl(savedPoster) then return "cachefs"
+          if synologyPosterUrl(item, authData, category) <> "" then return "synology-poster"
+          remotePoster = item.lookUp("posterRemoteUrl")
+          if remotePoster <> invalid and remotePoster <> "" and isHttpUrl(remotePoster) then return "remote"
+          if savedPoster <> invalid and savedPoster <> "" then return "saved"
+          return "none"
+      end function
+
       function remotePosterUrl(item as object, authData as dynamic, category as string) as string
+          synologyPoster = synologyPosterUrl(item, authData, category)
+          if synologyPoster <> "" then return synologyPoster
           remotePoster = safeStr(item, ["posterRemoteUrl"])
           if isHttpUrl(remotePoster) then return remotePoster
           savedPoster = safeStr(item, ["posterUrl"])
           if isHttpUrl(savedPoster) then return savedPoster
           return posterUrl(item, authData, category)
+      end function
+
+      function tvShowProxyPosterAllowed(category as string) as boolean
+          if category <> "tvshows" and category <> "ians-shows" then return false
+          if m.top.libraryId = invalid then return false
+          libraryId = safeStr({ value: m.top.libraryId }, ["value"])
+          libraryId = libraryId.trim()
+          return libraryId <> "" and libraryId <> "0"
       end function
 
   function isHttpUrl(url as dynamic) as boolean
@@ -791,8 +841,11 @@ sub init()
 	      baseUrl = authData.baseUrl
 	      sid = authData.sid
 	      if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = "" then return ""
+	      token = ""
+	      if authData.synoToken <> invalid then token = authData.synoToken
 
-	      id = safeStr(item, ["id"])
+	      id = safeStr(item, ["posterId", "videoStationId", "id"])
+	      if id = "" or id = "0" then id = safeStr(item, ["mapper_id", "mapperId"])
 	      id = id.trim()
 	      if id = "" or id = "0" then return ""
 
@@ -807,7 +860,43 @@ sub init()
 	          if savedType = "homevideo" then mediaType = "home_video"
 	      end if
 
-	      return baseUrl + "/webapi/VideoStation/poster.cgi?api=SYNO.VideoStation.Poster&version=2&method=getimage&_sid=" + sid + "&id=" + id + "&type=" + mediaType + "&poster_mtime=" + posterMtime(item)
+	      mtime = posterMtime(item)
+	      if mediaType = "tvshow"
+	          url = baseUrl + "/webapi/entry.cgi?type=tvshow&id=" + id
+	          if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)
+	          url = url + "&api=SYNO.VideoStation2.Poster&method=get&version=1&resolution=%222x%22"
+	          url = url + "&_sid=" + sid
+	          if token <> "" then url = url + "&SynoToken=" + token
+	          return url
+	      end if
+
+	      url = baseUrl + "/webapi/entry.cgi?api=SYNO.VideoStation2.Poster&version=1&method=get&_sid=" + sid + "&id=" + id + "&type=" + mediaType
+	      if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)
+	      if token <> "" then url = url + "&SynoToken=" + token
+	      return url
+	  end function
+
+	  function escapeQueryValue(value as string) as string
+	      out = ""
+	      idx = 1
+	      while idx <= len(value)
+	          ch = mid(value, idx, 1)
+	          if ch = " "
+	              out = out + "%20"
+	          else if ch = ":"
+	              out = out + "%3A"
+	          else if ch = "+"
+	              out = out + "%2B"
+	          else if ch = "#"
+	              out = out + "%23"
+	          else if ch = "%"
+	              out = out + "%25"
+	          else
+	              out = out + ch
+	          end if
+	          idx = idx + 1
+	      end while
+	      return out
 	  end function
 
 	  function posterMtime(item as object) as string
@@ -825,16 +914,76 @@ sub init()
 	      savedBackdrop = item.lookUp("backdropUrl")
 	      if savedBackdrop <> invalid and savedBackdrop <> "" then return savedBackdrop
 	      if authData = invalid then return ""
-	      proxyBase = authData.proxyBaseUrl
-	      if proxyBase = invalid or proxyBase = "" then return ""
-	      mapperId = item.lookUp("mapper_id")
-	      if mapperId = invalid then mapperId = item.lookUp("mapperId")
-	      mapper = safeStr({ value: mapperId }, ["value"])
-	      mapper = mapper.trim()
-	      if mapper = "" or mapper = "0" then return ""
-	      return proxyBase + "/backdrop?mapper_id=" + mapper + "&format=jpg"
+          synologyBackdrop = synologyBackdropUrl(item, authData)
+          if synologyBackdrop <> "" then return synologyBackdrop
+	      return ""
 	  end function
 
+      function backdropSource(item as object, authData as dynamic) as string
+          savedBackdrop = item.lookUp("backdropUrl")
+          if isLocalArtworkUrl(savedBackdrop) then return "cachefs"
+          if savedBackdrop <> invalid and savedBackdrop <> "" then return backdropSourceFromUrl(savedBackdrop)
+          if synologyBackdropUrl(item, authData) <> "" then return "synology-backdrop"
+          if authData = invalid then return "none"
+          return "none"
+      end function
+
+      function backdropSourceFromUrl(url as dynamic) as string
+          if url = invalid then return "none"
+          if type(url) <> "roString" and type(url) <> "String" then return "saved"
+          lower = lcase(url)
+          if instr(1, lower, "syno.videostation2.backdrop") > 0 then return "synology-backdrop"
+          return "saved"
+      end function
+
+      function synologyBackdropUrl(item as object, authData as dynamic) as string
+          if authData = invalid then return ""
+          baseUrl = authData.baseUrl
+          sid = authData.sid
+          if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = "" then return ""
+          id = safeStr(item, ["videoStationId", "id", "mapper_id", "mapperId"])
+          id = id.trim()
+          if id = "" or id = "0" then return ""
+          mediaType = "movie"
+          category = m.category
+          if category = "tvshows" then mediaType = "tvshow"
+          if category = "homevideos" then mediaType = "home_video"
+          if category = "tvrecordings" then mediaType = "tv_record"
+          savedType = item.lookUp("type")
+          if savedType <> invalid and savedType <> ""
+              if savedType = "episode" then mediaType = "tvshow_episode"
+              if savedType = "movie" then mediaType = "movie"
+              if savedType = "homevideo" then mediaType = "home_video"
+          end if
+          mtime = backdropMtime(item)
+          mapper = safeStr(item, ["mapper_id", "mapperId"])
+          mapper = mapper.trim()
+          if mapper = "" or mapper = "0" then mapper = id
+          if mapper <> "" and mapper <> "0"
+              url = baseUrl + "/webapi/entry.cgi?mapper_id=" + mapper
+              if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)
+              url = url + "&api=SYNO.VideoStation2.Backdrop&method=get&version=1"
+              url = url + "&_sid=" + sid
+              if authData.synoToken <> invalid and authData.synoToken <> "" then url = url + "&SynoToken=" + authData.synoToken
+              return url
+          end if
+
+          url = baseUrl + "/webapi/entry.cgi?api=SYNO.VideoStation2.Backdrop&version=1&method=get&_sid=" + sid + "&id=" + id + "&type=" + mediaType
+          if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)
+          if authData.synoToken <> invalid and authData.synoToken <> "" then url = url + "&SynoToken=" + authData.synoToken
+          return url
+      end function
+
+      function backdropMtime(item as object) as string
+          mtime = safeStr(item, ["backdrop_mtime", "backdropMtime"])
+          if mtime <> "" then return mtime.trim()
+          additional = item.lookUp("additional")
+          if additional <> invalid
+              mtime = safeStr(additional, ["backdrop_mtime", "backdropMtime"])
+              if mtime <> "" then return mtime.trim()
+          end if
+          return ""
+      end function
 
     ' When the VideoGrid Group itself gains focus (e.g. after doBack()),
     ' redirect to the inner grid node so the d-pad works immediately.
@@ -865,6 +1014,7 @@ sub init()
           return true
       end if
       if key = "back"
+          if m.focusArea = "nav" then return false
           if left(m.category, 6) = "local_"
               m.top.backPressed = true
               return true

@@ -1,42 +1,43 @@
 # Synology DS Video for Roku
 
-A Roku channel for browsing and playing videos from Synology Video Station. It supports Movie, TV Show, Home Video, TV Recording, custom Video Station libraries, playlists, favorites/watch list/shared videos, metadata artwork, Roku-side artwork caching, and optional NAS-side FFmpeg transcoding for files Roku cannot play directly.
+A Roku channel for browsing and playing Synology Video Station libraries, with optional NAS-side helpers for Roku-friendly transcoding and subtitle downloads.
 
 ## Features
 
-- Browse Synology Video Station libraries from Roku.
-- Movie, TV show, episode, home video, TV recording, playlist, favorites, watch list, and shared-video views.
-- TV seasons and episode metadata from Video Station.
-- Posters, episode thumbnails, and backdrops.
-- Roku device artwork cache using `cachefs:/`.
-- Optional HTTPS FFmpeg HLS proxy for AVI/MKV/transcode-needed videos.
-- Direct playback for Roku-compatible files when possible.
+- Browse Movie, TV Show, Home Video, TV Recording, custom Video Station libraries, playlists, favorites, watch list, and shared videos.
+- Show TV seasons, episode metadata, resume points, posters, episode thumbnails, and backdrops.
+- Load artwork and captions directly from Synology when possible.
+- Stream Roku-compatible MP4/M4V/MOV files directly.
+- Transcode incompatible files through a NAS FFmpeg HLS service.
+- Optionally convert incompatible files to MP4 on the NAS and write `.vsmeta` sidecars.
+- Optionally download `.srt` subtitles for existing and newly indexed files.
 
 ## Requirements
 
 - Synology DSM with Video Station installed and indexed.
 - Roku device with Developer Mode enabled.
 - A computer on the same network for sideloading the Roku channel.
-- For transcoding:
+- For NAS helper services:
   - Node.js on the NAS.
   - FFmpeg on the NAS.
   - TCP port `8099` reachable by the Roku, or an HTTPS reverse proxy.
+  - Optional OpenSubtitles API settings for automatic subtitle downloads.
 
 ## Roku Installation
 
-Enable Developer Mode on the Roku, then package this channel from the repository root:
+Package this channel from the repository root:
 
 ```sh
 zip -r /tmp/roku-ds-video.zip manifest source components images -x '*.DS_Store'
 ```
 
-Open the Roku developer installer in a browser:
+Open the Roku developer installer:
 
 ```text
 http://ROKU_IP_ADDRESS/plugin_install
 ```
 
-Upload `/tmp/roku-ds-video.zip`, install it, then launch the development channel from the Roku home screen.
+Upload `/tmp/roku-ds-video.zip`, install it, then launch the development channel.
 
 You can also install with curl:
 
@@ -53,35 +54,134 @@ curl --digest -u rokudev:YOUR_ROKU_DEV_PASSWORD \
 On first launch, enter:
 
 - NAS address: hostname or IP only, such as `nas.example.com` or `10.0.1.74`.
-- Port: your DSM Video Station port, such as `5000`, `5001`, or a custom port.
+- Port: your DSM Video Station port.
 - Protocol: HTTP or HTTPS.
 - Username and password: Synology account with Video Station access.
 - Transcode port: normally `8099`.
 
-Credentials are saved on the Roku. After that, the app auto logs in. Use `Settings` from the top navigation bar to edit them.
+Credentials are saved on the Roku. Use `Settings` from the top navigation bar to edit them.
 
-## NAS FFmpeg Proxy
+## NAS Tools Layout
 
-The proxy is needed for files that Roku cannot play directly, such as many AVI and MKV files. It also exposes Video Station database artwork and metadata endpoints used by the Roku app.
-
-Copy the `tools` folder to the NAS. Recommended layout:
+Copy the whole `tools` folder to the NAS. The expected layout is:
 
 ```text
 /volume1/docker/roku-ds-video-tools/
 /volume1/docker/roku-ds-video-tools/ffmpeg-hls-proxy.js
+/volume1/docker/roku-ds-video-tools/download-subtitles.js
+/volume1/docker/roku-ds-video-tools/subtitle-watcher.js
+/volume1/docker/roku-ds-video-tools/library-converter.js
+/volume1/docker/roku-ds-video-tools/generate-vsmeta.js
 /volume1/docker/roku-ds-video-tools/nas/start-hls-proxy.sh
-/volume1/docker/roku-ds-video-tools/nas/stop-hls-proxy.sh
+/volume1/docker/roku-ds-video-tools/nas/start-on-demand.sh
+/volume1/docker/roku-ds-video-tools/nas/start-full-automation.sh
 ```
 
-SSH into the NAS and start it:
+The launcher scripts read `/volume1/docker/roku-ds-video-tools/.env` when present.
+
+Example `.env` for subtitles and HTTPS:
+
+```sh
+OPEN_SUBTITLES_API_KEY=your-api-key
+OPEN_SUBTITLES_LANGUAGE=en
+ROKU_HLS_HTTPS_CERT=/path/to/fullchain.pem
+ROKU_HLS_HTTPS_KEY=/path/to/privkey.pem
+ROKU_HLS_BASE_URL=https://your-hostname:8099
+```
+
+## Build Modes
+
+### On-Demand Mode
+
+Use this mode when you want subtitles downloaded automatically, but videos converted only when Roku plays an incompatible file.
 
 ```sh
 cd /volume1/docker/roku-ds-video-tools
-chmod +x nas/start-hls-proxy.sh nas/stop-hls-proxy.sh
-nas/start-hls-proxy.sh
+chmod +x nas/*.sh
+nas/start-on-demand.sh
 ```
 
-Check from another machine:
+Starts:
+
+- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback.
+- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files.
+
+By default the subtitle watcher scans movie and TV libraries only (`Movies`, `New Stuff`, `TV Shows`, and `Ian's Shows`) to avoid false subtitle matches for home videos. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
+
+Logs:
+
+```text
+/tmp/roku-hls-proxy.log
+/tmp/roku-subtitle-watcher.log
+```
+
+Stop:
+
+```sh
+cd /volume1/docker/roku-ds-video-tools && nas/stop-on-demand.sh
+```
+
+### Full Automation Mode
+
+Use this mode when you want the NAS to keep the library Roku-ready in the background.
+
+```sh
+cd /volume1/docker/roku-ds-video-tools
+chmod +x nas/*.sh
+nas/start-full-automation.sh
+```
+
+Starts:
+
+- `ffmpeg-hls-proxy.js`: on-demand playback fallback.
+- `subtitle-watcher.js`: subtitles for existing and newly indexed files.
+- `library-converter.js --watch --delete-original`: scans on first start, then polls for newly indexed incompatible videos, converts them to MP4, writes `.vsmeta`, indexes the replacement, and removes the original after the replacement succeeds.
+
+Logs:
+
+```text
+/tmp/roku-hls-proxy.log
+/tmp/roku-subtitle-watcher.log
+/tmp/roku-library-converter.log
+```
+
+Stop:
+
+```sh
+cd /volume1/docker/roku-ds-video-tools && nas/stop-full-automation.sh
+```
+
+Preview conversion without changing files:
+
+```sh
+cd /volume1/docker/roku-ds-video-tools
+/volume1/@appstore/homebridge/app/bin/node library-converter.js --once --dry-run
+```
+
+Run subtitle scan once without changing files:
+
+```sh
+cd /volume1/docker/roku-ds-video-tools
+/volume1/@appstore/homebridge/app/bin/node subtitle-watcher.js --once --dry-run
+```
+
+## DSM Task Scheduler
+
+For on-demand mode at boot, create a triggered task as root:
+
+```sh
+cd /volume1/docker/roku-ds-video-tools && nas/start-on-demand.sh
+```
+
+For full automation at boot:
+
+```sh
+cd /volume1/docker/roku-ds-video-tools && nas/start-full-automation.sh
+```
+
+## Proxy Health
+
+Check the HLS/transcode service:
 
 ```sh
 curl http://NAS_IP_OR_HOSTNAME:8099/health
@@ -93,30 +193,7 @@ Expected:
 {"ok":true,"sessions":0}
 ```
 
-Stop it:
-
-```sh
-cd /volume1/docker/roku-ds-video-tools
-nas/stop-hls-proxy.sh
-```
-
-Logs are written to:
-
-```text
-/tmp/roku-hls-proxy.log
-```
-
-## Start Proxy at Boot
-
-In DSM Task Scheduler, create a triggered task that runs as `root` at boot:
-
-```sh
-cd /volume1/docker/roku-ds-video-tools && nas/start-hls-proxy.sh
-```
-
 ## HTTPS Proxy Mode
-
-For offsite use, Roku should connect to an HTTPS endpoint with a trusted certificate.
 
 The proxy can serve HTTPS directly:
 
@@ -128,7 +205,7 @@ ROKU_HLS_BASE_URL=https://your-hostname.example.com:8099 \
 nas/start-hls-proxy.sh
 ```
 
-If you use DSM Reverse Proxy instead, point the reverse proxy to `127.0.0.1:8099` and set:
+If you use DSM Reverse Proxy instead, point it to `127.0.0.1:8099` and set:
 
 ```sh
 ROKU_HLS_BASE_URL=https://your-hostname.example.com/roku-hls \
@@ -136,69 +213,53 @@ ROKU_HLS_PATH_PREFIX=/roku-hls \
 nas/start-hls-proxy.sh
 ```
 
-Then use `your-hostname.example.com` and transcode port/path settings that match your public endpoint.
-
 ## FFmpeg and Node Paths
 
-The NAS start script checks common Synology locations:
-
-- `/var/packages/ffmpeg7/target/bin/ffmpeg`
-- `/var/packages/ffmpeg/target/bin/ffmpeg`
-- `ffmpeg` in `PATH`
-- Node.js in `PATH`
-- Synology Node.js package paths
-
-You can override paths:
+The NAS scripts check common Synology paths for FFmpeg and Node.js. You can override paths:
 
 ```sh
 FFMPEG=/path/to/ffmpeg NODE_BIN=/path/to/node nas/start-hls-proxy.sh
 ```
 
-## Artwork Cache
+## Migrating Existing `@roku-transcodes` Files
 
-The Roku app stores downloaded posters and backdrops in Roku cache storage:
+If you already have completed MP4s in `/volume1/video/@roku-transcodes`, migrate them into regular library folders:
 
-```text
-cachefs:/ds_video_image_cache
+```sh
+cd /volume1/docker/roku-ds-video-tools
+/volume1/@appstore/homebridge/app/bin/node migrate-transcodes.js --dry-run
+/volume1/@appstore/homebridge/app/bin/node migrate-transcodes.js --prune-root
 ```
-
-On launch, the app starts a background pre-cache job that walks Video Station libraries and stores missing artwork. The first launch can be busier while the cache warms. Later launches should reuse cached images unless Roku clears cache storage.
 
 ## Troubleshooting
 
 If playback fails:
 
-- Confirm the NAS proxy is running: `curl http://NAS_IP:8099/health`.
-- Confirm the Roku can reach the NAS/proxy port.
-- For HTTPS, confirm the certificate is trusted and the hostname matches.
-- Check `/tmp/roku-hls-proxy.log` on the NAS.
-- Try an MP4 file first to confirm direct playback works.
+- Confirm the proxy is running: `curl http://NAS_IP:8099/health`.
+- Confirm Roku can reach the NAS/proxy port.
+- Check `/tmp/roku-hls-proxy.log`.
+
+If subtitles are missing:
+
+- Confirm `.env` contains `OPEN_SUBTITLES_API_KEY`.
+- Check `/tmp/roku-subtitle-watcher.log`.
+- OpenSubtitles free/API quotas may pause downloads until the reset time in the log.
+- Run `node subtitle-watcher.js --once --dry-run` to see what would be processed.
+
+If conversion is not happening:
+
+- Check `/tmp/roku-library-converter.log`.
+- Confirm Video Station has indexed the file.
+- Run `node library-converter.js --once --dry-run`.
 
 If artwork is missing:
 
-- Leave the app open for a few minutes after first launch so the cache can warm.
-- Confirm the NAS proxy can read Video Station metadata.
-- Check the proxy log for poster/backdrop errors.
-
-If a library is missing or duplicated:
-
-- Confirm the library is public/visible in Video Station.
+- Confirm the item has Video Station poster/backdrop metadata or a `.vsmeta` sidecar.
 - Re-index Video Station metadata on the NAS.
-- Restart the NAS proxy after Video Station database changes.
 
 ## Development
 
-The channel source is standard Roku SceneGraph/BrightScript:
-
-```text
-manifest
-source/
-components/
-images/
-tools/
-```
-
-Validate/build with BrightScript Compiler if available:
+Validate/build with BrightScript Compiler:
 
 ```sh
 npx bsc --copy-to-staging=false
@@ -211,4 +272,3 @@ zip -r /tmp/roku-ds-video.zip manifest source components images -x '*.DS_Store'
 ```
 
 Before publishing or sharing a build, update `build_version` in `manifest`.
-
