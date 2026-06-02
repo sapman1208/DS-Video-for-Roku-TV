@@ -60,9 +60,17 @@ Useful settings:
 - `ROKU_SERVICE_MODE=full` also starts the background library converter.
 - `ROKU_HLS_PORT=8099` should match the Roku app.
 - `ROKU_HLS_BASE_URL=https://your-hostname:8099` is used for subtitle/proxy URLs.
+- Leave `ROKU_HLS_ROOT=` blank for the package-owned temp folder on a clean DSM install.
+- Leave `ROKU_HLS_MP4_DIR=` blank until you grant the package user write access to a shared media folder.
 - `SUBDL_API_KEY=` enables SubDL downloads.
 - `OPEN_SUBTITLES_API_KEY=` enables OpenSubtitles downloads.
 
 Restart the package after changing config.
 
 Because DSM 7 runs this package as `RokuDSVideoTools`, grant that package user read access to your media folders and write access to any folders where it should save subtitles, VSMETA files, or converted MP4 files.
+
+If Package Center says the service failed to start, check:
+
+```text
+/var/packages/RokuDSVideoTools/var/package-start.log
+```

@@ -5,15 +5,18 @@ PKG_DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG_NAME/target}"
 PKG_VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG_NAME/var}"
 TOOLS_DIR="$PKG_DEST/tools"
 CONFIG_FILE="$PKG_VAR/config.env"
+START_LOG="$PKG_VAR/package-start.log"
 
 load_config() {
-  mkdir -p "$PKG_VAR"
+  mkdir -p "$PKG_VAR" "$PKG_VAR/hls" "$PKG_VAR/transcodes"
   if [ -f "$CONFIG_FILE" ]; then
     set -a
     . "$CONFIG_FILE"
     set +a
   fi
 
+  export ROKU_HLS_ROOT="${ROKU_HLS_ROOT:-$PKG_VAR/hls}"
+  export ROKU_HLS_MP4_DIR="${ROKU_HLS_MP4_DIR:-$PKG_VAR/transcodes}"
   export ROKU_HLS_PID="${ROKU_HLS_PID:-$PKG_VAR/roku-hls-proxy.pid}"
   export ROKU_HLS_LOG="${ROKU_HLS_LOG:-$PKG_VAR/roku-hls-proxy.log}"
   export ROKU_SUBTITLE_PID="${ROKU_SUBTITLE_PID:-$PKG_VAR/roku-subtitle-watcher.pid}"
@@ -29,16 +32,23 @@ is_running() {
 
 start_pkg() {
   load_config
+  {
+    echo "---- $(date '+%Y-%m-%d %H:%M:%S') start ----"
+    echo "package var: $PKG_VAR"
+    echo "hls root: $ROKU_HLS_ROOT"
+    echo "mp4 dir: $ROKU_HLS_MP4_DIR"
+    echo "mode: ${ROKU_SERVICE_MODE:-on-demand}"
+  } >>"$START_LOG" 2>&1
   mode="${ROKU_SERVICE_MODE:-on-demand}"
   case "$mode" in
     full|full-automation)
-      "$TOOLS_DIR/nas/start-full-automation.sh"
+      "$TOOLS_DIR/nas/start-full-automation.sh" >>"$START_LOG" 2>&1
       ;;
     proxy)
-      "$TOOLS_DIR/nas/start-hls-proxy.sh"
+      "$TOOLS_DIR/nas/start-hls-proxy.sh" >>"$START_LOG" 2>&1
       ;;
     on-demand|*)
-      "$TOOLS_DIR/nas/start-on-demand.sh"
+      "$TOOLS_DIR/nas/start-on-demand.sh" >>"$START_LOG" 2>&1
       ;;
   esac
 }
@@ -56,6 +66,75 @@ status_pkg() {
   exit 1
 }
 
+find_node() {
+  if [ -n "${NODE_BIN:-}" ] && [ -x "$NODE_BIN" ]; then
+    echo "$NODE_BIN"
+  elif command -v node >/dev/null 2>&1; then
+    command -v node
+  elif [ -x /volume1/@appstore/homebridge/app/bin/node ]; then
+    echo /volume1/@appstore/homebridge/app/bin/node
+  elif [ -x /var/packages/Node.js_v20/target/usr/local/bin/node ]; then
+    echo /var/packages/Node.js_v20/target/usr/local/bin/node
+  elif [ -x /var/packages/Node.js_v18/target/usr/local/bin/node ]; then
+    echo /var/packages/Node.js_v18/target/usr/local/bin/node
+  fi
+}
+
+find_ffmpeg() {
+  if [ -n "${FFMPEG:-}" ] && [ -x "$FFMPEG" ]; then
+    echo "$FFMPEG"
+  elif [ -x /var/packages/ffmpeg7/target/bin/ffmpeg ]; then
+    echo /var/packages/ffmpeg7/target/bin/ffmpeg
+  elif [ -x /var/packages/ffmpeg/target/bin/ffmpeg ]; then
+    echo /var/packages/ffmpeg/target/bin/ffmpeg
+  elif command -v ffmpeg >/dev/null 2>&1; then
+    command -v ffmpeg
+  fi
+}
+
+diagnose_pkg() {
+  load_config
+  echo "Roku DS Video Tools diagnostic"
+  echo "package destination: $PKG_DEST"
+  echo "package var: $PKG_VAR"
+  echo "config: $CONFIG_FILE"
+  echo "service mode: ${ROKU_SERVICE_MODE:-on-demand}"
+  echo "hls root: $ROKU_HLS_ROOT"
+  echo "mp4 dir: $ROKU_HLS_MP4_DIR"
+
+  node_path="$(find_node || true)"
+  if [ -n "$node_path" ]; then
+    echo "node: $node_path"
+  else
+    echo "node: missing"
+  fi
+
+  ffmpeg_path="$(find_ffmpeg || true)"
+  if [ -n "$ffmpeg_path" ]; then
+    echo "ffmpeg: $ffmpeg_path"
+  else
+    echo "ffmpeg: missing"
+  fi
+
+  if [ -d /var/packages/VideoStation ]; then
+    echo "Video Station: installed"
+  else
+    echo "Video Station: missing"
+  fi
+
+  if [ -w "$ROKU_HLS_ROOT" ]; then
+    echo "hls root writable: yes"
+  else
+    echo "hls root writable: no"
+  fi
+
+  if [ -w "$ROKU_HLS_MP4_DIR" ]; then
+    echo "mp4 dir writable: yes"
+  else
+    echo "mp4 dir writable: no"
+  fi
+}
+
 case "$1" in
   start)
     start_pkg
@@ -68,12 +147,16 @@ case "$1" in
     ;;
   log)
     load_config
+    echo "package start: $START_LOG"
     echo "proxy: $ROKU_HLS_LOG"
     echo "subtitle watcher: $ROKU_SUBTITLE_LOG"
     echo "library converter: $ROKU_CONVERT_LOG"
     ;;
+  diagnose)
+    diagnose_pkg
+    ;;
   *)
-    echo "Usage: $0 {start|stop|status|log}" >&2
+    echo "Usage: $0 {start|stop|status|log|diagnose}" >&2
     exit 1
     ;;
 esac
