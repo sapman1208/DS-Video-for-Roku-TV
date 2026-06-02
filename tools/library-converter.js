@@ -4,6 +4,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const FFMPEG = process.env.FFMPEG || "/var/packages/ffmpeg7/target/bin/ffmpeg";
+const FFPROBE = process.env.FFPROBE || FFMPEG.replace(/ffmpeg(?:\.exe)?$/i, "ffprobe");
 const NODE_BIN = process.env.ROKU_HLS_NODE || process.execPath;
 const VSMETA_GENERATOR = process.env.ROKU_HLS_VSMETA_GENERATOR || path.join(__dirname, "generate-vsmeta.js");
 const SUBTITLE_DOWNLOADER = process.env.ROKU_HLS_SUBTITLE_DOWNLOADER || path.join(__dirname, "download-subtitles.js");
@@ -16,6 +17,7 @@ const DELETE_ORIGINAL = process.argv.includes("--delete-original") || process.en
 const LOCK_FILE = process.env.ROKU_CONVERT_LOCK || "/tmp/roku-library-converter.lock";
 const DIRECT_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 const VIDEO_EXTENSIONS = new Set([".avi", ".mkv", ".webm", ".m2ts", ".wmv", ".mpg", ".mpeg", ".ts", ".m2v", ".flv"]);
+const TEXT_SUBTITLE_CODECS = new Set(["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"]);
 
 function sqlEscape(value) {
   return String(value || "").replace(/'/g, "''");
@@ -223,6 +225,51 @@ function downloadSubtitles(target) {
   if (detail) console.log(detail);
 }
 
+function textSubtitleStreams(source) {
+  if (!fs.existsSync(FFPROBE)) return [];
+  const result = spawnSync(FFPROBE, [
+    "-v", "error",
+    "-select_streams", "s",
+    "-show_entries", "stream=index,codec_name",
+    "-of", "json",
+    source,
+  ], { encoding: "utf8", timeout: 30000 });
+  if (result.status !== 0) return [];
+  try {
+    const parsed = JSON.parse(result.stdout || "{}");
+    return (parsed.streams || [])
+      .filter((stream) => TEXT_SUBTITLE_CODECS.has(String(stream.codec_name || "").toLowerCase()))
+      .map((stream) => Number(stream.index))
+      .filter((index) => Number.isInteger(index));
+  } catch {
+    return [];
+  }
+}
+
+function subtitleArgsForSource(source) {
+  const args = [];
+  for (const index of textSubtitleStreams(source)) args.push("-map", `0:${index}`);
+  if (args.length > 0) args.push("-c:s", "mov_text");
+  return args;
+}
+
+function copySidecarSubtitles(source, target) {
+  const sourceParsed = path.parse(source);
+  const targetParsed = path.parse(target);
+  const escapedBase = sourceParsed.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sidecarRe = new RegExp(`^${escapedBase}(?:\\.[A-Za-z]{2,3})?\\.(srt|vtt)$`, "i");
+  let copied = 0;
+  for (const entry of fs.readdirSync(sourceParsed.dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !sidecarRe.test(entry.name)) continue;
+    const suffix = entry.name.slice(sourceParsed.name.length);
+    const destination = path.join(targetParsed.dir, `${targetParsed.name}${suffix}`);
+    if (fs.existsSync(destination)) continue;
+    fs.copyFileSync(path.join(sourceParsed.dir, entry.name), destination);
+    copied += 1;
+  }
+  return copied;
+}
+
 function convertOne(source) {
   if (!fs.existsSync(source)) return { action: "skip", reason: "missing", source };
   const target = targetPathForSource(source);
@@ -234,7 +281,7 @@ function convertOne(source) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.tmp.mp4`;
   fs.rmSync(tmp, { force: true });
-  const result = spawnSync(FFMPEG, [
+  const ffmpegArgs = [
     "-hide_banner",
     "-loglevel", "warning",
     "-y",
@@ -250,15 +297,18 @@ function convertOne(source) {
     "-c:a", "aac",
     "-ac", "2",
     "-b:a", "160k",
+    ...subtitleArgsForSource(source),
     "-movflags", "+faststart",
     tmp,
-  ], { encoding: "utf8", timeout: 24 * 60 * 60 * 1000 });
+  ];
+  const result = spawnSync(FFMPEG, ffmpegArgs, { encoding: "utf8", timeout: 24 * 60 * 60 * 1000 });
 
   if (result.status !== 0) {
     fs.rmSync(tmp, { force: true });
     return { action: "error", source, target, error: (result.stderr || result.stdout || `ffmpeg exited ${result.status}`).trim().slice(0, 500) };
   }
   fs.renameSync(tmp, target);
+  const sidecarSubtitles = copySidecarSubtitles(source, target);
   generateVsmeta(source, target);
   downloadSubtitles(target);
   if (DELETE_ORIGINAL) {
@@ -266,7 +316,7 @@ function convertOne(source) {
     fs.rmSync(`${source}.vsmeta`, { force: true });
   }
   indexReplacement(source, target);
-  return { action: "converted", source, target, deleteOriginal: DELETE_ORIGINAL };
+  return { action: "converted", source, target, deleteOriginal: DELETE_ORIGINAL, sidecarSubtitles };
 }
 
 function scanOnce() {

@@ -135,7 +135,7 @@ Starts:
 
 - `ffmpeg-hls-proxy.js`: on-demand playback fallback.
 - `subtitle-watcher.js`: subtitles for existing and newly indexed files.
-- `library-converter.js --watch --delete-original`: scans on first start, then polls for newly indexed incompatible videos, converts them to MP4, writes `.vsmeta`, indexes the replacement, and removes the original after the replacement succeeds.
+- `library-converter.js --watch --delete-original`: scans on first start, then polls for newly indexed incompatible videos, converts them to MP4, writes `.vsmeta`, indexes the replacement, and removes the original after the replacement succeeds. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`, and matching sidecar `.srt`/`.vtt` files are copied to the new MP4 basename.
 
 Logs:
 
