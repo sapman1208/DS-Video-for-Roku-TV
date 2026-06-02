@@ -15,6 +15,11 @@ const LOCK_FILE = process.env.ROKU_SUBTITLE_LOCK || "/tmp/roku-subtitle-watcher.
 const VIDEO_RE = /\.(avi|mkv|mp4|m4v|mov|wmv|mpg|mpeg|ts|m2ts|m2v|flv|webm)$/i;
 const INCLUDE_HOME = process.env.ROKU_SUBTITLE_INCLUDE_HOME === "1";
 const DB_UNAVAILABLE_RE = /user VideoStation does not exist|Unknown id: VideoStation|No passwd entry|Permission denied|sudo:.*password|not in the sudoers/i;
+const MEDIA_ROOTS = (process.env.ROKU_MEDIA_ROOTS || process.env.ROKU_SUBTITLE_MEDIA_ROOTS || "")
+  .split(":")
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+const MAX_DEPTH = Number(process.env.ROKU_SUBTITLE_MAX_DEPTH || 12);
 
 function isSubtitleLibraryPath(filePath) {
   const norm = String(filePath || "").replace(/\\/g, "/").toLowerCase();
@@ -68,7 +73,37 @@ function hasSubtitle(filePath) {
   return subtitleTargets(filePath).some((candidate) => fs.existsSync(candidate));
 }
 
+function walkMediaRoot(root, depth = 0, out = []) {
+  if (LIMIT > 0 && out.length >= LIMIT) return out;
+  if (depth > MAX_DEPTH) return out;
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch (error) {
+    console.log(JSON.stringify({ action: "subtitle-root-skip", root, reason: error.message }));
+    return out;
+  }
+  for (const entry of entries) {
+    if (LIMIT > 0 && out.length >= LIMIT) break;
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      walkMediaRoot(fullPath, depth + 1, out);
+    } else if (entry.isFile() && VIDEO_RE.test(fullPath) && isSubtitleLibraryPath(fullPath) && (FORCE || !hasSubtitle(fullPath))) {
+      out.push(fullPath);
+    }
+  }
+  return out;
+}
+
+function discoverFilesystemCandidates() {
+  const candidates = [];
+  for (const root of MEDIA_ROOTS) walkMediaRoot(root, 0, candidates);
+  return [...new Set(candidates)].sort();
+}
+
 function discoverCandidates() {
+  if (MEDIA_ROOTS.length > 0) return discoverFilesystemCandidates();
   if (!canUseVideoStationDb()) {
     console.log(JSON.stringify({ action: "subtitle-scan-skip", reason: "VideoStation user missing" }));
     return [];
@@ -112,7 +147,7 @@ function downloadSubtitles(filePath) {
 function scanOnce() {
   const candidates = discoverCandidates();
   const summary = { checked: candidates.length, downloaded: 0, skipped: 0, errors: 0 };
-  console.log(JSON.stringify({ action: "subtitle-scan", candidates: candidates.length, dryRun: DRY_RUN, force: FORCE }));
+  console.log(JSON.stringify({ action: "subtitle-scan", source: MEDIA_ROOTS.length > 0 ? "filesystem" : "videostation-db", roots: MEDIA_ROOTS, candidates: candidates.length, dryRun: DRY_RUN, force: FORCE }));
   for (const filePath of candidates) {
     const result = downloadSubtitles(filePath);
     if (result.action === "downloaded" || result.action === "would-download") summary.downloaded += 1;

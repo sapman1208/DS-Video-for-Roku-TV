@@ -89,6 +89,7 @@ Useful settings:
 - Leave `ROKU_HLS_MP4_DIR=` blank until you grant the package user write access to a shared media folder.
 - `SUBDL_API_KEY=` enables SubDL downloads.
 - `OPEN_SUBTITLES_API_KEY=` enables OpenSubtitles downloads.
+- `ROKU_MEDIA_ROOTS=/volume1/video/Movies:/volume1/video/TV Shows` makes the subtitle watcher scan folders directly instead of querying Video Station's database.
 
 Restart the package after changing config.
 
