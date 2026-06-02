@@ -15,10 +15,15 @@ if [ ! -f "$VIDEO_STATION_SPK" ]; then
   exit 0
 fi
 
+if [ "$(id -u)" != "0" ]; then
+  echo "Video Station package is bundled at $VIDEO_STATION_SPK, but DSM is running this installer without root privileges."
+  echo "Install it manually from Package Center or SSH with synopkg install before starting Roku DS Video Tools."
+  exit 0
+fi
+
 if command -v synopkg >/dev/null 2>&1; then
   echo "Installing local Video Station package: $VIDEO_STATION_SPK"
   synopkg install "$VIDEO_STATION_SPK" || true
 else
   echo "synopkg command not found; cannot install Video Station automatically."
 fi
-

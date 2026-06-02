@@ -18,7 +18,7 @@ Video Station is Synology software and is not bundled in this repository. If Vid
 synology-spk/package/extras/VideoStation.spk
 ```
 
-The Roku package will include it as an optional local installer asset. On install, the package script will try to install it if Video Station is missing and the file exists.
+The Roku package will include it as an optional local installer asset. DSM 7 requires third-party packages to run as a package user instead of root, so the package cannot always install Video Station automatically. If the package log says it could not run `synopkg install`, install `VideoStation.spk` manually in Package Center first, then install or restart Roku DS Video Tools.
 
 ## ffmpeg wrapper
 
@@ -65,3 +65,4 @@ Useful settings:
 
 Restart the package after changing config.
 
+Because DSM 7 runs this package as `RokuDSVideoTools`, grant that package user read access to your media folders and write access to any folders where it should save subtitles, VSMETA files, or converted MP4 files.

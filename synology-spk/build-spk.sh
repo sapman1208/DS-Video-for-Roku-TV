@@ -10,7 +10,7 @@ PKGDIR="$BUILD/package"
 OUT="$SPK_ROOT/out"
 
 rm -rf "$BUILD"
-mkdir -p "$BUILD/scripts" "$PKGDIR/tools/nas" "$PKGDIR/config" "$PKGDIR/extras" "$OUT"
+mkdir -p "$BUILD/scripts" "$BUILD/conf" "$PKGDIR/tools/nas" "$PKGDIR/config" "$PKGDIR/extras" "$OUT"
 
 copy_tool() {
   src="$ROOT/tools/$1"
@@ -75,6 +75,7 @@ fi
 cp "$SPK_ROOT/spk/scripts/start-stop-status" "$BUILD/scripts/start-stop-status"
 cp "$SPK_ROOT/spk/scripts/postinst" "$BUILD/scripts/postinst"
 cp "$SPK_ROOT/spk/scripts/preuninst" "$BUILD/scripts/preuninst"
+cp "$SPK_ROOT/spk/conf/privilege" "$BUILD/conf/privilege"
 chmod 755 "$BUILD/scripts/start-stop-status" "$BUILD/scripts/postinst" "$BUILD/scripts/preuninst"
 
 sed "s/@VERSION@/$VERSION/g" "$SPK_ROOT/spk/INFO" > "$BUILD/INFO"
@@ -86,7 +87,7 @@ sed "s/@VERSION@/$VERSION/g" "$SPK_ROOT/spk/INFO" > "$BUILD/INFO"
 
 (
   cd "$BUILD"
-  tar -cf "$OUT/$PACKAGE-$VERSION.spk" INFO scripts package.tgz
+  tar -cf "$OUT/$PACKAGE-$VERSION.spk" INFO conf scripts package.tgz
 )
 
 echo "$OUT/$PACKAGE-$VERSION.spk"
