@@ -75,7 +75,7 @@ ROKU_SUBTITLE_POLL_SECONDS=900
 ROKU_CONVERT_POLL_SECONDS=900
 ```
 
-The subtitle watcher scans movie and TV libraries by default. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
+The subtitle watcher scans movie and TV libraries by default: `Movies`, `New Stuff`, `TV Shows`, and `Ian's Shows` (also matched as `Ians Shows`). Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
 
 ## Logs
 

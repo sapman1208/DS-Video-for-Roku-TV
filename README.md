@@ -54,7 +54,7 @@ curl --digest -u rokudev:YOUR_ROKU_DEV_PASSWORD \
 On first launch, enter:
 
 - NAS address: hostname or IP only, such as `nas.example.com` or `10.0.1.74`.
-- Port: your DSM Video Station port.
+- Port: your DSM port. Use `5001` for normal DSM HTTPS, or `5000` for DSM HTTP.
 - Protocol: HTTP or HTTPS.
 - Username and password: Synology account with Video Station access.
 - Transcode port: normally `8099`.
@@ -106,7 +106,7 @@ Starts:
 - `ffmpeg-hls-proxy.js`: transcodes only as needed during playback.
 - `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files.
 
-By default the subtitle watcher scans movie and TV libraries only (`Movies`, `New Stuff`, `TV Shows`, and `Ian's Shows`) to avoid false subtitle matches for home videos. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
+By default the subtitle watcher scans movie and TV libraries only: `Movies`, `New Stuff`, `TV Shows`, and `Ian's Shows` (also matched as `Ians Shows`). Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
 
 Logs:
 
