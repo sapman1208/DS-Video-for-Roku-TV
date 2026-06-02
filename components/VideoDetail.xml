@@ -16,6 +16,8 @@
             translation="[540, 150]" width="1180" height="72" />
         <Label id="metaLabel" text="" color="#C9CED3" font="font:MediumSystemFont"
             translation="[540, 230]" width="1100" height="110" />
+        <Label id="dateLabel" text="" color="#C9CED3" font="font:MediumSystemFont"
+            translation="[540, 285]" width="1100" height="44" visible="false" />
         <Label id="summaryLabel" text="" color="#FFFFFF" font="font:MediumSystemFont"
             translation="[540, 350]" width="1180" height="350" wrap="true" />
         <MarkupGrid id="actionGrid" translation="[540, 760]" itemComponentName="DetailActionItem"

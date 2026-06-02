@@ -49,12 +49,17 @@ sub onVideoDataSet(event as object)
     end if
     if data.originalAvailable <> invalid and data.originalAvailable <> ""
         if data.type <> invalid and data.type = "episode"
-            if meta <> "" then meta = meta + chr(10) + chr(10)
-            meta = meta + data.originalAvailable
+            m.top.findNode("dateLabel").text = data.originalAvailable
+            m.top.findNode("dateLabel").visible = true
         else
+            m.top.findNode("dateLabel").visible = false
+            m.top.findNode("dateLabel").text = ""
             if meta <> "" then meta = meta + "   "
             meta = meta + data.originalAvailable
         end if
+    else
+        m.top.findNode("dateLabel").visible = false
+        m.top.findNode("dateLabel").text = ""
     end if
     m.top.findNode("metaLabel").text = meta
     summary = ""
@@ -138,6 +143,8 @@ sub configurePosterFrame(data as object)
         m.top.findNode("titleLabel").width = 1040
         m.top.findNode("metaLabel").translation = [760, 230]
         m.top.findNode("metaLabel").width = 1000
+        m.top.findNode("dateLabel").translation = [760, 285]
+        m.top.findNode("dateLabel").width = 1000
         m.top.findNode("summaryLabel").translation = [760, 365]
         m.top.findNode("summaryLabel").width = 1040
         m.top.findNode("summaryLabel").height = 350
@@ -157,6 +164,8 @@ sub configurePosterFrame(data as object)
         m.top.findNode("titleLabel").width = 1180
         m.top.findNode("metaLabel").translation = [540, 230]
         m.top.findNode("metaLabel").width = 1100
+        m.top.findNode("dateLabel").translation = [540, 285]
+        m.top.findNode("dateLabel").width = 1100
         m.top.findNode("summaryLabel").translation = [540, 350]
         m.top.findNode("summaryLabel").width = 1180
         m.top.findNode("summaryLabel").height = 350
