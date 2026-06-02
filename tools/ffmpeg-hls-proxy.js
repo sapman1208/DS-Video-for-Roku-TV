@@ -1309,15 +1309,18 @@ async function libraryItems(libraryId, type) {
 
   const dateExpr = table === "home_video" ? "record_time::text" : "originally_available::text";
   const yearExpr = table === "home_video" ? "extract(year from record_time)::int" : "year";
-  const libraryWhere = safeLibraryId ? `library_id = ${safeLibraryId}` : "library_id is null";
-  const tvShowExtra = table === "tvshow" ? ", (select count(*) from tvshow_episode e where e.tvshow_id = tvshow.id) as episode_count" : "";
+  const libraryWhere = safeLibraryId ? `x0.library_id = ${safeLibraryId}` : "x0.library_id is null";
+  const tvShowExtra = table === "tvshow" ? ", (select count(*) from tvshow_episode e where e.tvshow_id = x0.id) as episode_count" : "";
+  const summaryJoin = table === "home_video" ? "" : "left join summary s on s.mapper_id = x0.mapper_id";
+  const summarySelect = table === "home_video" ? "" : ", coalesce(s.summary, '') as summary, coalesce(s.summary, '') as description";
   const sql = `
     select coalesce(json_agg(row_to_json(x) order by x.sort_title, x.title), '[]'::json)
     from (
-      select id, mapper_id, title, sort_title, library_id, ${yearExpr} as year, ${dateExpr} as original_available${tvShowExtra}
-      from ${table}
+      select x0.id, x0.mapper_id, x0.title, x0.sort_title, x0.library_id, ${yearExpr.replace(/\b(record_time|year)\b/g, "x0.$1")} as year, ${dateExpr.replace(/\b(record_time|originally_available)\b/g, "x0.$1")} as original_available${summarySelect}${tvShowExtra}
+      from ${table} x0
+      ${summaryJoin}
       where ${libraryWhere}
-      order by sort_title, title
+      order by x0.sort_title, x0.title
     ) x`;
   const output = await runVideoStationSql(sql);
   if (table === "tvshow") return JSON.stringify(mergeDuplicateTvShows(output || "[]"));

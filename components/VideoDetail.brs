@@ -48,8 +48,13 @@ sub onVideoDataSet(event as object)
         end if
     end if
     if data.originalAvailable <> invalid and data.originalAvailable <> ""
-        if meta <> "" then meta = meta + "   "
-        meta = meta + data.originalAvailable
+        if data.type <> invalid and data.type = "episode"
+            if meta <> "" then meta = meta + chr(10) + chr(10)
+            meta = meta + data.originalAvailable
+        else
+            if meta <> "" then meta = meta + "   "
+            meta = meta + data.originalAvailable
+        end if
     end if
     m.top.findNode("metaLabel").text = meta
     summary = ""
@@ -133,10 +138,11 @@ sub configurePosterFrame(data as object)
         m.top.findNode("titleLabel").width = 1040
         m.top.findNode("metaLabel").translation = [760, 230]
         m.top.findNode("metaLabel").width = 1000
-        m.top.findNode("summaryLabel").translation = [760, 310]
+        m.top.findNode("summaryLabel").translation = [760, 365]
         m.top.findNode("summaryLabel").width = 1040
-        m.top.findNode("actionGrid").translation = [760, 610]
-        m.top.findNode("statusLabel").translation = [760, 710]
+        m.top.findNode("summaryLabel").height = 350
+        m.top.findNode("actionGrid").translation = [760, 780]
+        m.top.findNode("statusLabel").translation = [760, 880]
     else
         poster.width = 360
         poster.height = 540
@@ -151,10 +157,11 @@ sub configurePosterFrame(data as object)
         m.top.findNode("titleLabel").width = 1180
         m.top.findNode("metaLabel").translation = [540, 230]
         m.top.findNode("metaLabel").width = 1100
-        m.top.findNode("summaryLabel").translation = [540, 310]
+        m.top.findNode("summaryLabel").translation = [540, 350]
         m.top.findNode("summaryLabel").width = 1180
-        m.top.findNode("actionGrid").translation = [540, 610]
-        m.top.findNode("statusLabel").translation = [540, 710]
+        m.top.findNode("summaryLabel").height = 350
+        m.top.findNode("actionGrid").translation = [540, 760]
+        m.top.findNode("statusLabel").translation = [540, 860]
     end if
 end sub
 

@@ -105,17 +105,19 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
 
       libraryParam = libraryParamFromReq(req)
-      if libraryParam <> ""
+      proxyItems = fetchProxyLibraryItems(proxyBaseUrl, invalid, "movie")
+      if proxyItems.count() = 0
           proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "movie")
-          if proxyItems.count() > 0
-              proxyItems = sortBrowseItems(proxyItems)
-              resolveCachedArtworkForItems(proxyItems, 1500)
-              print "GRID_SOURCE category=movies source=proxy-db count="; proxyItems.count()
-              m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid }
-              return
-          end if
       end if
-      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
+      if proxyItems.count() > 0
+          addDirectPosterIds(proxyItems)
+          proxyItems = sortBrowseItems(proxyItems)
+          resolveCachedArtworkForItems(proxyItems, 1500)
+          print "GRID_SOURCE category=movies source=proxy-db count="; proxyItems.count()
+          m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid }
+          return
+      end if
+      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movie", "movies"])
       if key <> ""
@@ -126,7 +128,7 @@ sub init()
           return
       end if
 
-      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movies", "movie"])
       if key <> ""
@@ -2240,6 +2242,7 @@ sub init()
               copyEpisodeMetadataField(meta, item, "summary")
               copyEpisodeMetadataField(meta, item, "description")
               copyEpisodeMetadataField(meta, item, "original_available")
+              copyEpisodeMetadataField(meta, item, "originally_available")
               copyEpisodeMetadataField(meta, item, "additional")
               summary = episodeSummaryText(meta)
               if summary <> ""

@@ -912,7 +912,7 @@ sub init()
       else if epNumber > 0
           episodeMeta = "Episode " + stri(epNumber).trim()
       end if
-      originalAvailable = safeStr(ep, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered", "year"])
+      originalAvailable = episodeDateText(ep)
 
       summary = episodeSummaryText(ep)
       detailPoster = posterUrl(ep, authData)
@@ -1026,6 +1026,26 @@ sub init()
           end if
       end if
       return ""
+  end function
+
+  function episodeDateText(item as object) as string
+      value = safeStr(item, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered"])
+      if value = ""
+          additional = item.lookUp("additional")
+          if additional <> invalid
+              value = safeStr(additional, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered"])
+              if value = ""
+                  extra = additional.lookUp("extra")
+                  if extra <> invalid
+                      value = safeStr(extra, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered"])
+                  end if
+              end if
+          end if
+      end if
+      value = value.trim()
+      if value = "0" then return ""
+      if value = "0000-00-00" then return ""
+      return value
   end function
 
   function summaryTextFromValue(value as dynamic) as string

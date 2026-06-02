@@ -15,13 +15,13 @@
         <Label id="titleLabel" text="" color="#FFFFFF" font="font:LargeBoldSystemFont"
             translation="[540, 150]" width="1180" height="72" />
         <Label id="metaLabel" text="" color="#C9CED3" font="font:MediumSystemFont"
-            translation="[540, 230]" width="1100" height="48" />
+            translation="[540, 230]" width="1100" height="110" />
         <Label id="summaryLabel" text="" color="#FFFFFF" font="font:MediumSystemFont"
-            translation="[540, 310]" width="1180" height="230" wrap="true" />
-        <MarkupGrid id="actionGrid" translation="[540, 610]" itemComponentName="DetailActionItem"
+            translation="[540, 350]" width="1180" height="350" wrap="true" />
+        <MarkupGrid id="actionGrid" translation="[540, 760]" itemComponentName="DetailActionItem"
             numColumns="4" numRows="1" itemSize="[210, 76]" itemSpacing="[18, 0]" />
         <Label id="statusLabel" text="" color="#FFB3B8" font="font:SmallSystemFont"
-            translation="[540, 710]" width="920" />
+            translation="[540, 860]" width="920" />
     </children>
     <script type="text/brightscript" uri="pkg:/components/VideoDetail.brs" />
 </component>
