@@ -48,6 +48,19 @@ Set a version explicitly:
 VERSION=1.8.0 sh synology-spk/build-spk.sh
 ```
 
+## One-Command SSH Install
+
+Package Center will prompt for `Node.js_v22` during manual install. To install Node first and then install this package without clicking through Package Center, use the SSH bootstrap installer:
+
+```sh
+SYNO_HOST=10.0.1.174 \
+SYNO_USER=your-admin-user \
+SYNO_PASSWORD='your-password' \
+sh synology-spk/install-via-ssh.sh
+```
+
+The script uses Synology's own package server for `Node.js_v22`, uploads the built Roku SPK to `/tmp`, installs it with `synopkg`, and starts the package.
+
 ## Configure On NAS
 
 After installation, edit the package config in DSM or over SSH:
