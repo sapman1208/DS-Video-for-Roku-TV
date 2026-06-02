@@ -918,7 +918,7 @@ sub init()
       detailPoster = posterUrl(ep, authData)
       detailBackdrop = showBackdropUrl(authData)
       backdropSource = showBackdropSource(authData)
-      print "DETAIL_HANDOFF type=episode title="; safeStr(ep, ["title", "name"]); " posterSource="; episodePosterSource(ep, authData); " backdropSource="; backdropSource; " summaryLen="; len(summary)
+      print "DETAIL_HANDOFF type=episode title="; safeStr(ep, ["title", "name"]); " date="; originalAvailable; " posterSource="; episodePosterSource(ep, authData); " backdropSource="; backdropSource; " summaryLen="; len(summary)
       return {
           type: "episode",
           id: epId,
@@ -1029,15 +1029,15 @@ sub init()
   end function
 
   function episodeDateText(item as object) as string
-      value = safeStr(item, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered"])
+      value = safeStr(item, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered", "year"])
       if value = ""
           additional = item.lookUp("additional")
           if additional <> invalid
-              value = safeStr(additional, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered"])
+              value = safeStr(additional, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered", "year"])
               if value = ""
                   extra = additional.lookUp("extra")
                   if extra <> invalid
-                      value = safeStr(extra, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered"])
+                      value = safeStr(extra, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered", "year"])
                   end if
               end if
           end if

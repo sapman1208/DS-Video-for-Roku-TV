@@ -451,8 +451,6 @@ sub init()
 
       if bestEpisodes.count() > 0
           if bestMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, bestMetadata)
-          proxyEpisodeMetadata = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
-          if proxyEpisodeMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, proxyEpisodeMetadata)
           normalizeEpisodeItems(bestEpisodes)
           enrichEpisodeSummariesFromVsmeta(bestEpisodes, baseUrl, sid, token)
           addDirectPosterIds(bestEpisodes)
@@ -2230,7 +2228,7 @@ sub init()
       for each playable in playableItems
           season = itemInt(playable, ["season", "season_number", "season_num", "season_index"])
           episode = itemInt(playable, ["episode", "episode_number", "episode_num", "ep_num", "ep_index"])
-          meta = findEpisodeMetadata(metadataItems, season, episode)
+          meta = findEpisodeMetadataForItem(metadataItems, playable, season, episode)
           if meta <> invalid
               item = {}
               for each key in playable
@@ -2273,6 +2271,37 @@ sub init()
           if ms = season and me = episode then return item
       end for
       return invalid
+  end function
+
+  function findEpisodeMetadataForItem(metadataItems as object, playable as object, season as integer, episode as integer) as dynamic
+      meta = findEpisodeMetadata(metadataItems, season, episode)
+      if meta <> invalid then return meta
+
+      playablePath = normalizedEpisodeMetadataPath(itemPath(playable))
+      playableTitle = normalizedTitleKey(idToStr(playable.lookUp("title")))
+      if playableTitle = "" then playableTitle = normalizedTitleKey(idToStr(playable.lookUp("name")))
+
+      for each item in metadataItems
+          itemPathText = normalizedEpisodeMetadataPath(itemPath(item))
+          if playablePath <> "" and itemPathText <> "" and playablePath = itemPathText then return item
+
+          itemTitle = normalizedTitleKey(idToStr(item.lookUp("title")))
+          if itemTitle = "" then itemTitle = normalizedTitleKey(idToStr(item.lookUp("name")))
+          if playableTitle <> "" and itemTitle <> "" and playableTitle = itemTitle
+              ms = itemInt(item, ["season", "season_number", "season_num", "season_index"])
+              if season <= 0 or ms <= 0 or ms = season then return item
+          end if
+      end for
+      return invalid
+  end function
+
+  function normalizedEpisodeMetadataPath(path as string) as string
+      p = lcase(path.trim())
+      if left(p, 8) = "/volume"
+          slash = instr(9, p, "/")
+          if slash > 0 then p = mid(p, slash)
+      end if
+      return p
   end function
 
   sub copyEpisodeMetadataField(source as object, target as object, key as string)
