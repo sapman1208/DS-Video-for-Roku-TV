@@ -2021,9 +2021,15 @@ sub init()
           end if
           text = mid(text, 2).trim()
       end while
+      if len(text) > 2 and left(text, 1) = "B"
+          thirdCode = asc(mid(text, 3, 1))
+          if thirdCode >= 65 and thirdCode <= 90 then text = mid(text, 3).trim()
+      end if
       if len(text) < 12 then return ""
+      if right(text, 1) = chr(34) then return ""
       if instr(1, text, "JFIF") > 0 then return ""
       if instr(1, text, "Exif") > 0 then return ""
+      if instr(1, text, ".") = 0 and instr(1, text, "!") = 0 and instr(1, text, "?") = 0 then return ""
       return text
   end function
 

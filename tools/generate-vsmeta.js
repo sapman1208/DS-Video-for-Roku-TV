@@ -13,6 +13,7 @@ const limit = limitArg ? Number(limitArg.split("=")[1]) || 0 : 0;
 const positional = args.filter((arg) => !arg.startsWith("--"));
 const sourcePath = positional[0] || "";
 const targetVideoPath = positional[1] || "";
+const overridePath = process.env.ROKU_VSMETA_OVERRIDES || path.join(__dirname, "vsmeta-overrides.json");
 
 if (!allMode && (!sourcePath || !targetVideoPath)) {
   console.error("usage: generate-vsmeta.js <source-video-path> <target-video-path>");
@@ -89,6 +90,17 @@ function clean(value) {
   return String(value || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function loadOverrides() {
+  try {
+    if (!fs.existsSync(overridePath)) return {};
+    return JSON.parse(fs.readFileSync(overridePath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+const metadataOverrides = loadOverrides();
+
 function withoutVideoExtension(value) {
   return String(value || "").replace(/\.(avi|mkv|mp4|m4v|mov|wmv|mpg|mpeg|ts|m2ts|webm)$/i, "");
 }
@@ -108,6 +120,19 @@ function libraryNameForPart(part) {
   if (norm === "tv shows") return "TV Shows";
   if (norm === "ians shows") return "Ian's Shows";
   return "";
+}
+
+function metadataOverride(showTitle, season, episode) {
+  const key = `${normalizeForCompare(showTitle)}|${Number(season) || 0}|${Number(episode) || 0}`;
+  return metadataOverrides[key] || {};
+}
+
+function applyEpisodeOverride(info) {
+  if (!info) return info;
+  const override = metadataOverride(info.showTitle, info.season, info.episode);
+  if (override.title) info.episodeTitle = clean(override.title);
+  if (override.summary) info.summary = String(override.summary || "").trim();
+  return info;
 }
 
 function sourceCandidates(videoPath) {
@@ -151,7 +176,7 @@ function episodeInfo(videoPath) {
   const rows = runSql(`
     select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, '')
     from video_file vf
-    left join tvshow_episode e on e.mapper_id = vf.mapper_id
+    left join tvshow_episode e on e.id = vf.mapper_id or e.mapper_id = vf.mapper_id
     left join tvshow t on t.id = e.tvshow_id
     left join summary s on s.mapper_id = e.mapper_id
     left join summary ts on ts.mapper_id = t.mapper_id
@@ -161,7 +186,7 @@ function episodeInfo(videoPath) {
   if (!rows) return null;
   const parts = rows.split("\t");
   if (parts.length < 7 || !parts[0]) return null;
-  return {
+  return applyEpisodeOverride({
     mapperId: parts[0],
     season: Number(parts[1]) || 0,
     episode: Number(parts[2]) || 0,
@@ -171,7 +196,7 @@ function episodeInfo(videoPath) {
     showMapperId: parts[6],
     showSummary: parts[7] || "",
     showDate: /^\d{4}-\d{2}-\d{2}/.test(parts[8] || "") ? parts[8].slice(0, 10) : "",
-  };
+  });
 }
 
 function showInfoByTitle(showTitle) {
@@ -194,6 +219,39 @@ function showInfoByTitle(showTitle) {
     showSummary: parts[2] || "",
     showDate: /^\d{4}-\d{2}-\d{2}/.test(parts[3] || "") ? parts[3].slice(0, 10) : "",
   };
+}
+
+function episodeInfoByShowSeasonEpisode(showTitle, season, episode) {
+  if (!showTitle || !season || !episode) return null;
+  const escaped = sqlEscape(showTitle);
+  const rows = runSql(`
+    select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, '')
+    from tvshow_episode e
+    join tvshow t on t.id = e.tvshow_id
+    left join summary s on s.mapper_id = e.mapper_id
+    left join summary ts on ts.mapper_id = t.mapper_id
+    where e.season = ${Number(season)}
+      and e.episode = ${Number(episode)}
+      and (
+        lower(t.title) = lower('${escaped}')
+        or lower(replace(replace(t.title, ':', ''), '!', '')) = lower(replace(replace('${escaped}', ':', ''), '!', ''))
+      )
+    order by case when lower(t.title) = lower('${escaped}') then 0 else 1 end
+    limit 1`);
+  if (!rows) return null;
+  const parts = rows.split("\t");
+  if (parts.length < 7 || !parts[0]) return null;
+  return applyEpisodeOverride({
+    mapperId: parts[0],
+    season: Number(parts[1]) || 0,
+    episode: Number(parts[2]) || 0,
+    episodeTitle: clean(parts[3]) || `Episode ${parts[2]}`,
+    summary: parts[4] || "",
+    showTitle: clean(parts[5]) || showTitle,
+    showMapperId: parts[6],
+    showSummary: parts[7] || "",
+    showDate: /^\d{4}-\d{2}-\d{2}/.test(parts[8] || "") ? parts[8].slice(0, 10) : "",
+  });
 }
 
 function episodeInfoFromPath(videoPath) {
@@ -219,8 +277,13 @@ function episodeInfoFromPath(videoPath) {
   if (showNorm && titleNorm.startsWith(showNorm + " ")) title = title.slice(outputShow.length).trim();
   title = title.replace(/\bS\d{1,2}E\d{1,3}\b/i, " ");
   title = clean(title.replace(/[._]+/g, " ").replace(/^[-\s]+|[-\s]+$/g, ""));
+  const dbEpisode = episodeInfoByShowSeasonEpisode(outputShow, season, episode) || episodeInfoByShowSeasonEpisode(show, season, episode);
+  if (dbEpisode) {
+    if (!dbEpisode.episodeTitle || dbEpisode.episodeTitle === `Episode ${episode}`) dbEpisode.episodeTitle = title || dbEpisode.episodeTitle;
+    return dbEpisode;
+  }
   const showInfo = showInfoByTitle(outputShow) || {};
-  return {
+  return applyEpisodeOverride({
     mapperId: "",
     season,
     episode,
@@ -230,7 +293,7 @@ function episodeInfoFromPath(videoPath) {
     showMapperId: showInfo.showMapperId || "",
     showSummary: showInfo.showSummary || "",
     showDate: showInfo.showDate || "",
-  };
+  });
 }
 
 function movieInfo(videoPath) {

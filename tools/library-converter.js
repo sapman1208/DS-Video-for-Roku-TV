@@ -194,16 +194,19 @@ function discoverCandidates() {
 }
 
 function generateVsmeta(source, target) {
-  if (!fs.existsSync(VSMETA_GENERATOR)) return false;
-  const result = spawnSync(NODE_BIN, [VSMETA_GENERATOR, "--force", source, target], {
-    encoding: "utf8",
-    timeout: 120000,
-  });
-  if (result.status !== 0) {
+  const sourceVsmeta = `${source}.vsmeta`;
+  const targetVsmeta = `${target}.vsmeta`;
+  if (fs.existsSync(VSMETA_GENERATOR)) {
+    const result = spawnSync(NODE_BIN, [VSMETA_GENERATOR, "--force", source, target], {
+      encoding: "utf8",
+      timeout: 120000,
+    });
+    if (result.status === 0 && fs.existsSync(targetVsmeta)) return true;
     console.log(`[convert] vsmeta failed ${target}: ${(result.stderr || result.stdout || "").trim()}`);
-    return false;
   }
-  return fs.existsSync(`${target}.vsmeta`);
+  if (!fs.existsSync(sourceVsmeta)) return false;
+  fs.copyFileSync(sourceVsmeta, targetVsmeta);
+  return true;
 }
 
 function indexReplacement(source, target) {
@@ -353,14 +356,15 @@ function convertOne(source) {
   fs.renameSync(tmp, target);
   const sidecarSubtitles = copySidecarSubtitles(source, target);
   generateVsmeta(source, target);
-  downloadSubtitles(target);
-  const embeddedDownloadedSubtitle = sourceTextSubtitleCount === 0 ? remuxSidecarSubtitleIntoMp4(target) : false;
+  const needsDownloadedSubtitle = sidecarSubtitles.length === 0;
+  const downloadedSubtitle = needsDownloadedSubtitle ? downloadSubtitles(target) : false;
+  const embeddedDownloadedSubtitle = downloadedSubtitle && sourceTextSubtitleCount === 0 ? remuxSidecarSubtitleIntoMp4(target) : false;
   if (DELETE_ORIGINAL) {
     fs.rmSync(source, { force: true });
     fs.rmSync(`${source}.vsmeta`, { force: true });
   }
   indexReplacement(source, target);
-  return { action: "converted", source, target, deleteOriginal: DELETE_ORIGINAL, sidecarSubtitles, embeddedDownloadedSubtitle };
+  return { action: "converted", source, target, deleteOriginal: DELETE_ORIGINAL, sidecarSubtitles, downloadedSubtitle, embeddedDownloadedSubtitle };
 }
 
 function scanOnce() {
