@@ -31,7 +31,14 @@ function runSql(sql) {
   const result = spawnSync("su", ["-l", "VideoStation", "-s", "/bin/bash", "-c", command], {
     encoding: "utf8",
   });
-  if (result.status !== 0) throw new Error((result.stderr || result.stdout || `psql failed ${result.status}`).trim());
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || `psql failed ${result.status}`).trim();
+    if (/user VideoStation does not exist|Unknown id: VideoStation|No passwd entry/i.test(detail)) {
+      console.log(JSON.stringify({ action: "subtitle-scan-skip", reason: "VideoStation user missing" }));
+      return "";
+    }
+    throw new Error(detail);
+  }
   return String(result.stdout || "").trim();
 }
 

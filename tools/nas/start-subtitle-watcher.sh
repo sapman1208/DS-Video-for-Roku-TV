@@ -41,6 +41,11 @@ if [ ! -f "$WATCHER_JS" ]; then
   exit 1
 fi
 
+if ! id VideoStation >/dev/null 2>&1; then
+  echo "VideoStation user not found; subtitle watcher disabled until Video Station is installed."
+  exit 0
+fi
+
 nohup "$NODE_BIN" "$WATCHER_JS" --watch >>"$LOG_FILE" 2>&1 &
 echo $! >"$PID_FILE"
 echo "started roku-subtitle-watcher pid $(cat "$PID_FILE")"

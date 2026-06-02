@@ -13,10 +13,17 @@ if [ ! -f "$CONFIG_FILE" ]; then
   cp "$CONFIG_SAMPLE" "$CONFIG_FILE"
 fi
 
+# Migrate early test-package defaults that required shared-folder write access.
+if grep -q '^ROKU_HLS_ROOT=/volume1/@tmp/roku-hls-proxy$' "$CONFIG_FILE"; then
+  sed -i 's#^ROKU_HLS_ROOT=/volume1/@tmp/roku-hls-proxy$#ROKU_HLS_ROOT=#' "$CONFIG_FILE"
+fi
+if grep -q '^ROKU_HLS_MP4_DIR=/volume1/video/@roku-transcodes$' "$CONFIG_FILE"; then
+  sed -i 's#^ROKU_HLS_MP4_DIR=/volume1/video/@roku-transcodes$#ROKU_HLS_MP4_DIR=#' "$CONFIG_FILE"
+fi
+
 chmod 755 "$PKG_DEST/tools/nas/"*.sh
 
 "$PKG_DEST/tools/nas/install-videostation-if-needed.sh" "$PKG_DEST" || true
 "$PKG_DEST/tools/nas/install-videostation-wrapper.sh" "$PKG_DEST" || true
 
 exit 0
-
