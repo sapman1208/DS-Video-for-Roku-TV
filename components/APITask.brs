@@ -451,6 +451,8 @@ sub init()
 
       if bestEpisodes.count() > 0
           if bestMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, bestMetadata)
+          proxyEpisodeMetadata = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
+          if proxyEpisodeMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, proxyEpisodeMetadata)
           normalizeEpisodeItems(bestEpisodes)
           enrichEpisodeSummariesFromVsmeta(bestEpisodes, baseUrl, sid, token)
           addDirectPosterIds(bestEpisodes)
