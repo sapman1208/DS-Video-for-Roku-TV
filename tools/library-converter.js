@@ -345,6 +345,7 @@ function convertOne(source) {
     "-b:a", "160k",
     ...subtitleArgsForSource(source),
     "-movflags", "+faststart",
+    "-f", "mp4",
     tmp,
   ];
   const result = spawnSync(FFMPEG, ffmpegArgs, { encoding: "utf8", timeout: 24 * 60 * 60 * 1000 });

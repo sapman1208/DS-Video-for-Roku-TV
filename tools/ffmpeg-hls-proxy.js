@@ -528,7 +528,7 @@ function homeVideoInfoFromPath(filePath) {
 
 function mp4CachePaths(src, id) {
   const fallbackFinal = path.join(MP4_DIR, `${id}.mp4`);
-  const tmpFor = (finalPath) => `${finalPath}.tmp`;
+  const tmpFor = (finalPath) => `${finalPath}.tmp.mp4`;
   const filePath = sourceFilePath(src);
   const info = episodeInfoFromPath(filePath);
   if (info) {
@@ -659,7 +659,7 @@ function indexReplacement(sourcePath, targetPath) {
 }
 
 function downloadSubtitlesForPath(targetPath) {
-  if (!process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return;
+  if (!process.env.SUBDL_API_KEY && !process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return;
   if (!targetPath || !fs.existsSync(SUBTITLE_DOWNLOADER)) return;
   try {
     const result = spawnSync(NODE_BIN, [SUBTITLE_DOWNLOADER, targetPath], {
@@ -698,7 +698,7 @@ function findSubtitleForPath(filePath, lang = "en") {
 function ensureSubtitleForPath(filePath, lang = "en") {
   let subtitle = findSubtitleForPath(filePath, lang);
   if (subtitle) return subtitle;
-  if (!process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return "";
+  if (!process.env.SUBDL_API_KEY && !process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return "";
   const sourcePath = sourceExistingPathFromFilePath(filePath);
   if (!sourcePath) return "";
   downloadSubtitlesForPath(sourcePath);
