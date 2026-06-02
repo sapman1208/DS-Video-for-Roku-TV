@@ -63,7 +63,9 @@ copy_nas_script stop-full-automation.sh
 cp "$SPK_ROOT/package/config/config.env.example" "$PKGDIR/config/config.env.example"
 cp "$SPK_ROOT/package/tools/nas/install-videostation-if-needed.sh" "$PKGDIR/tools/nas/install-videostation-if-needed.sh"
 cp "$SPK_ROOT/package/tools/nas/install-videostation-wrapper.sh" "$PKGDIR/tools/nas/install-videostation-wrapper.sh"
-chmod 755 "$PKGDIR/tools/nas/install-videostation-if-needed.sh" "$PKGDIR/tools/nas/install-videostation-wrapper.sh"
+cp "$SPK_ROOT/package/tools/nas/videostation_for_722.sh" "$PKGDIR/tools/nas/videostation_for_722.sh"
+cp "$SPK_ROOT/package/tools/nas/videostation_for_722_LICENSE.txt" "$PKGDIR/tools/nas/videostation_for_722_LICENSE.txt"
+chmod 755 "$PKGDIR/tools/nas/install-videostation-if-needed.sh" "$PKGDIR/tools/nas/install-videostation-wrapper.sh" "$PKGDIR/tools/nas/videostation_for_722.sh"
 
 if [ -f "$SPK_ROOT/package/extras/VideoStation.spk" ]; then
   cp "$SPK_ROOT/package/extras/VideoStation.spk" "$PKGDIR/extras/VideoStation.spk"

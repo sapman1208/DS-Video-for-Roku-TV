@@ -13,6 +13,7 @@ SYNO_USER="${SYNO_USER:-}"
 SYNO_PASSWORD="${SYNO_PASSWORD:-}"
 REMOTE_SPK="/tmp/RokuDSVideoTools.spk"
 REMOTE_INSTALLER="/tmp/roku-ds-video-tools-install.sh"
+VIDEO_STATION_INSTALL="${SYNO_INSTALL_VIDEO_STATION:-}"
 
 [ -n "$SYNO_HOST" ] || usage
 [ -n "$SYNO_USER" ] || usage
@@ -61,6 +62,7 @@ trap 'rm -f "$LOCAL_INSTALLER"' EXIT
   echo "set -eu"
   echo "INSTALL_USER=$(quote_sh "$SYNO_USER")"
   echo "REMOTE_SPK=$(quote_sh "$REMOTE_SPK")"
+  echo "VIDEO_STATION_INSTALL=$(quote_sh "$VIDEO_STATION_INSTALL")"
   cat <<'INSTALLER'
 SYNOPKG=/usr/syno/bin/synopkg
 volume=$(ls -1d /volume[0-9]* 2>/dev/null | sed "s#^/##" | head -n 1)
@@ -75,8 +77,33 @@ else
   echo "Node.js_v22 already installed."
 fi
 
+if [ -n "$VIDEO_STATION_INSTALL" ]; then
+  case "$VIDEO_STATION_INSTALL" in
+    all|novs|noms|onlyamc)
+      echo "Installing Video Station support with option: $VIDEO_STATION_INSTALL"
+      if [ -x /var/packages/RokuDSVideoTools/target/tools/nas/videostation_for_722.sh ]; then
+        /var/packages/RokuDSVideoTools/target/tools/nas/videostation_for_722.sh --install="$VIDEO_STATION_INSTALL"
+      else
+        echo "Video Station helper is not installed yet; will run after RokuDSVideoTools install."
+      fi
+      ;;
+    *)
+      echo "Invalid SYNO_INSTALL_VIDEO_STATION value: $VIDEO_STATION_INSTALL" >&2
+      echo "Use one of: all, novs, noms, onlyamc" >&2
+      exit 2
+      ;;
+  esac
+fi
+
 echo "Installing RokuDSVideoTools..."
 "$SYNOPKG" install "$REMOTE_SPK"
+
+if [ -n "$VIDEO_STATION_INSTALL" ]; then
+  if [ -x /var/packages/RokuDSVideoTools/target/tools/nas/videostation_for_722.sh ]; then
+    /var/packages/RokuDSVideoTools/target/tools/nas/videostation_for_722.sh --install="$VIDEO_STATION_INSTALL"
+  fi
+fi
+
 "$SYNOPKG" start RokuDSVideoTools || "$SYNOPKG" resume RokuDSVideoTools || true
 "$SYNOPKG" status RokuDSVideoTools || true
 INSTALLER

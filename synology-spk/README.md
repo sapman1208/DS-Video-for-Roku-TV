@@ -61,6 +61,16 @@ sh synology-spk/install-via-ssh.sh
 
 The script uses Synology's own package server for `Node.js_v22`, uploads the built Roku SPK to `/tmp`, installs it with `synopkg`, and starts the package.
 
+To also run the bundled `007revad/Video_Station_for_DSM_722` helper after install, set:
+
+```sh
+SYNO_INSTALL_VIDEO_STATION=all
+```
+
+Supported values match the upstream script: `all`, `novs`, `noms`, and `onlyamc`.
+
+The bundled helper is `videostation_for_722.sh` v1.4.22 from [007revad/Video_Station_for_DSM_722](https://github.com/007revad/Video_Station_for_DSM_722), MIT licensed. It modifies Synology package-limit files and installs discontinued Synology packages, so it is never run by normal package startup.
+
 ## Configure On NAS
 
 After installation, edit the package config in DSM or over SSH:
