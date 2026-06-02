@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+PKG_NAME="${SYNOPKG_PKGNAME:-RokuDSVideoTools}"
+PKG_DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG_NAME/target}"
+PKG_VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG_NAME/var}"
+CONFIG_FILE="$PKG_VAR/config.env"
+CONFIG_SAMPLE="$PKG_DEST/config/config.env.example"
+
+mkdir -p "$PKG_VAR"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  cp "$CONFIG_SAMPLE" "$CONFIG_FILE"
+fi
+
+chmod 755 "$PKG_DEST/tools/nas/"*.sh
+
+"$PKG_DEST/tools/nas/install-videostation-if-needed.sh" "$PKG_DEST" || true
+"$PKG_DEST/tools/nas/install-videostation-wrapper.sh" "$PKG_DEST" || true
+
+exit 0
+

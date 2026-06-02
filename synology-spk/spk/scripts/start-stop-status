@@ -1,0 +1,82 @@
+#!/bin/sh
+
+PKG_NAME="${SYNOPKG_PKGNAME:-RokuDSVideoTools}"
+PKG_DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG_NAME/target}"
+PKG_VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG_NAME/var}"
+TOOLS_DIR="$PKG_DEST/tools"
+CONFIG_FILE="$PKG_VAR/config.env"
+TOOLS_ENV="$TOOLS_DIR/.env"
+
+load_config() {
+  mkdir -p "$PKG_VAR" "$TOOLS_DIR"
+  if [ -f "$CONFIG_FILE" ]; then
+    cp "$CONFIG_FILE" "$TOOLS_ENV"
+    set -a
+    . "$CONFIG_FILE"
+    set +a
+  fi
+
+  export ROKU_HLS_PID="${ROKU_HLS_PID:-$PKG_VAR/roku-hls-proxy.pid}"
+  export ROKU_HLS_LOG="${ROKU_HLS_LOG:-$PKG_VAR/roku-hls-proxy.log}"
+  export ROKU_SUBTITLE_PID="${ROKU_SUBTITLE_PID:-$PKG_VAR/roku-subtitle-watcher.pid}"
+  export ROKU_SUBTITLE_LOG="${ROKU_SUBTITLE_LOG:-$PKG_VAR/roku-subtitle-watcher.log}"
+  export ROKU_CONVERT_PID="${ROKU_CONVERT_PID:-$PKG_VAR/roku-library-converter.pid}"
+  export ROKU_CONVERT_LOG="${ROKU_CONVERT_LOG:-$PKG_VAR/roku-library-converter.log}"
+}
+
+is_running() {
+  pid_file="$1"
+  [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null
+}
+
+start_pkg() {
+  load_config
+  mode="${ROKU_SERVICE_MODE:-on-demand}"
+  case "$mode" in
+    full|full-automation)
+      "$TOOLS_DIR/nas/start-full-automation.sh"
+      ;;
+    proxy)
+      "$TOOLS_DIR/nas/start-hls-proxy.sh"
+      ;;
+    on-demand|*)
+      "$TOOLS_DIR/nas/start-on-demand.sh"
+      ;;
+  esac
+}
+
+stop_pkg() {
+  load_config
+  "$TOOLS_DIR/nas/stop-full-automation.sh" >/dev/null 2>&1 || true
+}
+
+status_pkg() {
+  load_config
+  if is_running "$ROKU_HLS_PID" || is_running "$ROKU_SUBTITLE_PID" || is_running "$ROKU_CONVERT_PID"; then
+    exit 0
+  fi
+  exit 1
+}
+
+case "$1" in
+  start)
+    start_pkg
+    ;;
+  stop)
+    stop_pkg
+    ;;
+  status)
+    status_pkg
+    ;;
+  log)
+    load_config
+    echo "proxy: $ROKU_HLS_LOG"
+    echo "subtitle watcher: $ROKU_SUBTITLE_LOG"
+    echo "library converter: $ROKU_CONVERT_LOG"
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|status|log}" >&2
+    exit 1
+    ;;
+esac
+
