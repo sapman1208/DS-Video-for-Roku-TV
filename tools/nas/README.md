@@ -21,7 +21,7 @@ nas/stop-on-demand.sh
 
 ### Full Automation
 
-Downloads missing subtitles and converts incompatible videos in the background. The converter scans on first start, then polls for newly indexed files. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`, and matching sidecar `.srt`/`.vtt` files are copied to the new MP4 basename.
+Downloads missing subtitles and converts incompatible videos in the background. The converter scans on first start, then polls for newly indexed files. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`; when none are available, the converter tries to download/copy a sidecar `.srt`/`.vtt` and remux it into the MP4 as an internal `mov_text` track.
 
 ```sh
 cd /volume1/docker/roku-ds-video-tools
@@ -69,6 +69,7 @@ Useful settings:
 ```sh
 OPEN_SUBTITLES_API_KEY=your-api-key
 OPEN_SUBTITLES_LANGUAGE=en
+SUBDL_API_KEY=your-subdl-api-key
 ROKU_HLS_PORT=8099
 ROKU_HLS_BASE_URL=https://your-hostname:8099
 ROKU_SUBTITLE_POLL_SECONDS=900

@@ -21,7 +21,7 @@ A Roku channel for browsing and playing Synology Video Station libraries, with o
   - Node.js on the NAS.
   - FFmpeg on the NAS.
   - TCP port `8099` reachable by the Roku, or an HTTPS reverse proxy.
-  - Optional OpenSubtitles API settings for automatic subtitle downloads.
+  - Optional SubDL and/or OpenSubtitles API settings for automatic subtitle downloads.
 
 ## Roku Installation
 
@@ -82,6 +82,7 @@ The launcher scripts read `/volume1/docker/roku-ds-video-tools/.env` when presen
 Example `.env` for subtitles and HTTPS:
 
 ```sh
+SUBDL_API_KEY=your-subdl-api-key
 OPEN_SUBTITLES_API_KEY=your-api-key
 OPEN_SUBTITLES_LANGUAGE=en
 ROKU_HLS_HTTPS_CERT=/path/to/fullchain.pem
@@ -104,7 +105,7 @@ nas/start-on-demand.sh
 Starts:
 
 - `ffmpeg-hls-proxy.js`: transcodes only as needed during playback.
-- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files.
+- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured, then falls back to OpenSubtitles when configured.
 
 By default the subtitle watcher scans movie and TV-style library paths such as `Movies`, `New Stuff`, and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
 
@@ -135,7 +136,7 @@ Starts:
 
 - `ffmpeg-hls-proxy.js`: on-demand playback fallback.
 - `subtitle-watcher.js`: subtitles for existing and newly indexed files.
-- `library-converter.js --watch --delete-original`: scans on first start, then polls for newly indexed incompatible videos, converts them to MP4, writes `.vsmeta`, indexes the replacement, and removes the original after the replacement succeeds. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`, and matching sidecar `.srt`/`.vtt` files are copied to the new MP4 basename.
+- `library-converter.js --watch --delete-original`: scans on first start, then polls for newly indexed incompatible videos, converts them to MP4, writes `.vsmeta`, indexes the replacement, and removes the original after the replacement succeeds. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`; when none are available, the converter tries to download/copy a sidecar `.srt`/`.vtt` and remux it into the MP4 as an internal `mov_text` track.
 
 Logs:
 
@@ -256,7 +257,7 @@ If playback fails:
 
 If subtitles are missing:
 
-- Confirm `.env` contains `OPEN_SUBTITLES_API_KEY`.
+- Confirm `.env` contains `SUBDL_API_KEY` and/or `OPEN_SUBTITLES_API_KEY`.
 - Check `/tmp/roku-subtitle-watcher.log`.
 - OpenSubtitles free/API quotas may pause downloads until the reset time in the log.
 - Run `node subtitle-watcher.js --once --dry-run` to see what would be processed.

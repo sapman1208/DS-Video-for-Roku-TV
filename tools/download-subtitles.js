@@ -2,22 +2,26 @@
 const fs = require("fs");
 const https = require("https");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
-const API_KEY = process.env.OPEN_SUBTITLES_API_KEY || process.env.OPENSUBTITLES_API_KEY || "";
-const USERNAME = process.env.OPEN_SUBTITLES_USERNAME || process.env.OPENSUBTITLES_USERNAME || "";
-const PASSWORD = process.env.OPEN_SUBTITLES_PASSWORD || process.env.OPENSUBTITLES_PASSWORD || "";
-const LANGUAGE = process.env.OPEN_SUBTITLES_LANGUAGE || "en";
+const OPEN_SUBTITLES_API_KEY = process.env.OPEN_SUBTITLES_API_KEY || process.env.OPENSUBTITLES_API_KEY || "";
+const OPEN_SUBTITLES_USERNAME = process.env.OPEN_SUBTITLES_USERNAME || process.env.OPENSUBTITLES_USERNAME || "";
+const OPEN_SUBTITLES_PASSWORD = process.env.OPEN_SUBTITLES_PASSWORD || process.env.OPENSUBTITLES_PASSWORD || "";
+const SUBDL_API_KEY = process.env.SUBDL_API_KEY || "";
+const LANGUAGE = process.env.OPEN_SUBTITLES_LANGUAGE || process.env.SUBDL_LANGUAGE || "en";
 const USER_AGENT = process.env.OPEN_SUBTITLES_USER_AGENT || "RokuDSVideo v1.0";
-const BASE_URL = "https://api.opensubtitles.com/api/v1";
+const OPEN_SUBTITLES_BASE_URL = "https://api.opensubtitles.com/api/v1";
+const SUBDL_BASE_URL = "https://api.subdl.com/api/v1";
+const SUBDL_DOWNLOAD_BASE_URL = "https://dl.subdl.com";
 
 const target = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 const FORCE = process.argv.includes("--force");
 
 if (!target) {
-  console.error("usage: OPEN_SUBTITLES_API_KEY=... node download-subtitles.js /path/video.mp4");
+  console.error("usage: SUBDL_API_KEY=... or OPEN_SUBTITLES_API_KEY=... node download-subtitles.js /path/video.mp4");
   process.exit(2);
 }
-if (!API_KEY) {
+if (!SUBDL_API_KEY && !OPEN_SUBTITLES_API_KEY) {
   console.log("[subs] skipped missing api key");
   process.exit(0);
 }
@@ -82,18 +86,25 @@ function canonicalQueryValue(value) {
   return cleanNamePart(value).toLowerCase();
 }
 
+function subdlLanguage(value) {
+  const code = String(value || "en").trim();
+  if (!code) return "EN";
+  if (code.toLowerCase() === "en") return "EN";
+  return code.toUpperCase();
+}
+
 function hasSubtitle(filePath) {
   return subtitleTargets(filePath).some((candidate) => fs.existsSync(candidate));
 }
 
-function requestJson(method, endpoint, body, token = "", redirectCount = 0) {
+function requestOpenSubtitlesJson(method, endpoint, body, token = "", redirectCount = 0) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : "";
-    const targetUrl = /^https?:\/\//i.test(endpoint) ? endpoint : `${BASE_URL}${endpoint}`;
+    const targetUrl = /^https?:\/\//i.test(endpoint) ? endpoint : `${OPEN_SUBTITLES_BASE_URL}${endpoint}`;
     const req = https.request(targetUrl, {
       method,
       headers: {
-        "Api-Key": API_KEY,
+        "Api-Key": OPEN_SUBTITLES_API_KEY,
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -107,7 +118,7 @@ function requestJson(method, endpoint, body, token = "", redirectCount = 0) {
         const text = Buffer.concat(chunks).toString("utf8");
         if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectCount < 5) {
           const next = new URL(res.headers.location, targetUrl);
-          return requestJson(method, next.href, body, token, redirectCount + 1)
+          return requestOpenSubtitlesJson(method, next.href, body, token, redirectCount + 1)
             .then(resolve)
             .catch(reject);
         }
@@ -125,16 +136,44 @@ function requestJson(method, endpoint, body, token = "", redirectCount = 0) {
   });
 }
 
-function downloadFile(url, filePath, redirectCount = 0) {
+function requestSubdlJson(endpoint, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    const targetUrl = /^https?:\/\//i.test(endpoint) ? endpoint : `${SUBDL_BASE_URL}${endpoint}`;
+    https.get(targetUrl, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectCount < 5) {
+          const next = new URL(res.headers.location, targetUrl);
+          return requestSubdlJson(next.href, redirectCount + 1).then(resolve).catch(reject);
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`${res.statusCode} ${text.slice(0, 200)}`));
+        try {
+          resolve(JSON.parse(text || "{}"));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }).on("error", reject);
+  });
+}
+
+function downloadFile(url, filePath, redirectCount = 0, headers = {}) {
   return new Promise((resolve, reject) => {
     const tmp = `${filePath}.tmp`;
     fs.rmSync(tmp, { force: true });
     const out = fs.createWriteStream(tmp);
-    https.get(url, { headers: { "User-Agent": USER_AGENT } }, (res) => {
+    https.get(url, { headers: { "User-Agent": USER_AGENT, ...headers } }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectCount < 5) {
         out.close(() => fs.rmSync(tmp, { force: true }));
         const next = new URL(res.headers.location, url).href;
-        return downloadFile(next, filePath, redirectCount + 1).then(resolve).catch(reject);
+        return downloadFile(next, filePath, redirectCount + 1, headers).then(resolve).catch(reject);
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         out.close(() => fs.rmSync(tmp, { force: true }));
@@ -154,9 +193,38 @@ function downloadFile(url, filePath, redirectCount = 0) {
   });
 }
 
+async function downloadZipSubtitle(url, filePath) {
+  const tmpZip = `${filePath}.ziptmp`;
+  fs.rmSync(tmpZip, { force: true });
+  await downloadFile(url, tmpZip);
+  const list = spawnSync("unzip", ["-Z1", tmpZip], { encoding: "utf8", timeout: 30000 });
+  if (list.status !== 0) {
+    fs.rmSync(tmpZip, { force: true });
+    throw new Error("unzip not available or invalid subtitle zip");
+  }
+  const entry = String(list.stdout || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => /\.(srt|vtt)$/i.test(line) && !/^__MACOSX\//i.test(line));
+  if (!entry) {
+    fs.rmSync(tmpZip, { force: true });
+    throw new Error("subtitle zip did not contain srt/vtt");
+  }
+  const extracted = spawnSync("unzip", ["-p", tmpZip, entry], {
+    encoding: "buffer",
+    timeout: 30000,
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  fs.rmSync(tmpZip, { force: true });
+  if (extracted.status !== 0 || !extracted.stdout?.length) throw new Error("failed to extract subtitle from zip");
+  const tmpOut = `${filePath}.tmp`;
+  fs.writeFileSync(tmpOut, extracted.stdout);
+  fs.renameSync(tmpOut, filePath);
+}
+
 async function login() {
-  if (!USERNAME || !PASSWORD) return "";
-  const response = await requestJson("POST", "/login", { username: USERNAME, password: PASSWORD });
+  if (!OPEN_SUBTITLES_USERNAME || !OPEN_SUBTITLES_PASSWORD) return "";
+  const response = await requestOpenSubtitlesJson("POST", "/login", { username: OPEN_SUBTITLES_USERNAME, password: OPEN_SUBTITLES_PASSWORD });
   return response.token || "";
 }
 
@@ -170,6 +238,21 @@ async function main() {
     console.log(`[subs] skipped unparsed query ${target}`);
     return;
   }
+  if (SUBDL_API_KEY) {
+    const saved = await saveFromSubdl(info).catch((err) => {
+      console.log(`[subs] subdl error ${target}: ${err.message}`);
+      return false;
+    });
+    if (saved) return;
+  }
+  if (!OPEN_SUBTITLES_API_KEY) {
+    console.log(`[subs] none ${target}`);
+    return;
+  }
+  await saveFromOpenSubtitles(info);
+}
+
+async function saveFromOpenSubtitles(info) {
   if (info.type === "episode") {
     const params = new URLSearchParams();
     params.set("episode_number", String(info.episode));
@@ -178,8 +261,8 @@ async function main() {
     params.set("season_number", String(info.season));
     params.set("type", "episode");
     const token = await login().catch(() => "");
-    const results = await requestJson("GET", `/subtitles?${params.toString()}`, null, token);
-    await saveFirstSubtitle(results, token);
+    const results = await requestOpenSubtitlesJson("GET", `/subtitles?${params.toString()}`, null, token);
+    await saveFirstOpenSubtitles(results, token);
   } else {
     const params = new URLSearchParams();
     params.set("languages", LANGUAGE);
@@ -187,12 +270,80 @@ async function main() {
     params.set("type", "movie");
     if (info.year) params.set("year", String(info.year));
     const token = await login().catch(() => "");
-    const results = await requestJson("GET", `/subtitles?${params.toString()}`, null, token);
-    await saveFirstSubtitle(results, token);
+    const results = await requestOpenSubtitlesJson("GET", `/subtitles?${params.toString()}`, null, token);
+    await saveFirstOpenSubtitles(results, token);
   }
 }
 
-async function saveFirstSubtitle(results, token) {
+async function saveFromSubdl(info) {
+  const params = new URLSearchParams();
+  params.set("api_key", SUBDL_API_KEY);
+  params.set("film_name", canonicalQueryValue(info.query));
+  params.set("languages", subdlLanguage(LANGUAGE));
+  params.set("subs_per_page", "30");
+  params.set("releases", "1");
+  params.set("hi", "1");
+  params.set("unpack", "1");
+  if (info.type === "episode") {
+    params.set("type", "tv");
+    params.set("season_number", String(info.season));
+    params.set("episode_number", String(info.episode));
+  } else {
+    params.set("type", "movie");
+    if (info.year) params.set("year", String(info.year));
+  }
+  const titleResults = await requestSubdlJson(`/subtitles?${params.toString()}`);
+  if (titleResults.status === false) throw new Error(titleResults.error || "SubDL search failed");
+  if (await saveFirstSubdl(titleResults, info, false)) return true;
+
+  const fileParams = new URLSearchParams();
+  fileParams.set("api_key", SUBDL_API_KEY);
+  fileParams.set("file_name", path.basename(target));
+  fileParams.set("languages", subdlLanguage(LANGUAGE));
+  fileParams.set("subs_per_page", "30");
+  fileParams.set("releases", "1");
+  fileParams.set("hi", "1");
+  fileParams.set("unpack", "1");
+  const fileResults = await requestSubdlJson(`/subtitles?${fileParams.toString()}`);
+  if (fileResults.status === false) throw new Error(fileResults.error || "SubDL file search failed");
+  return saveFirstSubdl(fileResults, info, true);
+}
+
+async function saveFirstSubdl(results, info, quietNone = false) {
+  const entries = Array.isArray(results.subtitles) ? results.subtitles : [];
+  const flattened = [];
+  for (const entry of entries) {
+    if (Array.isArray(entry.unpack_files) && entry.unpack_files.length > 0) {
+      for (const unpacked of entry.unpack_files) flattened.push({ entry, unpacked, score: subdlSubtitleScore(entry, unpacked, info) });
+    } else {
+      flattened.push({ entry, unpacked: null, score: subdlSubtitleScore(entry, null, info) });
+    }
+  }
+  const ranked = flattened
+    .filter((item) => item.score > -1000)
+    .sort((a, b) => b.score - a.score);
+  const first = ranked[0];
+  if (!first) {
+    if (!quietNone) console.log(`[subs] subdl none ${target}`);
+    return false;
+  }
+  const out = subtitleTargets(target)[0];
+  const label = subdlSubtitleLabel(first.entry, first.unpacked);
+  console.log(`[subs] subdl selected ${label} score=${first.score}`);
+  const relativeUrl = first.unpacked?.url || first.entry.url;
+  if (!relativeUrl) {
+    console.log(`[subs] subdl missing download url ${target}`);
+    return false;
+  }
+  const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
+  if (first.unpacked?.url && /\.(srt|vtt)(?:$|\?)/i.test(downloadUrl)) await downloadFile(downloadUrl, out);
+  else if (first.unpacked?.url) await downloadFile(downloadUrl, out);
+  else await downloadZipSubtitle(downloadUrl, out);
+  console.log(`[subs] saved ${out}`);
+  return true;
+}
+
+async function saveFirstOpenSubtitles(results, token) {
   const entries = Array.isArray(results.data) ? results.data : [];
   const ranked = entries
     .filter((entry) => entry.attributes?.files?.[0]?.file_id)
@@ -206,11 +357,53 @@ async function saveFirstSubtitle(results, token) {
   }
   console.log(`[subs] selected ${subtitleLabel(first)} score=${ranked[0].score}`);
   const fileId = first.attributes.files[0].file_id;
-  const download = await requestJson("POST", "/download", { file_id: fileId, sub_format: "srt" }, token);
+  const download = await requestOpenSubtitlesJson("POST", "/download", { file_id: fileId, sub_format: "srt" }, token);
   if (!download.link) throw new Error("download link missing");
   const out = subtitleTargets(target)[0];
   await downloadFile(download.link, out);
   console.log(`[subs] saved ${out}`);
+}
+
+function subdlSubtitleLabel(entry, unpacked) {
+  return cleanNamePart([
+    unpacked?.release_name,
+    unpacked?.name,
+    entry.release_name,
+    entry.name,
+  ].filter(Boolean).join(" | "));
+}
+
+function subdlSubtitleScore(entry, unpacked, info) {
+  const label = subdlSubtitleLabel(entry, unpacked).toLowerCase();
+  let score = 0;
+  const season = Number(unpacked?.season || entry.season || 0);
+  const episode = Number(unpacked?.episode || entry.episode || 0);
+  const format = String(unpacked?.format || entry.format || "").toLowerCase();
+  const size = Number(unpacked?.size || entry.size || 0);
+  const hi = unpacked?.hi ?? entry.hi;
+
+  if (info.type === "episode") {
+    if (season === info.season) score += 80;
+    if (episode === info.episode) score += 100;
+    if (season && season !== info.season) score -= 500;
+    if (episode && episode !== info.episode) score -= 500;
+  }
+  if (format === "srt") score += 30;
+  if (format === "vtt") score += 10;
+  if (hi === false) score += 20;
+  if (hi === true) score -= 25;
+  if (entry.full_season && !unpacked) score -= 100;
+
+  for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
+    if (label.includes(bad)) score -= 500;
+  }
+  for (const good of ["web", "webrip", "web-dl", "hdtv", "bluray", "bdrip", "dvdrip", "proper"]) {
+    if (label.includes(good)) score += 8;
+  }
+  if (size > 0 && size < 15000) score -= 20;
+  if (size > 25000 && size < 90000) score += 10;
+
+  return score;
 }
 
 function subtitleLabel(entry) {

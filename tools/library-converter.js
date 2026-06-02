@@ -214,7 +214,7 @@ function indexReplacement(source, target) {
 }
 
 function downloadSubtitles(target) {
-  if (!process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return;
+  if (!process.env.SUBDL_API_KEY && !process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return false;
   if (!fs.existsSync(SUBTITLE_DOWNLOADER)) return;
   const result = spawnSync(NODE_BIN, [SUBTITLE_DOWNLOADER, target], {
     encoding: "utf8",
@@ -223,6 +223,7 @@ function downloadSubtitles(target) {
   });
   const detail = (result.stdout || result.stderr || "").trim();
   if (detail) console.log(detail);
+  return result.status === 0;
 }
 
 function textSubtitleStreams(source) {
@@ -253,6 +254,47 @@ function subtitleArgsForSource(source) {
   return args;
 }
 
+function subtitleTargets(filePath, lang = process.env.OPEN_SUBTITLES_LANGUAGE || process.env.SUBDL_LANGUAGE || "en") {
+  const parsed = path.parse(filePath);
+  return [
+    path.join(parsed.dir, `${parsed.name}.${lang}.srt`),
+    path.join(parsed.dir, `${parsed.name}.srt`),
+    path.join(parsed.dir, `${parsed.name}.${lang}.vtt`),
+    path.join(parsed.dir, `${parsed.name}.vtt`),
+  ];
+}
+
+function firstSidecarSubtitle(filePath) {
+  return subtitleTargets(filePath).find((candidate) => fs.existsSync(candidate)) || "";
+}
+
+function remuxSidecarSubtitleIntoMp4(target) {
+  const subtitle = firstSidecarSubtitle(target);
+  if (!subtitle) return false;
+  const tmp = `${target}.subtmp.mp4`;
+  fs.rmSync(tmp, { force: true });
+  const result = spawnSync(FFMPEG, [
+    "-hide_banner",
+    "-loglevel", "warning",
+    "-y",
+    "-i", target,
+    "-i", subtitle,
+    "-map", "0",
+    "-map", "1:0",
+    "-c", "copy",
+    "-c:s", "mov_text",
+    "-movflags", "+faststart",
+    tmp,
+  ], { encoding: "utf8", timeout: 30 * 60 * 1000 });
+  if (result.status !== 0) {
+    fs.rmSync(tmp, { force: true });
+    console.log(`[convert] subtitle remux failed ${target}: ${(result.stderr || result.stdout || "").trim().slice(0, 500)}`);
+    return false;
+  }
+  fs.renameSync(tmp, target);
+  return true;
+}
+
 function copySidecarSubtitles(source, target) {
   const sourceParsed = path.parse(source);
   const targetParsed = path.parse(target);
@@ -281,6 +323,7 @@ function convertOne(source) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.tmp.mp4`;
   fs.rmSync(tmp, { force: true });
+  const sourceTextSubtitleCount = textSubtitleStreams(source).length;
   const ffmpegArgs = [
     "-hide_banner",
     "-loglevel", "warning",
@@ -311,12 +354,13 @@ function convertOne(source) {
   const sidecarSubtitles = copySidecarSubtitles(source, target);
   generateVsmeta(source, target);
   downloadSubtitles(target);
+  const embeddedDownloadedSubtitle = sourceTextSubtitleCount === 0 ? remuxSidecarSubtitleIntoMp4(target) : false;
   if (DELETE_ORIGINAL) {
     fs.rmSync(source, { force: true });
     fs.rmSync(`${source}.vsmeta`, { force: true });
   }
   indexReplacement(source, target);
-  return { action: "converted", source, target, deleteOriginal: DELETE_ORIGINAL, sidecarSubtitles };
+  return { action: "converted", source, target, deleteOriginal: DELETE_ORIGINAL, sidecarSubtitles, embeddedDownloadedSubtitle };
 }
 
 function scanOnce() {
