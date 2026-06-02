@@ -2243,6 +2243,7 @@ sub init()
               copyEpisodeMetadataField(meta, item, "description")
               copyEpisodeMetadataField(meta, item, "original_available")
               copyEpisodeMetadataField(meta, item, "originally_available")
+              copyEpisodeMetadataField(meta, item, "year")
               copyEpisodeMetadataField(meta, item, "additional")
               summary = episodeSummaryText(meta)
               if summary <> ""
