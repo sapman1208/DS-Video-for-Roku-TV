@@ -5,12 +5,10 @@ PKG_DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG_NAME/target}"
 PKG_VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG_NAME/var}"
 TOOLS_DIR="$PKG_DEST/tools"
 CONFIG_FILE="$PKG_VAR/config.env"
-TOOLS_ENV="$TOOLS_DIR/.env"
 
 load_config() {
-  mkdir -p "$PKG_VAR" "$TOOLS_DIR"
+  mkdir -p "$PKG_VAR"
   if [ -f "$CONFIG_FILE" ]; then
-    cp "$CONFIG_FILE" "$TOOLS_ENV"
     set -a
     . "$CONFIG_FILE"
     set +a
@@ -79,4 +77,3 @@ case "$1" in
     exit 1
     ;;
 esac
-
