@@ -1731,8 +1731,8 @@ sub init()
       id = idToStr(candidateId)
       if id = "" or id = "0" then return emptyResult
 
-      richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22%5D"
-      simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22%5D"
+      richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22%5D"
+      simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22,%22originally_available%22%5D"
       attempts = [
           { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "tvshow_id", keys: ["episodes", "episode"] },
           { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "tvshow_id", keys: ["episode", "episodes"] },

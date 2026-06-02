@@ -912,6 +912,7 @@ sub init()
       else if epNumber > 0
           episodeMeta = "Episode " + stri(epNumber).trim()
       end if
+      originalAvailable = safeStr(ep, ["original_available", "originally_available", "originalAvailable", "date", "air_date", "premiered", "year"])
 
       summary = episodeSummaryText(ep)
       detailPoster = posterUrl(ep, authData)
@@ -929,6 +930,7 @@ sub init()
           seasonNumber: seasonNumber,
           episodeNumber: epNumber,
           episodeMeta: episodeMeta,
+          originalAvailable: originalAvailable,
           resumePosition: firstNumber(ep, ["resumePosition", "watch_position", "position"]),
           title: safeStr(ep, ["title", "name"]),
           summary: summary,

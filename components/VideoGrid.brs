@@ -635,10 +635,10 @@ sub init()
 	              fileId: rawFileId,
 	              mapperId: item.lookUp("mapper_id"),
 	              libraryId: m.top.libraryId,
-	              filePath: fileInfo.path,
-	              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
+		              filePath: fileInfo.path,
+		              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
 	              title: safeStr(item, ["title", "name", "file_name"]),
-	              summary: safeStr(item, ["summary", "description", "tagline"]),
+	              summary: summaryForDetail(item),
 	              posterUrl: posterUrl(item, authData, category),
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
 	              backdropUrl: backdropUrl(item, authData),
@@ -652,6 +652,13 @@ sub init()
 		          }
               print "DETAIL_HANDOFF type="; itemType; " category="; categoryLabel(category); " title="; safeStr(item, ["title", "name", "file_name"]); " posterSource="; posterSource(item, authData, category); " backdropSource="; backdropSource(item, authData)
       end sub
+
+  function summaryForDetail(item as object) as string
+      title = safeStr(item, ["title", "name", "file_name"])
+      summary = safeStr(item, ["summary", "description", "tagline"])
+      if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then return ""
+      return summary
+  end function
 
   function localListKeyForCategory(category as string) as string
       if category = "local_favorites" then return "favorites"

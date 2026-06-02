@@ -174,7 +174,7 @@ function imageFromTable(table, mapperId) {
 function episodeInfo(videoPath) {
   const escaped = sqlEscape(videoPath);
   const rows = runSql(`
-    select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, '')
+    select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, ''), coalesce(e.originally_available::text, '')
     from video_file vf
     left join tvshow_episode e on e.id = vf.mapper_id or e.mapper_id = vf.mapper_id
     left join tvshow t on t.id = e.tvshow_id
@@ -196,6 +196,7 @@ function episodeInfo(videoPath) {
     showMapperId: parts[6],
     showSummary: parts[7] || "",
     showDate: /^\d{4}-\d{2}-\d{2}/.test(parts[8] || "") ? parts[8].slice(0, 10) : "",
+    episodeDate: /^\d{4}-\d{2}-\d{2}/.test(parts[9] || "") ? parts[9].slice(0, 10) : "",
   });
 }
 
@@ -225,7 +226,7 @@ function episodeInfoByShowSeasonEpisode(showTitle, season, episode) {
   if (!showTitle || !season || !episode) return null;
   const escaped = sqlEscape(showTitle);
   const rows = runSql(`
-    select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, '')
+    select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, ''), coalesce(e.originally_available::text, '')
     from tvshow_episode e
     join tvshow t on t.id = e.tvshow_id
     left join summary s on s.mapper_id = e.mapper_id
@@ -251,6 +252,7 @@ function episodeInfoByShowSeasonEpisode(showTitle, season, episode) {
     showMapperId: parts[6],
     showSummary: parts[7] || "",
     showDate: /^\d{4}-\d{2}-\d{2}/.test(parts[8] || "") ? parts[8].slice(0, 10) : "",
+    episodeDate: /^\d{4}-\d{2}-\d{2}/.test(parts[9] || "") ? parts[9].slice(0, 10) : "",
   });
 }
 
@@ -293,6 +295,7 @@ function episodeInfoFromPath(videoPath) {
     showMapperId: showInfo.showMapperId || "",
     showSummary: showInfo.showSummary || "",
     showDate: showInfo.showDate || "",
+    episodeDate: "",
   });
 }
 
@@ -321,12 +324,13 @@ function movieInfo(videoPath) {
 function buildSeriesVsmeta(info, images) {
   const episodeImageChunks = imageTags(images.episode, 0x8a, 0x92, 1);
   const group3 = Buffer.concat(imageTags(images.backdrop, 0x0a, 0x12));
+  const episodeDate = info.episodeDate || info.showDate || "";
   const group2Chunks = [
     tag(0x08, info.season, "int"),
     tag(0x10, info.episode, "int"),
-    tag(0x18, info.showDate ? Number(info.showDate.slice(0, 4)) : 0, "int"),
+    tag(0x18, episodeDate ? Number(episodeDate.slice(0, 4)) : 0, "int"),
   ];
-  if (info.showDate) group2Chunks.push(tag(0x22, info.showDate, "date"));
+  if (episodeDate) group2Chunks.push(tag(0x22, episodeDate, "date"));
   group2Chunks.push(tag(0x28, true, "bool"));
   if (info.showSummary) group2Chunks.push(tag(0x32, info.showSummary));
   group2Chunks.push(...imageTags(images.poster, 0x3a, 0x42));

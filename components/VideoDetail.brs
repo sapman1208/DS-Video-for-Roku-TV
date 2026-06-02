@@ -55,6 +55,7 @@ sub onVideoDataSet(event as object)
     summary = ""
     if data.summary <> invalid then summary = data.summary
     if summary = "" and data.description <> invalid then summary = data.description
+    if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
     if summary = "" then summary = "No description available."
     m.top.findNode("summaryLabel").text = summary
     poster = ""
