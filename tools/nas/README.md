@@ -54,6 +54,12 @@ Start only the background converter:
 nas/start-library-converter.sh
 ```
 
+## Manual Tools
+
+The tools folder also includes maintenance scripts such as `normalize-media-plan.js`, `apply-normalize-plan.js`, `cleanup-normalize-leftovers.js`, `migrate-transcodes.js`, `generate-vsmeta.js`, and `generate-episode-posters.js`.
+
+These are manual utilities. They are not run by `nas/start-on-demand.sh`, `nas/start-full-automation.sh`, or any individual service start script. Run them directly only after reviewing their dry-run output or script options.
+
 ## Environment
 
 Scripts read `/volume1/docker/roku-ds-video-tools/.env`.

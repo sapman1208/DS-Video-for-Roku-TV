@@ -165,6 +165,21 @@ cd /volume1/docker/roku-ds-video-tools
 /volume1/@appstore/homebridge/app/bin/node subtitle-watcher.js --once --dry-run
 ```
 
+## Manual Maintenance Tools
+
+The NAS tools package also includes helper scripts for one-off cleanup and media-library maintenance. These are not run by `nas/start-on-demand.sh`, `nas/start-full-automation.sh`, or any other auto-start script.
+
+Included manual tools:
+
+- `normalize-media-plan.js`: previews media filename/folder normalization work.
+- `apply-normalize-plan.js`: applies a previously reviewed normalization plan.
+- `cleanup-normalize-leftovers.js`: removes leftover files from normalization work.
+- `migrate-transcodes.js`: moves completed `@roku-transcodes` MP4s back into regular library folders.
+- `generate-vsmeta.js`: writes `.vsmeta` sidecars when run directly.
+- `generate-episode-posters.js`: generates episode poster images when run directly.
+
+Run these manually only after reviewing their dry-run output or script options.
+
 ## DSM Task Scheduler
 
 For on-demand mode at boot, create a triggered task as root:
