@@ -14,6 +14,7 @@ const FORCE = process.argv.includes("--force");
 const LOCK_FILE = process.env.ROKU_SUBTITLE_LOCK || "/tmp/roku-subtitle-watcher.lock";
 const VIDEO_RE = /\.(avi|mkv|mp4|m4v|mov|wmv|mpg|mpeg|ts|m2ts|m2v|flv|webm)$/i;
 const INCLUDE_HOME = process.env.ROKU_SUBTITLE_INCLUDE_HOME === "1";
+const DB_UNAVAILABLE_RE = /user VideoStation does not exist|Unknown id: VideoStation|No passwd entry|Permission denied|sudo:.*password|not in the sudoers/i;
 
 function isSubtitleLibraryPath(filePath) {
   const norm = String(filePath || "").replace(/\\/g, "/").toLowerCase();
@@ -28,18 +29,31 @@ function isSubtitleLibraryPath(filePath) {
 
 function runSql(sql) {
   const command = `psql -U VideoStation -d video_metadata -X -q -t -A -F "\t" -c "${sql.replace(/"/g, '\\"')}"`;
-  const result = spawnSync("su", ["-l", "VideoStation", "-s", "/bin/bash", "-c", command], {
+  const runners = [
+    ["sudo", ["-n", "-u", "VideoStation", "/bin/bash", "-lc", command]],
+    ["su", ["-l", "VideoStation", "-s", "/bin/bash", "-c", command]],
+  ];
+  let detail = "";
+  for (const [bin, args] of runners) {
+    const result = spawnSync(bin, args, {
+      encoding: "utf8",
+    });
+    if (result.status === 0) return String(result.stdout || "").trim();
+    detail = (result.stderr || result.stdout || `${bin} failed ${result.status}`).trim();
+    if (!DB_UNAVAILABLE_RE.test(detail)) break;
+  }
+  if (DB_UNAVAILABLE_RE.test(detail)) {
+    console.log(JSON.stringify({ action: "subtitle-scan-skip", reason: "VideoStation database unavailable", detail }));
+    return "";
+  }
+  throw new Error(detail);
+}
+
+function canUseVideoStationDb() {
+  const result = spawnSync("id", ["VideoStation"], {
     encoding: "utf8",
   });
-  if (result.status !== 0) {
-    const detail = (result.stderr || result.stdout || `psql failed ${result.status}`).trim();
-    if (/user VideoStation does not exist|Unknown id: VideoStation|No passwd entry/i.test(detail)) {
-      console.log(JSON.stringify({ action: "subtitle-scan-skip", reason: "VideoStation user missing" }));
-      return "";
-    }
-    throw new Error(detail);
-  }
-  return String(result.stdout || "").trim();
+  return result.status === 0;
 }
 
 function subtitleTargets(filePath, lang = process.env.OPEN_SUBTITLES_LANGUAGE || process.env.OPENSUBTITLES_LANGUAGE || "en") {
@@ -55,6 +69,10 @@ function hasSubtitle(filePath) {
 }
 
 function discoverCandidates() {
+  if (!canUseVideoStationDb()) {
+    console.log(JSON.stringify({ action: "subtitle-scan-skip", reason: "VideoStation user missing" }));
+    return [];
+  }
   const max = LIMIT > 0 ? `limit ${LIMIT}` : "";
   const rows = runSql(`
     select distinct vf.path
