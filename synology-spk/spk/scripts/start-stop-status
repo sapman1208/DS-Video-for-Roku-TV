@@ -87,6 +87,10 @@ find_ffmpeg() {
     echo /var/packages/ffmpeg7/target/bin/ffmpeg
   elif [ -x /var/packages/ffmpeg/target/bin/ffmpeg ]; then
     echo /var/packages/ffmpeg/target/bin/ffmpeg
+  elif [ -x /var/packages/VideoStation/target/bin/ffmpeg ]; then
+    echo /var/packages/VideoStation/target/bin/ffmpeg
+  elif [ -x /var/packages/VideoStation/target/lib/ffmpeg ]; then
+    echo /var/packages/VideoStation/target/lib/ffmpeg
   elif command -v ffmpeg >/dev/null 2>&1; then
     command -v ffmpeg
   fi

@@ -8,7 +8,7 @@ description="NAS helper services for the DS Video Roku channel: proxy playback, 
 startable="yes"
 ctl_stop="yes"
 thirdparty="yes"
+install_dep_packages="Node.js_v20"
 silent_install="no"
 silent_upgrade="no"
 silent_uninstall="no"
-

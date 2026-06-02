@@ -10,6 +10,8 @@ The package installs:
 - VSMETA generation and migration utilities.
 - DSM Package Center start/stop/status integration.
 
+The package declares Synology `Node.js_v20` as an install dependency because the services are Node scripts. For transcoding, install either Video Station, SynoCommunity `ffmpeg7`, SynoCommunity `ffmpeg`, or set `FFMPEG=/path/to/ffmpeg` in the package config.
+
 ## Video Station
 
 Video Station is Synology software and is not bundled in this repository. If Video Station disappears from Package Center, put an official Video Station `.spk` that you already have rights to use in:

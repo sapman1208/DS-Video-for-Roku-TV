@@ -28,10 +28,14 @@ if [ -z "${FFMPEG:-}" ]; then
     export FFMPEG=/var/packages/ffmpeg7/target/bin/ffmpeg
   elif [ -x /var/packages/ffmpeg/target/bin/ffmpeg ]; then
     export FFMPEG=/var/packages/ffmpeg/target/bin/ffmpeg
+  elif [ -x /var/packages/VideoStation/target/bin/ffmpeg ]; then
+    export FFMPEG=/var/packages/VideoStation/target/bin/ffmpeg
+  elif [ -x /var/packages/VideoStation/target/lib/ffmpeg ]; then
+    export FFMPEG=/var/packages/VideoStation/target/lib/ffmpeg
   elif command -v ffmpeg >/dev/null 2>&1; then
     export FFMPEG="$(command -v ffmpeg)"
   else
-    echo "ffmpeg not found. Set FFMPEG=/path/to/ffmpeg before starting." >&2
+    echo "ffmpeg not found. Install SynoCommunity ffmpeg7, Video Station, or set FFMPEG=/path/to/ffmpeg before starting." >&2
     exit 1
   fi
 fi
