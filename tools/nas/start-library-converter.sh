@@ -40,6 +40,8 @@ if [ -z "${NODE_BIN:-}" ]; then
     NODE_BIN="$(command -v node)"
   elif [ -x /volume1/@appstore/homebridge/app/bin/node ]; then
     NODE_BIN=/volume1/@appstore/homebridge/app/bin/node
+  elif [ -x /var/packages/Node.js_v22/target/usr/local/bin/node ]; then
+    NODE_BIN=/var/packages/Node.js_v22/target/usr/local/bin/node
   elif [ -x /var/packages/Node.js_v20/target/usr/local/bin/node ]; then
     NODE_BIN=/var/packages/Node.js_v20/target/usr/local/bin/node
   elif [ -x /var/packages/Node.js_v18/target/usr/local/bin/node ]; then

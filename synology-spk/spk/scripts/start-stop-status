@@ -73,6 +73,8 @@ find_node() {
     command -v node
   elif [ -x /volume1/@appstore/homebridge/app/bin/node ]; then
     echo /volume1/@appstore/homebridge/app/bin/node
+  elif [ -x /var/packages/Node.js_v22/target/usr/local/bin/node ]; then
+    echo /var/packages/Node.js_v22/target/usr/local/bin/node
   elif [ -x /var/packages/Node.js_v20/target/usr/local/bin/node ]; then
     echo /var/packages/Node.js_v20/target/usr/local/bin/node
   elif [ -x /var/packages/Node.js_v18/target/usr/local/bin/node ]; then

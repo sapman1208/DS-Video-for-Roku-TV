@@ -10,7 +10,7 @@ The package installs:
 - VSMETA generation and migration utilities.
 - DSM Package Center start/stop/status integration.
 
-The package declares Synology `Node.js_v20` as an install dependency because the services are Node scripts. For transcoding, install either Video Station, SynoCommunity `ffmpeg7`, SynoCommunity `ffmpeg`, or set `FFMPEG=/path/to/ffmpeg` in the package config.
+The package declares Synology `Node.js_v22` as an install dependency because the services are Node scripts. The scripts also detect `Node.js_v20`, `Node.js_v18`, and Homebridge's bundled Node on systems that already have one of those installed. For transcoding, install either Video Station, SynoCommunity `ffmpeg7`, SynoCommunity `ffmpeg`, or set `FFMPEG=/path/to/ffmpeg` in the package config.
 
 ## Video Station
 
