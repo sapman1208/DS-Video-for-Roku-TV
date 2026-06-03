@@ -122,6 +122,10 @@ sub init()
 
       ' Back from any screen except login — pop the stack
       if key = "back"
+          if isLocalPlaylistGrid(m.currentScreen)
+              doBack()
+              return true
+          end if
           if isTopNavFocused() then return false
           if m.screenStack.count() > 1
               doBack()
@@ -143,6 +147,14 @@ sub init()
       end if
 
       return false
+  end function
+
+  function isLocalPlaylistGrid(screen as dynamic) as boolean
+      if screen = invalid then return false
+      if screen.subtype() <> "VideoGrid" then return false
+      category = screen.category
+      if category = invalid then return false
+      return left(category, 6) = "local_"
   end function
 
   function isTopNavFocused() as boolean
@@ -176,6 +188,15 @@ sub init()
               if nav <> invalid
                   m.currentScreen.focusNavCategory = "settings"
                   return
+              end if
+          end if
+          if screenToRemove.subtype() = "VideoDetail" and m.currentScreen <> invalid and m.currentScreen.subtype() = "VideoGrid"
+              currentCategory = m.currentScreen.category
+              if currentCategory <> invalid and left(currentCategory, 6) = "local_" and m.screenStack.count() > 1
+                  localListScreen = m.currentScreen
+                  m.top.removeChild(localListScreen)
+                  m.screenStack.pop()
+                  m.currentScreen = m.screenStack[m.screenStack.count() - 1]
               end if
           end if
           ' Focus the Group first, then the actual inner navigable widget

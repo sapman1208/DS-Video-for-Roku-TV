@@ -1,73 +1,40 @@
 <?xml version="1.0" encoding="utf-8" ?>
-  <component name="VideoPlayer" extends="Group">
-      <interface>
-          <field id="authData" type="assocarray" />
-          <field id="videoData" type="assocarray" />
-          <field id="resumePosition" type="integer" value="0" />
-          <field id="playbackDone" type="boolean" alwaysNotify="true" />
-          <field id="playbackResult" type="assocarray" alwaysNotify="true" />
-      </interface>
-      <children>
-          <Rectangle id="backgroundRect" color="#000000" width="1920" height="1080" />
-
-          <Rectangle id="loadingOverlay" color="#000000"
-              width="1920" height="1080" />
-          <Label id="loadingLabel" text=""
-              color="#FFFFFF" font="font:MediumSystemFont"
-              translation="[820, 510]" visible="false" />
-          <Label id="videoTitle" text="" color="#8BAFD1"
-              font="font:SmallSystemFont"
-              translation="[760, 560]" width="400" visible="false" />
-
-          <!-- Full-width label at top-left so diagnostic text never gets clipped -->
-          <Label id="errorLabel" text="" color="#FFE066"
-              font="font:SmallSystemFont"
-              translation="[40, 30]"
-              width="1840"
-              wrap="true"
-              visible="false" />
-
-          <Video id="videoNode"
-              translation="[0,0]"
-              width="1920"
-              height="1080"
-              visible="false" />
-          <Group id="captionOverlay" visible="false" translation="[220, 718]">
-              <Rectangle id="captionBackground" color="#000000" opacity="0.72"
-                  width="1480" height="132" />
-              <Label id="captionLabel" text="" color="#FFFFFF"
-                  font="font:MediumBoldSystemFont"
-                  horizAlign="center"
-                  vertAlign="center"
-                  translation="[30, 10]"
-                  width="1420" height="112"
-                  wrap="true"
-                  maxLines="3" />
-          </Group>
-          <Group id="resumeOverlay" visible="false">
-              <Rectangle color="#000000" width="1920" height="1080" />
-              <Label id="resumeOverlayLabel" text="Resuming..."
-                  color="#FFFFFF" font="font:MediumSystemFont"
-                  horizAlign="center"
-                  translation="[0, 500]" width="1920" />
-          </Group>
-          <Group id="controlOverlay" visible="false" translation="[0, 820]">
-              <Rectangle color="#000000" opacity="0.72" width="1920" height="260" />
-              <Label id="overlayTitle" text="" color="#FFFFFF"
-                  font="font:MediumBoldSystemFont"
-                  translation="[100, 38]" width="1720" />
-              <Label id="overlayTime" text="" color="#D8D8D8"
-                  font="font:SmallSystemFont"
-                  translation="[100, 96]" width="1720" />
-              <Rectangle color="#4C4C4C" width="1720" height="12" translation="[100, 148]" />
-              <Rectangle id="overlayProgress" color="#DF3540" width="1" height="12" translation="[100, 148]" />
-          </Group>
-          <Timer id="progressTimer" repeat="true" duration="5" />
-          <Timer id="overlayRefreshTimer" repeat="true" duration="1" />
-          <Timer id="overlayTimer" repeat="false" duration="5" />
-          <Timer id="resumeSeekTimer" repeat="true" duration="0.75" />
-          <Timer id="captionTimer" repeat="true" duration="0.5" />
-      </children>
-      <script type="text/brightscript" uri="pkg:/components/VideoPlayer.brs" />
-  </component>
-  
+<component name="VideoPlayer" extends="Group">
+    <interface>
+        <field id="authData" type="assocarray" />
+        <field id="videoData" type="assocarray" />
+        <field id="resumePosition" type="integer" value="0" />
+        <field id="playbackDone" type="boolean" alwaysNotify="true" />
+        <field id="playbackResult" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/VideoPlayer.brs" />
+    <script type="text/brightscript" uri="pkg:/source/bslib.brs" />
+    <children>
+        <Rectangle id="backgroundRect" color="#000000" width="1920" height="1080" />
+        <Rectangle id="loadingOverlay" color="#000000" width="1920" height="1080" />
+        <Label id="loadingLabel" text="" color="#FFFFFF" font="font:MediumSystemFont" translation="[820, 510]" visible="false" />
+        <Label id="videoTitle" text="" color="#8BAFD1" font="font:SmallSystemFont" translation="[760, 560]" width="400" visible="false" />
+        <Label id="errorLabel" text="" color="#FFE066" font="font:SmallSystemFont" translation="[40, 30]" width="1840" wrap="true" visible="false" />
+        <Video id="videoNode" translation="[0,0]" width="1920" height="1080" visible="false" />
+        <Group id="captionOverlay" visible="false" translation="[220, 718]">
+            <Rectangle id="captionBackground" color="#000000" opacity="0.72" width="1480" height="132" />
+            <Label id="captionLabel" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" horizAlign="center" vertAlign="center" translation="[30, 10]" width="1420" height="112" wrap="true" maxLines="3" />
+        </Group>
+        <Group id="resumeOverlay" visible="false">
+            <Rectangle color="#000000" width="1920" height="1080" />
+            <Label id="resumeOverlayLabel" text="Resuming..." color="#FFFFFF" font="font:MediumSystemFont" horizAlign="center" translation="[0, 500]" width="1920" />
+        </Group>
+        <Group id="controlOverlay" visible="false" translation="[0, 820]">
+            <Rectangle color="#000000" opacity="0.72" width="1920" height="260" />
+            <Label id="overlayTitle" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[100, 38]" width="1720" />
+            <Label id="overlayTime" text="" color="#D8D8D8" font="font:SmallSystemFont" translation="[100, 96]" width="1720" />
+            <Rectangle color="#4C4C4C" width="1720" height="12" translation="[100, 148]" />
+            <Rectangle id="overlayProgress" color="#DF3540" width="1" height="12" translation="[100, 148]" />
+        </Group>
+        <Timer id="progressTimer" repeat="true" duration="5" />
+        <Timer id="overlayRefreshTimer" repeat="true" duration="1" />
+        <Timer id="overlayTimer" repeat="false" duration="5" />
+        <Timer id="resumeSeekTimer" repeat="true" duration="0.75" />
+        <Timer id="captionTimer" repeat="true" duration="0.5" />
+    </children>
+</component>

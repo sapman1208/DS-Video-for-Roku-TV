@@ -4,10 +4,10 @@
         <field id="itemContent" type="node" />
         <field id="focusPercent" type="float" />
     </interface>
+    <script type="text/brightscript" uri="pkg:/components/NavItem.brs" />
+    <script type="text/brightscript" uri="pkg:/source/bslib.brs" />
     <children>
         <Rectangle id="focusBg" color="#FFFFFF" width="240" height="60" opacity="0" />
-        <Label id="titleLabel" text="" color="#D8D8D8" font="font:SmallBoldSystemFont"
-            translation="[4, 8]" width="232" height="46" wrap="true" horizAlign="center" />
+        <Label id="titleLabel" text="" color="#D8D8D8" font="font:SmallBoldSystemFont" translation="[4, 8]" width="232" height="46" wrap="true" horizAlign="center" />
     </children>
-    <script type="text/brightscript" uri="pkg:/components/NavItem.brs" />
 </component>

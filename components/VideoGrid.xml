@@ -13,42 +13,19 @@
         <field id="refreshArtwork" type="boolean" alwaysNotify="true" />
         <field id="backPressed" type="boolean" alwaysNotify="true" />
     </interface>
+    <script type="text/brightscript" uri="pkg:/components/VideoGrid.brs" />
+    <script type="text/brightscript" uri="pkg:/source/bslib.brs" />
     <children>
         <Rectangle color="#373B3E" width="1920" height="1080" />
         <Rectangle color="#2D3134" width="1920" height="80" />
-        <MarkupGrid id="categoryList"
-            translation="[48, 10]"
-            itemComponentName="NavItem"
-            numColumns="7"
-            itemSize="[240, 60]"
-            itemSpacing="[14, 0]"
-            numRows="1" />
+        <MarkupGrid id="categoryList" translation="[48, 10]" itemComponentName="NavItem" numColumns="7" itemSize="[240, 60]" itemSpacing="[14, 0]" numRows="1" />
         <Timer id="navLoadTimer" repeat="false" duration="0.25" />
         <Timer id="posterRetryTimer" repeat="true" duration="0.35" />
         <Timer id="initialPosterRetryTimer" repeat="false" duration="0.65" />
         <Timer id="scrollPosterRetryTimer" repeat="false" duration="0.55" />
-
-        <Label id="pageTitleLabel" text="" color="#FFFFFF"
-            font="font:MediumBoldSystemFont"
-            translation="[48, 92]" width="900" visible="false" />
-
-        <Label id="loadingLabel" text=""
-            color="#8BAFD1" font="font:MediumSystemFont"
-            translation="[840, 530]" visible="false" />
-
-        <Label id="errorLabel" text="" color="#FF6B6B"
-            font="font:MediumSystemFont" translation="[600, 500]"
-            width="720" wrap="true" visible="false" />
-
-        <MarkupGrid id="videoGrid"
-            translation="[48, 120]"
-            itemComponentName="VideoItem"
-            numColumns="7"
-            itemSize="[220, 430]"
-            itemSpacing="[45, 22]"
-            vertFocusAnimationStyle="floatingFocus"
-            numRows="2"
-            visible="false" />
+        <Label id="pageTitleLabel" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[48, 92]" width="900" visible="false" />
+        <Label id="loadingLabel" text="" color="#8BAFD1" font="font:MediumSystemFont" translation="[840, 530]" visible="false" />
+        <Label id="errorLabel" text="" color="#FF6B6B" font="font:MediumSystemFont" translation="[600, 500]" width="720" wrap="true" visible="false" />
+        <MarkupGrid id="videoGrid" translation="[48, 120]" itemComponentName="VideoItem" numColumns="7" itemSize="[220, 430]" itemSpacing="[45, 22]" vertFocusAnimationStyle="floatingFocus" numRows="2" visible="false" />
     </children>
-    <script type="text/brightscript" uri="pkg:/components/VideoGrid.brs" />
 </component>

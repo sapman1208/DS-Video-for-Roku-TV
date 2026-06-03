@@ -978,6 +978,38 @@ async function tvMetadata(title) {
   return output || "[]";
 }
 
+function collectionIdForKey(key, collectionId) {
+  const direct = Number(collectionId);
+  if (Number.isInteger(direct) && direct > 0) return direct;
+  if (key === "favorites") return 5;
+  if (key === "watchlist") return 4;
+  return 0;
+}
+
+async function toggleCollection(collectionId, mapperId, enabled) {
+  const cid = Number(collectionId);
+  const mid = Number(mapperId);
+  if (!Number.isInteger(cid) || cid <= 0) throw new Error("invalid collection id");
+  if (!Number.isInteger(mid) || mid <= 0) throw new Error("invalid mapper id");
+
+  if (enabled) {
+    await runVideoStationSql(`
+      insert into collection_map (collection_id, mapper_id, create_date, modify_date)
+      values (${cid}, ${mid}, now(), now())
+      on conflict (collection_id, mapper_id)
+      do update set modify_date = now()
+    `);
+    return { action: "added", collection_id: cid, mapper_id: mid };
+  }
+
+  await runVideoStationSql(`
+    delete from collection_map
+    where collection_id = ${cid}
+      and mapper_id = ${mid}
+  `);
+  return { action: "removed", collection_id: cid, mapper_id: mid };
+}
+
 async function tvEpisodes(tvshowId, title) {
   const safeId = String(tvshowId || "").replace(/[^0-9]/g, "");
   const escapedTitle = sqlEscape(title);
@@ -1755,6 +1787,20 @@ async function handleRequest(req, res) {
     } catch (err) {
       console.log(`[proxy] libraries error ${err.message}`);
       return send(res, 500, { "content-type": "application/json" }, JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  if (requestPath === "/collection-toggle") {
+    const key = url.searchParams.get("key") || "";
+    const collectionId = collectionIdForKey(key, url.searchParams.get("collection_id") || "");
+    const mapperId = url.searchParams.get("mapper_id") || url.searchParams.get("mapper") || "";
+    const enabled = url.searchParams.get("enabled") === "1" || url.searchParams.get("enabled") === "true";
+    try {
+      const item = await toggleCollection(collectionId, mapperId, enabled);
+      return sendJson(res, 200, { success: true, item });
+    } catch (err) {
+      console.log(`[proxy] collection-toggle error ${err.message}`);
+      return sendJson(res, 500, { success: false, error: err.message });
     }
   }
 

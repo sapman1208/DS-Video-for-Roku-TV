@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <component name="MainScene" extends="Scene">
+    <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+    <script type="text/brightscript" uri="pkg:/source/bslib.brs" />
     <children>
         <Rectangle id="background" color="#DF3540" width="1920" height="1080" />
         <Timer id="playbackFocusTimer" repeat="false" duration="0.15" />
     </children>
-    <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 </component>

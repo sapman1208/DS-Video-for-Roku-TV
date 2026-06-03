@@ -87,6 +87,7 @@ sub init()
       authData = m.top.authData
       if authData = invalid then return
       loadNavCategories(authData)
+      refreshActiveNav()
 
       task = createObject("roSGNode", "APITask")
       task.request = {
@@ -98,6 +99,7 @@ sub init()
           tvshowId: showData.id,
           tvshowIdCandidates: showData.idCandidates,
           libraryId: showData.libraryId,
+          sourceLibraryTitle: showData.sourceLibraryTitle,
           showTitle: showData.title
       }
       task.observeField("response", "onEpisodesLoaded")
@@ -424,8 +426,8 @@ sub init()
       focused = m.episodeFocusedIndex
       if focused < 0 then focused = 0
       row = int(focused / cols)
-      startRow = row - 2
-      endRow = row + 2
+      startRow = row - 1
+      endRow = row + 1
       if startRow < 0 then startRow = 0
       maxRow = int((seasonEpisodes.count() - 1) / cols)
       if endRow > maxRow then endRow = maxRow
@@ -467,6 +469,14 @@ sub init()
       m.posterRetryCursor = 0
   end sub
 
+  sub stopEpisodeArtworkTimers()
+      timer = m.top.findNode("posterRetryTimer")
+      if timer <> invalid then timer.control = "stop"
+      timer = m.top.findNode("initialPosterRetryTimer")
+      if timer <> invalid then timer.control = "stop"
+      m.posterRetryQueue = []
+  end sub
+
   sub enqueueEpisodePosterRetry(idx as integer, seasonEpisodes as object)
       if not episodeArtworkNeedsRetry(idx, seasonEpisodes) then return
       key = episodeAttemptKey(idx)
@@ -496,7 +506,7 @@ sub init()
           return
       end if
       seasonEpisodes = episodesForCurrentSeason()
-      batchSize = 4
+      batchSize = 2
       processed = 0
       while processed < batchSize and m.posterRetryQueue.count() > 0
           idx = m.posterRetryQueue[0]
@@ -527,7 +537,7 @@ sub init()
   end function
 
   function maxEpisodePosterRetryAttempts() as integer
-      return 3
+      return 1
   end function
 
   function episodeArtworkNeedsRetry(idx as integer, seasonEpisodes as object) as boolean
@@ -839,6 +849,7 @@ sub init()
 
   sub onEpisodeSelected(event as object)
       idx = event.getData()
+      stopEpisodeArtworkTimers()
       seasonEpisodes = []
       for each epItem in m.episodes
           if episodeSeason(epItem) = m.currentSeason then seasonEpisodes.push(epItem)
@@ -858,18 +869,13 @@ sub init()
   function autoplayEpisodeList(authData as object) as object
       playlist = []
       if m.episodes = invalid then return playlist
-      for each season in m.seasons
-          seasonEpisodes = []
-          for each ep in m.episodes
-              if episodeSeason(ep) = season then seasonEpisodes.push(ep)
-          end for
-          seasonEpisodes = sortEpisodesForAutoplay(seasonEpisodes)
-          idx = 0
-          while idx < seasonEpisodes.count()
-              playlist.push(episodeVideoPayload(seasonEpisodes[idx], authData, idx))
-              idx = idx + 1
-          end while
-      end for
+      seasonEpisodes = episodesForCurrentSeason()
+      seasonEpisodes = sortEpisodesForAutoplay(seasonEpisodes)
+      idx = 0
+      while idx < seasonEpisodes.count()
+          playlist.push(episodeVideoPayload(seasonEpisodes[idx], authData, idx))
+          idx = idx + 1
+      end while
       return playlist
   end function
 
@@ -1019,10 +1025,12 @@ sub init()
           if summary <> "" then return summary
           extra = additional.lookUp("extra")
           if extra <> invalid
-              summary = summaryTextFromValue(extra.lookUp("summary"))
-              if summary <> "" then return summary
-              summary = summaryTextFromValue(extra.lookUp("description"))
-              if summary <> "" then return summary
+              if type(extra) = "roAssociativeArray"
+                  summary = summaryTextFromValue(extra.lookUp("summary"))
+                  if summary <> "" then return summary
+                  summary = summaryTextFromValue(extra.lookUp("description"))
+                  if summary <> "" then return summary
+              end if
           end if
       end if
       return ""
@@ -1215,6 +1223,7 @@ sub init()
 
   sub onNavSelected(event as object)
       idx = event.getData()
+      stopEpisodeArtworkTimers()
       if idx >= 0 and idx < m.categories.count() then m.top.selectedCategory = categoryPayload(idx)
   end sub
 
@@ -1274,23 +1283,35 @@ sub init()
   end sub
 
   sub populateNavCategories()
-      contentNode = createObject("roSGNode", "ContentNode")
-      for each cat in m.categories
-          item = contentNode.createChild("ContentNode")
-          item.title = cat.title
-      end for
-      nav = m.top.findNode("categoryList")
-      nav.content = contentNode
-      nav.numColumns = m.categories.count()
-      focusActiveNav()
+      refreshActiveNav()
   end sub
 
   sub focusActiveNav()
       nav = m.top.findNode("categoryList")
-      activeIdx = activeCategoryIndex()
-      if activeIdx >= 0 then nav.jumpToItem = activeIdx
+      refreshActiveNav()
       nav.setFocus(true)
       m.focusArea = "nav"
+  end sub
+
+  sub refreshActiveNav()
+      nav = m.top.findNode("categoryList")
+      if nav = invalid then return
+      activeIdx = activeCategoryIndex()
+      contentNode = createObject("roSGNode", "ContentNode")
+      idx = 0
+      for each cat in m.categories
+          item = contentNode.createChild("ContentNode")
+          item.title = cat.title
+          activeValue = "false"
+          if idx = activeIdx then activeValue = "true"
+          item.addFields({ isActiveNav: activeValue })
+          idx = idx + 1
+      end for
+      nav.content = invalid
+      nav.content = contentNode
+      nav.numColumns = m.categories.count()
+      if activeIdx >= 0 then nav.jumpToItem = activeIdx
+      print "NAV_ACTIVE screen=episodes idx="; activeIdx
   end sub
 
   sub onFocusNavCategory(event as object)
@@ -1307,6 +1328,18 @@ sub init()
       i = 0
       activeLibrary = invalid
       if m.top.showData <> invalid then activeLibrary = m.top.showData.lookUp("libraryId")
+      activeTitle = ""
+      if m.top.showData <> invalid then activeTitle = safeStr(m.top.showData, ["sourceLibraryTitle", "libraryTitle"])
+      if activeTitle <> ""
+          while i < m.categories.count()
+              cat = m.categories[i]
+              if cat.lookUp("category") = "tvshows" and lcase(safeStr(cat, ["title"])) = lcase(activeTitle)
+                  return i
+              end if
+              i = i + 1
+          end while
+      end if
+      i = 0
       while i < m.categories.count()
           cat = m.categories[i]
           if cat.lookUp("category") = "tvshows"

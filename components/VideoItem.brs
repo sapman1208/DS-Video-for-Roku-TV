@@ -77,13 +77,17 @@ sub applyLayoutMode(mode as string)
     title.maxLines = 2
     title.lineSpacing = 0
     year.font = "font:SmallSystemFont"
+    year.maxLines = 1
+    year.wrap = false
+    year.height = 34
 
-    if mode = "landscape" or mode = "homeLandscape"
+    if mode = "landscape" or mode = "homeLandscape" or mode = "showLandscape"
         bg.width = 520
         bg.height = 292
         poster.width = 520
         poster.height = 292
         poster.loadDisplayMode = "scaleToZoom"
+        if mode = "showLandscape" then poster.loadDisplayMode = "scaleToFit"
         m.top.findNode("iconPoster").width = 132
         m.top.findNode("iconPoster").height = 132
         m.top.findNode("iconPoster").translation = [194, 80]
@@ -98,23 +102,27 @@ sub applyLayoutMode(mode as string)
             title.maxLines = 3
             title.lineSpacing = -1
             year.translation = [0, 386]
+        else if mode = "showLandscape"
+            title.height = 76
+            title.maxLines = 3
+            year.translation = [0, 386]
         end if
     else if mode = "icon"
         bg.width = 220
-        bg.height = 200
+        bg.height = 220
         poster.width = 220
-        poster.height = 200
+        poster.height = 220
         poster.loadDisplayMode = "scaleToFit"
         m.top.findNode("iconPoster").width = 118
         m.top.findNode("iconPoster").height = 118
-        m.top.findNode("iconPoster").translation = [51, 41]
-        title.translation = [0, 216]
+        m.top.findNode("iconPoster").translation = [51, 51]
+        title.translation = [0, 236]
         title.width = 220
         title.height = 74
         title.font = "font:TinySystemFont"
         title.maxLines = 3
         title.lineSpacing = -1
-        year.translation = [0, 296]
+        year.translation = [0, 316]
         year.width = 220
         year.font = "font:TinySystemFont"
     else
@@ -138,6 +146,9 @@ sub applyLayoutMode(mode as string)
             title.lineSpacing = -1
             year.translation = [0, 412]
             year.font = "font:TinySystemFont"
+            year.height = 78
+            year.maxLines = 3
+            year.wrap = true
         end if
     end if
 end sub

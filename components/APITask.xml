@@ -5,4 +5,5 @@
         <field id="response" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/APITask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/bslib.brs" />
 </component>

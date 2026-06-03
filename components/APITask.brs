@@ -36,6 +36,7 @@ sub init()
       if action = "updateWatchStatus" then updateWatchStatus(req)
       if action = "listLibraries" then listLibraries(req)
       if action = "listEpisodes" then listEpisodes(req)
+      if action = "movieMetadata" then movieMetadata(req)
       if action = "latestResume" then latestResume(req)
       if action = "getStreamUrl" then getStreamUrl(req)
       if action = "fetchTextUrl" then fetchTextUrl(req)
@@ -105,18 +106,6 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
 
       libraryParam = libraryParamFromReq(req)
-      proxyItems = fetchProxyLibraryItems(proxyBaseUrl, invalid, "movie")
-      if proxyItems.count() = 0
-          proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "movie")
-      end if
-      if proxyItems.count() > 0
-          addDirectPosterIds(proxyItems)
-          proxyItems = sortBrowseItems(proxyItems)
-          resolveCachedArtworkForItems(proxyItems, 1500)
-          print "GRID_SOURCE category=movies source=proxy-db count="; proxyItems.count()
-          m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid }
-          return
-      end if
       url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movie", "movies"])
@@ -136,6 +125,19 @@ sub init()
           parseAndRespond(result, key, baseUrl, sid)
           m.skipProxyArtworkAttach = false
           print "GRID_SOURCE category=movies source=synology1 count="; m.top.response.items.count()
+          return
+      end if
+
+      proxyItems = fetchProxyLibraryItems(proxyBaseUrl, invalid, "movie")
+      if proxyItems.count() = 0
+          proxyItems = fetchProxyLibraryItems(proxyBaseUrl, req.libraryId, "movie")
+      end if
+      if proxyItems.count() > 0
+          addDirectPosterIds(proxyItems)
+          proxyItems = sortBrowseItems(proxyItems)
+          resolveCachedArtworkForItems(proxyItems, 1500)
+          print "GRID_SOURCE category=movies source=proxy-db count="; proxyItems.count()
+          m.top.response = { success: true, items: proxyItems, total: proxyItems.count(), baseUrl: baseUrl, sid: sid }
           return
       end if
 
@@ -302,11 +304,11 @@ sub init()
       if collectionId = "" or collectionId = "0" then collectionId = collectionIdForKey(idToStr(req.localKey))
       if collectionId = "" then collectionId = "-1"
 
-      additional = "%5B%22watched_ratio%22,%22file%22,%22poster_mtime%22,%22backdrop_mtime%22,%22summary%22,%22collection%22%5D"
+      additional = "%5B%22watched_ratio%22,%22file%22,%22poster_mtime%22,%22backdrop_mtime%22,%22summary%22,%22extra%22,%22collection%22,%22originally_available%22%5D"
       params = "id=" + collectionId + "&offset=0&limit=500&sort_by=title&sort_direction=asc&additional=" + additional
       url = apiUrl(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "2", "video_list", params, sid, token)
       result = httpGet(url)
-      respondWithCollectionVideos(result, baseUrl, sid)
+      respondWithCollectionVideos(result, baseUrl, sid, token)
   end sub
 
   sub toggleCollectionVideo(req as object)
@@ -316,8 +318,30 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
       collectionId = idToStr(req.collectionId)
       if collectionId = "" or collectionId = "0" then collectionId = collectionIdForKey(idToStr(req.localKey))
+      if left(collectionId, 1) = "-"
+          resolvedCollectionId = resolveCollectionId(baseUrl, sid, token, idToStr(req.localKey), collectionId)
+          if resolvedCollectionId = "" or resolvedCollectionId = "0" or left(resolvedCollectionId, 1) = "-"
+              resolvedCollectionId = defaultRealCollectionIdForKey(idToStr(req.localKey))
+          end if
+          if resolvedCollectionId <> "" and resolvedCollectionId <> "0" and left(resolvedCollectionId, 1) <> "-"
+              print "COLLECTION_ID_RESOLVE key="; idToStr(req.localKey); " pseudo="; collectionId; " real="; resolvedCollectionId
+              collectionId = resolvedCollectionId
+          end if
+      end if
       videoId = idToStr(req.videoId)
       videoType = collectionVideoType(idToStr(req.videoType))
+      mapperId = ""
+      if req.mapperId <> invalid then mapperId = idToStr(req.mapperId)
+      if (videoId = "" or videoId = "0" or videoId = mapperId) and req.proxyBaseUrl <> invalid and req.filePath <> invalid
+          resolved = resolveVideoStationItem(req.proxyBaseUrl, req.filePath)
+          if resolved <> invalid
+              resolvedId = idToStr(resolved.lookUp("id"))
+              resolvedType = idToStr(resolved.lookUp("type"))
+              if resolvedId <> "" and resolvedId <> "0" then videoId = resolvedId
+              if resolvedType <> "" and resolvedType <> "0" then videoType = collectionVideoType(resolvedType)
+              print "COLLECTION_RESOLVE id="; videoId; " type="; videoType; " path="; left(idToStr(req.filePath), 120)
+          end if
+      end if
       if collectionId = "" or videoId = "" or videoId = "0"
           m.top.response = { success: false, error: "Missing collection or video id" }
           return
@@ -325,21 +349,69 @@ sub init()
 
       method = "deletevideo"
       if req.enabled = true then method = "addvideo"
-      params = "id=" + collectionId + "&video_type=" + videoType + "&video_id=" + videoId
       url = apiEndpoint(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", sid, token)
-      body = "api=SYNO.VideoStation.Collection&version=1&method=" + method + "&" + params
-      result = httpPostForm(url, body)
-      if result = invalid or result = ""
-          m.top.response = { success: false, error: "No response from Synology collection API" }
-          return
-      end if
-      json = parseJSON(result)
-      if json <> invalid and json.success = true
-          m.top.response = { success: true, result: json }
+      enc = createObject("roUrlTransfer")
+      videoTypes = collectionVideoTypeCandidates(videoType)
+      lastResult = ""
+      lastAttempt = ""
+
+      for each candidateType in videoTypes
+          typeParam = enc.escape(candidateType)
+          attempts = [
+              { version: "1", params: "id=" + collectionId + "&type=" + typeParam + "&video_id=" + videoId },
+              { version: "1", params: "id=" + collectionId + "&video_type=" + typeParam + "&video_id=" + videoId },
+              { version: "2", params: "id=" + collectionId + "&type=" + typeParam + "&video_id=" + videoId },
+              { version: "2", params: "id=" + collectionId + "&video_type=" + typeParam + "&video_id=" + videoId },
+              { version: "1", params: "id=" + collectionId + "&type=" + typeParam + "&video_ids=%5B" + videoId + "%5D" },
+              { version: "1", params: "id=" + collectionId + "&video_type=" + typeParam + "&video_ids=%5B" + videoId + "%5D" },
+              { version: "2", params: "id=" + collectionId + "&type=" + typeParam + "&video_ids=%5B" + videoId + "%5D" },
+              { version: "2", params: "id=" + collectionId + "&video_type=" + typeParam + "&video_ids=%5B" + videoId + "%5D" }
+          ]
+          for each attempt in attempts
+              lastAttempt = "v" + attempt.version + " " + method + " " + attempt.params
+              body = "api=SYNO.VideoStation.Collection&version=" + attempt.version + "&method=" + method + "&" + attempt.params
+              result = httpPostForm(url, body)
+              if result <> invalid and result <> ""
+                  lastResult = result
+                  print "COLLECTION_SYNC_ATTEMPT "; lastAttempt; " resp="; left(result, 180)
+                  json = parseJSON(result)
+                  if json <> invalid and json.success = true
+                      m.top.response = { success: true, result: json, attempt: lastAttempt }
+                      return
+                  end if
+              else
+                  print "COLLECTION_SYNC_ATTEMPT "; lastAttempt; " resp=<empty>"
+              end if
+          end for
+      end for
+
+      if lastResult = ""
+          m.top.response = { success: false, error: "No response from Synology collection API", detail: lastAttempt }
       else
-          m.top.response = { success: false, error: "Synology collection update failed", detail: left(result, 300) }
+          if req.proxyBaseUrl <> invalid and req.proxyBaseUrl <> "" and mapperId <> "" and mapperId <> "0"
+              proxyResult = toggleCollectionViaProxy(req.proxyBaseUrl, idToStr(req.localKey), collectionId, mapperId, req.enabled = true)
+              if proxyResult <> invalid
+                  proxyJson = parseJSON(proxyResult)
+                  if proxyJson <> invalid and proxyJson.success = true
+                      m.top.response = { success: true, result: proxyJson, attempt: "proxy-db mapper_id=" + mapperId }
+                      return
+                  end if
+                  print "COLLECTION_PROXY_SYNC failed "; left(proxyResult, 180)
+              end if
+          end if
+          m.top.response = { success: false, error: "Synology collection update failed", detail: left(lastResult, 300), attempt: lastAttempt }
       end if
   end sub
+
+  function toggleCollectionViaProxy(proxyBaseUrl as string, localKey as string, collectionId as string, mapperId as string, enabled as boolean) as dynamic
+      enc = createObject("roUrlTransfer")
+      enabledText = "0"
+      if enabled then enabledText = "1"
+      url = ffmpegProxyBaseUrl("", proxyBaseUrl) + "/collection-toggle?key=" + enc.escape(localKey) + "&collection_id=" + enc.escape(collectionId) + "&mapper_id=" + enc.escape(mapperId) + "&enabled=" + enabledText
+      result = httpGet(url)
+      if result <> invalid and result <> "" then print "COLLECTION_PROXY_SYNC resp="; left(result, 180)
+      return result
+  end function
 
   sub updateWatchStatus(req as object)
       baseUrl = req.baseUrl
@@ -430,6 +502,9 @@ sub init()
       libraryId = ""
       if req.libraryId <> invalid then libraryId = idToStr(req.libraryId)
       if libraryId = "0" then libraryId = ""
+      sourceLibraryTitle = ""
+      if req.sourceLibraryTitle <> invalid then sourceLibraryTitle = lcase(idToStr(req.sourceLibraryTitle))
+      useProxyBeforeFileScan = libraryId <> "" or sourceLibraryTitle = "ian's shows" or sourceLibraryTitle = "ians shows"
 
       proxyMetadata = []
       playableProxyMetadata = []
@@ -460,12 +535,38 @@ sub init()
           return
       end if
 
+      if useProxyBeforeFileScan
+          proxyMetadata = fetchProxyTvMetadata(proxyBaseUrl, showTitle)
+          playableProxyMetadata = playableEpisodeMetadata(proxyMetadata)
+          proxyEpisodes = fetchBestProxyEpisodes(proxyBaseUrl, candidates, showTitle)
+          if proxyMetadata.count() > bestMetadata.count() then bestMetadata = proxyMetadata
+
+          if proxyEpisodes.count() > 0
+              normalizeEpisodeItems(proxyEpisodes)
+              addDirectPosterIds(proxyEpisodes)
+              proxyEpisodes = uniqueEpisodeItems(proxyEpisodes)
+              print "EPISODE_SOURCE title="; showTitle; " source=proxy-db count="; proxyEpisodes.count()
+              m.top.response = { success: true, items: proxyEpisodes, total: proxyEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "Video Station database episodes" }
+              return
+          end if
+
+          if playableProxyMetadata.count() > 0
+              normalizeEpisodeItems(playableProxyMetadata)
+              addDirectPosterIds(playableProxyMetadata)
+              playableProxyMetadata = uniqueEpisodeItems(playableProxyMetadata)
+              print "EPISODE_SOURCE title="; showTitle; " source=proxy-metadata count="; playableProxyMetadata.count()
+              m.top.response = { success: true, items: playableProxyMetadata, total: playableProxyMetadata.count(), baseUrl: baseUrl, sid: sid, detail: "Video Station metadata episodes" }
+              return
+          end if
+      end if
+
       fallbackEpisodes = findEpisodesByShowTitle(baseUrl, sid, token, showTitle)
       if fallbackEpisodes.count() > 0
           if bestMetadata.count() > 0 then fallbackEpisodes = mergeEpisodeMetadata(fallbackEpisodes, bestMetadata)
           normalizeEpisodeItems(fallbackEpisodes)
           enrichEpisodeSummariesFromVsmeta(fallbackEpisodes, baseUrl, sid, token)
           addDirectPosterIds(fallbackEpisodes)
+          addFileStationSidecarPosterUrls(fallbackEpisodes, baseUrl, sid, token)
           fallbackEpisodes = uniqueEpisodeItems(fallbackEpisodes)
           print "EPISODE_SOURCE title="; showTitle; " source=filestation-scan count="; fallbackEpisodes.count()
           m.top.response = { success: true, items: fallbackEpisodes, total: fallbackEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "FileStation episode fallback" }
@@ -687,6 +788,71 @@ sub init()
       return invalid
   end function
 
+  sub movieMetadata(req as object)
+      baseUrl = req.baseUrl
+      sid = req.sid
+      token = ""
+      if req.synoToken <> invalid then token = req.synoToken
+      videoId = idToStr(req.id)
+      title = ""
+      if req.title <> invalid then title = req.title
+      if videoId = "" or videoId = "0"
+          m.top.response = { success: false, error: "missing movie id", summary: "" }
+          return
+      end if
+
+      summary = movieMetadataSummaryV2(baseUrl, sid, token, videoId)
+      source = "synology2"
+      if summary = ""
+          summary = movieMetadataSummaryV1(baseUrl, sid, videoId)
+          source = "synology1"
+      end if
+      if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
+      print "MOVIE_METADATA id="; videoId; " source="; source; " summaryLen="; len(summary)
+      m.top.response = { success: summary <> "", summary: summary, id: videoId, source: source }
+  end sub
+
+  function movieMetadataSummaryV2(baseUrl as string, sid as string, token as string, videoId as string) as string
+      apiName = "SYNO.VideoStation2.Movie"
+      url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
+      enc = createObject("roUrlTransfer")
+      additional = "[%22summary%22,%22extra%22,%22file%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22]"
+      body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=%5B" + enc.escape(videoId) + "%5D&additional=" + additional
+      r = httpPostForm(url, body)
+      if r = invalid or r = "" then return ""
+      j = parseJSON(r)
+      if j <> invalid and j.success = true and j.data <> invalid
+          item = firstV2InfoItem(j.data, "movie")
+          if item <> invalid then return episodeSummaryText(item)
+      end if
+      return ""
+  end function
+
+  function movieMetadataSummaryV1(baseUrl as string, sid as string, videoId as string) as string
+      addlFormats = ["additional=%5B%22summary%22,%22extra%22,%22file%22%5D", "additional=summary", "additional=%22summary%22"]
+      for each addl in addlFormats
+          url = baseUrl + "/webapi/VideoStation/movie.cgi?api=SYNO.VideoStation.Movie&version=1&method=getinfo&id=" + videoId + "&" + addl + "&_sid=" + sid
+          r = httpGet(url)
+          if r <> invalid and r <> ""
+              j = parseJSON(r)
+              if j <> invalid and j.success = true and j.data <> invalid
+                  movies = j.data.lookUp("movies")
+                  if movies = invalid then movies = j.data.lookUp("movie")
+                  if movies <> invalid
+                      if type(movies) = "roArray" and movies.count() > 0
+                          summary = episodeSummaryText(movies[0])
+                          if summary <> "" then return summary
+                      else if type(movies) = "roAssociativeArray"
+                          summary = episodeSummaryText(movies)
+                          if summary <> "" then return summary
+                      end if
+                  end if
+              end if
+          end if
+      end for
+      return ""
+  end function
+
   function getFileInfoV2(baseUrl as string, sid as string, token as string, videoId as string, mediaType as string) as object
       apiName = v2InfoApiForMediaType(mediaType)
       url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
@@ -791,6 +957,34 @@ sub init()
       enc = createObject("roUrlTransfer")
       return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(subtitlePathForVideo(filePath))) + "&mode=open", sid, token)
   end function
+
+  function fileStationSidecarPosterPath(videoPath as string) as string
+      if videoPath = "" then return ""
+      lastSlash = 0
+      idx = 1
+      while idx <= len(videoPath)
+          if mid(videoPath, idx, 1) = "/" then lastSlash = idx
+          idx = idx + 1
+      end while
+      if lastSlash <= 0 or lastSlash >= len(videoPath) then return ""
+      dirPath = left(videoPath, lastSlash - 1)
+      fileName = mid(videoPath, lastSlash + 1)
+      return dirPath + "/@eaDir/" + fileName + "/SYNOVIDEO_VIDEO_POSTER.jpg"
+  end function
+
+  sub addFileStationSidecarPosterUrls(items as object, baseUrl as string, sid as string, token as string)
+      if items = invalid then return
+      for each item in items
+          savedPoster = idToStr(item.lookUp("posterUrl"))
+          if savedPoster = "" or savedPoster = "0"
+              fileInfo = itemFileInfo(item)
+              sidecarPath = fileStationSidecarPosterPath(fileInfo.path)
+              if sidecarPath <> ""
+                  item.addReplace("posterUrl", fileStationStreamUrl(baseUrl, sid, token, sidecarPath))
+              end if
+          end if
+      end for
+  end sub
 
   function ffmpegProxyBaseUrl(baseUrl as string, proxyBaseUrl as dynamic) as string
       if proxyBaseUrl <> invalid and proxyBaseUrl <> "" then return proxyBaseUrl
@@ -1528,6 +1722,7 @@ sub init()
       skipProxyArtwork = false
       if m.skipProxyArtworkAttach <> invalid and m.skipProxyArtworkAttach = true then skipProxyArtwork = true
       if not skipProxyArtwork then attachProxyArtworkForItems(items, m.currentProxyBaseUrl)
+      normalizeBrowseSummaries(items)
       addDirectPosterIds(items)
       items = sortBrowseItems(items)
       if not skipProxyArtwork then resolveCachedArtworkForItems(items, 1500)
@@ -1538,6 +1733,17 @@ sub init()
         if type(t) = "roFloat" or type(t) = "Float" then total = int(t)
     end if
       m.top.response = { success: true, items: items, total: total, baseUrl: baseUrl, sid: sid }
+  end sub
+
+  sub normalizeBrowseSummaries(items as object)
+      if items = invalid then return
+      for each item in items
+          summary = episodeSummaryText(item)
+          if summary <> ""
+              item.addReplace("summary", summary)
+              item.addReplace("description", summary)
+          end if
+      end for
   end sub
 
   sub appendAndRespond(result as dynamic, dataKey as string, prefixItems as object, baseUrl as string, sid as string)
@@ -1600,7 +1806,6 @@ sub init()
           displayTitle = "Shared Videos"
       end if
       id = idToStr(item.lookUp("id"))
-      if playlistType <> "" then id = collectionIdForKey(playlistType)
       iconUrl = ""
       if playlistType = "favorites" then iconUrl = "pkg:/images/playlist-favorites.png"
       if playlistType = "watchlist" then iconUrl = "pkg:/images/playlist-watchlist.png"
@@ -1615,6 +1820,41 @@ sub init()
       return key
   end function
 
+  function collectionTitleForKey(key as string) as string
+      if key = "favorites" then return "syno_favorite"
+      if key = "watchlist" then return "syno_watchlist"
+      if key = "shared" then return "syno_default_shared"
+      return ""
+  end function
+
+  function defaultRealCollectionIdForKey(key as string) as string
+      if key = "watchlist" then return "4"
+      if key = "favorites" then return "5"
+      return ""
+  end function
+
+  function resolveCollectionId(baseUrl as string, sid as string, token as string, key as string, fallbackId as string) as string
+      targetTitle = collectionTitleForKey(key)
+      if targetTitle = "" then return fallbackId
+      url = apiUrl(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "3", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc", sid, token)
+      result = httpGet(url)
+      if result = invalid or result = "" then return fallbackId
+      json = parseJSON(result)
+      if json = invalid or json.success <> true or json.data = invalid then return fallbackId
+      dataKey = firstValidKey(result, ["collections", "collection", "playlists", "playlist"])
+      if dataKey = "" then return fallbackId
+      items = json.data.lookUp(dataKey)
+      if items = invalid then return fallbackId
+      for each item in items
+          title = idToStr(item.lookUp("title"))
+          if title = targetTitle
+              id = idToStr(item.lookUp("id"))
+              if id <> "" and id <> "0" and left(id, 1) <> "-" then return id
+          end if
+      end for
+      return fallbackId
+  end function
+
   function collectionVideoType(value as string) as string
       v = lcase(value)
       if v = "episode" then return "tvshow_episode"
@@ -1624,6 +1864,14 @@ sub init()
       if v = "tvrecord" then return "tv_record"
       if v = "tv_record" then return "tv_record"
       return "movie"
+  end function
+
+  function collectionVideoTypeCandidates(value as string) as object
+      v = collectionVideoType(value)
+      if v = "tvshow_episode" then return ["tvshow_episode", "episode"]
+      if v = "home_video" then return ["home_video", "homevideo"]
+      if v = "tv_record" then return ["tv_record", "tvrecord"]
+      return [v]
   end function
 
   function resolveVideoStationItem(proxyBaseUrl as dynamic, filePath as dynamic) as dynamic
@@ -1648,7 +1896,7 @@ sub init()
       return json
   end function
 
-  sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string)
+  sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string, token as string)
       if result = invalid or result = ""
           m.top.response = { success: false, error: "No response from Synology collection API", items: [] }
           return
@@ -1669,8 +1917,10 @@ sub init()
       normalized = []
       for each item in items
           normalizeCollectionVideo(item, mediaType)
+          enrichCollectionVideoMetadata(item, baseUrl, sid, token)
           normalized.push(item)
       end for
+      normalized = uniqueCollectionVideos(normalized)
       normalized = sortBrowseItems(normalized)
       resolveCachedArtworkForItems(normalized, 1500)
       m.top.response = { success: true, items: normalized, total: normalized.count(), baseUrl: baseUrl, sid: sid }
@@ -1736,14 +1986,14 @@ sub init()
       richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22%5D"
       simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22,%22originally_available%22%5D"
       attempts = [
-          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "tvshow_id", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", idParam: "tvshow_id", keys: ["episodes", "episode"] },
           { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "tvshow_id", keys: ["episode", "episodes"] },
           { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "1", idParam: "tvshow_id", keys: ["episode", "episodes"] },
-          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", idParam: "tvshow_id", keys: ["episodes", "episode"] },
-          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "id", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "tvshow_id", keys: ["episodes", "episode"] },
           { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "id", keys: ["episode", "episodes"] },
-          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "", keys: ["episodes", "episode"] },
-          { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "", keys: ["episode", "episodes"] }
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "id", keys: ["episodes", "episode"] },
+          { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "", keys: ["episode", "episodes"] },
+          { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", idParam: "", keys: ["episodes", "episode"] }
       ]
       additionals = [richAdditional, simpleAdditional, ""]
 
@@ -1768,6 +2018,7 @@ sub init()
                   if best.episodes.count() = 0 and meta.count() > best.metadata.count() then best = candidate
                   if parsed.count() > 0 then return candidate
                   if stopOnMetadata and meta.count() > 0 then return candidate
+                  if parsed.count() = 0 and meta.count() = 0 then exit for
               end if
               if best.url = "" then best = { episodes: [], metadata: [], result: result, url: url, source: "" }
           end for
@@ -1793,6 +2044,203 @@ sub init()
           if summary <> "0" and summary <> "" then item.addReplace("summary", summary)
       end if
   end sub
+
+  function uniqueCollectionVideos(items as object) as object
+      unique = []
+      if items = invalid then return unique
+      for each item in items
+          key = collectionVideoUniqueKey(item)
+          existingIdx = -1
+          i = 0
+          while i < unique.count()
+              if collectionVideoUniqueKey(unique[i]) = key
+                  existingIdx = i
+                  exit while
+              end if
+              i = i + 1
+          end while
+          if existingIdx < 0
+              unique.push(item)
+          else if collectionVideoScore(item) > collectionVideoScore(unique[existingIdx])
+              print "COLLECTION_DEDUPE replace key="; key; " old="; idToStr(unique[existingIdx].lookUp("title")); " new="; idToStr(item.lookUp("title"))
+              unique[existingIdx] = item
+          else
+              print "COLLECTION_DEDUPE keep key="; key; " kept="; idToStr(unique[existingIdx].lookUp("title")); " skipped="; idToStr(item.lookUp("title"))
+          end if
+      end for
+      return unique
+  end function
+
+  function collectionVideoUniqueKey(item as object) as string
+      if item = invalid then return "invalid"
+      mapper = idToStr(item.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+      if mapper <> "" and mapper <> "0" then return "mapper:" + mapper
+      id = idToStr(item.lookUp("id"))
+      if id = "" or id = "0" then id = idToStr(item.lookUp("videoStationId"))
+      mediaType = normalizedAppVideoType(idToStr(item.lookUp("type")))
+      if id <> "" and id <> "0" then return mediaType + ":" + id
+      title = lcase(idToStr(item.lookUp("title")))
+      if title = "" or title = "0" then title = lcase(idToStr(item.lookUp("name")))
+      return "title:" + title
+  end function
+
+  function collectionVideoScore(item as object) as integer
+      if item = invalid then return 0
+      score = 0
+      mediaType = normalizedAppVideoType(idToStr(item.lookUp("type")))
+      if mediaType = "episode" then score = score + 60
+      if mediaType = "movie" then score = score + 40
+      if mediaType = "homevideo" then score = score + 30
+      id = idToStr(item.lookUp("id"))
+      if id = "" or id = "0" then id = idToStr(item.lookUp("videoStationId"))
+      if id <> "" and id <> "0" and val(id) > 0 then score = score + 80
+      mapper = idToStr(item.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+      if mapper <> "" and mapper <> "0" then score = score + 20
+      if mediaType = "episode"
+          if collectionDeepText(item, ["showTitle", "tvshow_title", "series_title", "parent_title"]) <> "" then score = score + 15
+          if itemInt(item, ["seasonNumber", "season_number", "season", "season_num", "season_index"]) > 0 then score = score + 10
+          if itemInt(item, ["episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"]) > 0 then score = score + 10
+      end if
+      if collectionDeepText(item, ["summary", "description"]) <> "" then score = score + 5
+      if itemFileInfo(item).path <> "" then score = score + 5
+      return score
+  end function
+
+  sub enrichCollectionVideoMetadata(item as object, baseUrl as string, sid as string, token as string)
+      if item = invalid then return
+      mediaType = normalizedAppVideoType(idToStr(item.lookUp("type")))
+      if mediaType = "" or mediaType = "0" then return
+      if not collectionNeedsMetadata(item, mediaType) then return
+
+      videoId = idToStr(item.lookUp("id"))
+      if videoId = "" or videoId = "0" then videoId = idToStr(item.lookUp("videoStationId"))
+      if videoId = "" or videoId = "0" then return
+
+      meta = fetchCollectionInfoItem(baseUrl, sid, token, videoId, mediaType)
+      if meta = invalid then return
+      copyCollectionMetadata(meta, item, mediaType)
+      print "COLLECTION_METADATA type="; mediaType; " id="; videoId; " title="; idToStr(item.lookUp("title")); " show="; idToStr(item.lookUp("showTitle")); " season="; idToStr(item.lookUp("seasonNumber")); " episode="; idToStr(item.lookUp("episodeNumber")); " date="; idToStr(item.lookUp("original_available"))
+  end sub
+
+  function collectionNeedsMetadata(item as object, mediaType as string) as boolean
+      if mediaType = "movie"
+          dateText = collectionDeepText(item, ["original_available", "originally_available", "year", "date"])
+          return dateText = ""
+      end if
+      if mediaType = "episode"
+          showTitle = collectionDeepText(item, ["showTitle", "tvshow_title", "series_title", "parent_title"])
+          season = collectionDeepText(item, ["seasonNumber", "season_number", "season", "season_num", "season_index"])
+          episode = collectionDeepText(item, ["episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"])
+          return showTitle = "" or season = "" or season = "0" or episode = "" or episode = "0"
+      end if
+      return false
+  end function
+
+  function fetchCollectionInfoItem(baseUrl as string, sid as string, token as string, videoId as string, mediaType as string) as dynamic
+      apiName = v2InfoApiForMediaType(mediaType)
+      url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
+      enc = createObject("roUrlTransfer")
+      additional = "[%22summary%22,%22extra%22,%22file%22,%22collection%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22]"
+      body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=%5B" + enc.escape(videoId) + "%5D&additional=" + additional
+      r = httpPostForm(url, body)
+      if r = invalid or r = "" then return invalid
+      j = parseJSON(r)
+      if j <> invalid and j.success = true and j.data <> invalid
+          return firstV2InfoItem(j.data, mediaType)
+      end if
+      return invalid
+  end function
+
+  sub copyCollectionMetadata(meta as object, item as object, mediaType as string)
+      copyEpisodeMetadataField(meta, item, "title")
+      copyEpisodeMetadataField(meta, item, "name")
+      copyEpisodeMetadataField(meta, item, "summary")
+      copyEpisodeMetadataField(meta, item, "description")
+      copyEpisodeMetadataField(meta, item, "original_available")
+      copyEpisodeMetadataField(meta, item, "originally_available")
+      copyEpisodeMetadataField(meta, item, "year")
+      copyEpisodeMetadataField(meta, item, "additional")
+      copyEpisodeMetadataField(meta, item, "mapper_id")
+
+      if mediaType = "episode"
+          copyEpisodeMetadataField(meta, item, "season")
+          copyEpisodeMetadataField(meta, item, "season_number")
+          copyEpisodeMetadataField(meta, item, "season_num")
+          copyEpisodeMetadataField(meta, item, "season_index")
+          copyEpisodeMetadataField(meta, item, "episode")
+          copyEpisodeMetadataField(meta, item, "episode_number")
+          copyEpisodeMetadataField(meta, item, "episode_num")
+          copyEpisodeMetadataField(meta, item, "ep_num")
+          copyEpisodeMetadataField(meta, item, "ep_index")
+          showTitle = collectionDeepText(meta, ["showTitle", "tvshow_title", "series_title", "parent_title"])
+          if showTitle = ""
+              tvshow = meta.lookUp("tvshow")
+              if tvshow <> invalid then showTitle = collectionDeepText(tvshow, ["title", "name"])
+          end if
+          if showTitle = ""
+              additional = meta.lookUp("additional")
+              if additional <> invalid
+                  showTitle = collectionDeepText(additional, ["showTitle", "tvshow_title", "series_title", "parent_title"])
+                  tvshow = additional.lookUp("tvshow")
+                  if showTitle = "" and tvshow <> invalid then showTitle = collectionDeepText(tvshow, ["title", "name"])
+              end if
+          end if
+          if showTitle <> "" then item.addReplace("showTitle", showTitle)
+          seasonText = collectionDeepText(meta, ["seasonNumber", "season_number", "season", "season_num", "season_index"])
+          if seasonText <> "" and seasonText <> "0" then item.addReplace("seasonNumber", seasonText)
+          episodeText = collectionDeepText(meta, ["episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"])
+          if episodeText <> "" and episodeText <> "0" then item.addReplace("episodeNumber", episodeText)
+      end if
+
+      dateText = collectionDeepText(meta, ["original_available", "originally_available", "year", "date"])
+      if dateText <> "" and dateText <> "0" then item.addReplace("original_available", dateText)
+      summary = episodeSummaryText(meta)
+      if summary <> ""
+          item.addReplace("summary", summary)
+          item.addReplace("description", summary)
+      end if
+  end sub
+
+  function collectionDeepText(item as dynamic, keys as object) as string
+      if item = invalid then return ""
+      if type(item) <> "roAssociativeArray"
+          textValue = idToStr(item)
+          trimmed = textValue.trim()
+          if left(trimmed, 1) = "{" or left(trimmed, 1) = "["
+              parsed = parseJSON(trimmed)
+              if parsed <> invalid
+                  parsedText = collectionDeepText(parsed, keys)
+                  if parsedText <> "" and parsedText <> "0" then return parsedText
+              end if
+          end if
+          return textValue
+      end if
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid
+              if type(value) = "roAssociativeArray"
+                  text = collectionDeepText(value, ["title", "name", "value", "summary", "description"])
+                  if text <> "" and text <> "0" then return text
+              else
+                  text = idToStr(value)
+                  if text <> "" and text <> "0" then return text
+              end if
+          end if
+      end for
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          text = collectionDeepText(additional, keys)
+          if text <> "" and text <> "0" then return text
+      end if
+      extra = item.lookUp("extra")
+      if extra <> invalid
+          text = collectionDeepText(extra, keys)
+          if text <> "" and text <> "0" then return text
+      end if
+      return ""
+  end function
 
   function normalizedAppVideoType(value as string) as string
       v = lcase(value)
@@ -1931,10 +2379,12 @@ sub init()
           if summary <> "" then return summary
           extra = additional.lookUp("extra")
           if extra <> invalid
-              summary = summaryTextFromValue(extra.lookUp("summary"))
-              if summary <> "" then return summary
-              summary = summaryTextFromValue(extra.lookUp("description"))
-              if summary <> "" then return summary
+              if type(extra) = "roAssociativeArray"
+                  summary = summaryTextFromValue(extra.lookUp("summary"))
+                  if summary <> "" then return summary
+                  summary = summaryTextFromValue(extra.lookUp("description"))
+                  if summary <> "" then return summary
+              end if
           end if
       end if
       return ""

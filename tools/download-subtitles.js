@@ -86,6 +86,13 @@ function canonicalQueryValue(value) {
   return cleanNamePart(value).toLowerCase();
 }
 
+function episodeMarker(value) {
+  const text = String(value || "");
+  const match = text.match(/\bS(\d{1,2})E(\d{1,3})\b/i) || text.match(/\b(\d{1,2})x(\d{1,3})\b/i);
+  if (!match) return null;
+  return { season: Number(match[1]), episode: Number(match[2]) };
+}
+
 function subdlLanguage(value) {
   const code = String(value || "en").trim();
   if (!code) return "EN";
@@ -193,24 +200,44 @@ function downloadFile(url, filePath, redirectCount = 0, headers = {}) {
   });
 }
 
-async function downloadZipSubtitle(url, filePath) {
+async function downloadZipSubtitle(url, filePath, preferredEntry = "") {
   const tmpZip = `${filePath}.ziptmp`;
   fs.rmSync(tmpZip, { force: true });
   await downloadFile(url, tmpZip);
-  const list = spawnSync("unzip", ["-Z1", tmpZip], { encoding: "utf8", timeout: 30000 });
+  let archiveTool = "unzip";
+  let list = spawnSync("unzip", ["-Z1", tmpZip], { encoding: "utf8", timeout: 30000 });
+  let entries = [];
+  if (list.status === 0) {
+    entries = String(list.stdout || "")
+      .split("\n")
+      .map((line) => line.trim());
+  } else {
+    archiveTool = "7z";
+    list = spawnSync("7z", ["l", "-slt", tmpZip], { encoding: "utf8", timeout: 30000 });
+    if (list.status === 0) {
+      entries = String(list.stdout || "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("Path = "))
+        .map((line) => line.slice("Path = ".length).trim());
+    }
+  }
   if (list.status !== 0) {
     fs.rmSync(tmpZip, { force: true });
-    throw new Error("unzip not available or invalid subtitle zip");
+    throw new Error("zip extractor not available or invalid subtitle zip");
   }
-  const entry = String(list.stdout || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => /\.(srt|vtt)$/i.test(line) && !/^__MACOSX\//i.test(line));
+  entries = entries
+    .filter((line) => /\.(srt|vtt)$/i.test(line) && !/^__MACOSX\//i.test(line));
+  const preferredBase = cleanNamePart(path.basename(preferredEntry || "")).toLowerCase();
+  const entry = (preferredBase
+    ? entries.find((line) => cleanNamePart(path.basename(line)).toLowerCase() === preferredBase)
+    : "") || entries[0];
   if (!entry) {
     fs.rmSync(tmpZip, { force: true });
     throw new Error("subtitle zip did not contain srt/vtt");
   }
-  const extracted = spawnSync("unzip", ["-p", tmpZip, entry], {
+  const extractedArgs = archiveTool === "unzip" ? ["-p", tmpZip, entry] : ["x", "-so", tmpZip, entry];
+  const extracted = spawnSync(archiveTool, extractedArgs, {
     encoding: "buffer",
     timeout: 30000,
     maxBuffer: 20 * 1024 * 1024,
@@ -336,9 +363,17 @@ async function saveFirstSubdl(results, info, quietNone = false) {
     return false;
   }
   const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
-  if (first.unpacked?.url && /\.(srt|vtt)(?:$|\?)/i.test(downloadUrl)) await downloadFile(downloadUrl, out);
-  else if (first.unpacked?.url) await downloadFile(downloadUrl, out);
-  else await downloadZipSubtitle(downloadUrl, out);
+  if (first.unpacked?.url) {
+    try {
+      await downloadFile(downloadUrl, out);
+    } catch (err) {
+      if (!first.entry.url) throw err;
+      const zipUrl = /^https?:\/\//i.test(first.entry.url) ? first.entry.url : `${SUBDL_DOWNLOAD_BASE_URL}${first.entry.url}`;
+      await downloadZipSubtitle(zipUrl, out, first.unpacked.name || first.unpacked.release_name || "");
+    }
+  } else {
+    await downloadZipSubtitle(downloadUrl, out);
+  }
   console.log(`[subs] saved ${out}`);
   return true;
 }
@@ -383,10 +418,12 @@ function subdlSubtitleScore(entry, unpacked, info) {
   const hi = unpacked?.hi ?? entry.hi;
 
   if (info.type === "episode") {
+    const marker = episodeMarker(label);
+    if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
     if (season === info.season) score += 80;
     if (episode === info.episode) score += 100;
-    if (season && season !== info.season) score -= 500;
-    if (episode && episode !== info.episode) score -= 500;
+    if (season && season !== info.season) return -10000;
+    if (episode && episode !== info.episode) return -10000;
   }
   if (format === "srt") score += 30;
   if (format === "vtt") score += 10;
@@ -422,6 +459,17 @@ function subtitleScore(entry) {
   const file = attrs.files?.[0] || {};
   const label = subtitleLabel(entry).toLowerCase();
   let score = 0;
+  const info = parseVideoInfo(target);
+
+  if (info.type === "episode") {
+    const marker = episodeMarker(label);
+    if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
+    const details = attrs.feature_details || {};
+    const season = Number(details.season_number || details.season || 0);
+    const episode = Number(details.episode_number || details.episode || 0);
+    if (season && season !== info.season) return -10000;
+    if (episode && episode !== info.episode) return -10000;
+  }
 
   if (attrs.from_trusted) score += 80;
   if (attrs.ai_translated === false) score += 20;

@@ -155,6 +155,7 @@ sub init()
       end if
       items = filterRemovedItems(items, removedItems)
       items = mergeLocalItems(items, filterRemovedItems(localItems, removedItems))
+      items = uniquePlaylistItems(items)
       m.items = items
       resetPosterRetryState()
       if m.items.count() = 0
@@ -222,7 +223,7 @@ sub init()
           grid.numRows = 2
       else if category = "playlists"
           grid.translation = [48, 150]
-          grid.itemSize = [220, 300]
+          grid.itemSize = [220, 350]
           grid.itemSpacing = [45, 22]
           grid.numColumns = 7
           grid.numRows = 1
@@ -278,7 +279,9 @@ sub init()
               preventWrapDown: preventDown
           })
 
-          if category = "movies" or left(category, 6) = "local_"
+          if left(category, 6) = "local_"
+              node.description = playlistItemMeta(item)
+          else if category = "movies"
               node.description = safeStr(item, ["original_available", "year", "create_time"])
           else if category = "tvshows"
               node.description = ""
@@ -312,6 +315,105 @@ sub init()
   function shouldAssignPosterInitially(category as string, idx as integer, cols as integer) as boolean
       if shouldDeferArtworkCache(category) then return idx < cols * 2
       return true
+  end function
+
+  function playlistItemMeta(item as object) as string
+      mediaType = lcase(safeStr(item, ["type"]))
+      showTitle = safeStr(item, ["showTitle", "show_title", "tvshow_title", "series_title", "parent_title"])
+      if showTitle = "" then showTitle = showTitleFromPlaylistPath(item)
+      if showTitle = "" and mediaType = "tvshow" then showTitle = safeStr(item, ["title", "name"])
+
+      season = safeStr(item, ["seasonNumber", "season_number", "seasonText", "season", "season_num", "season_index"])
+      episode = safeStr(item, ["episodeNumber", "episode_number", "episodeText", "episode", "episode_num", "ep_num", "ep_index"])
+      if season = "" or season = "0" or episode = "" or episode = "0"
+          parsed = seasonEpisodeFromPlaylistPath(item)
+          if season = "" or season = "0" then season = parsed.season
+          if episode = "" or episode = "0" then episode = parsed.episode
+      end if
+      episodeLine = ""
+      if season <> "" and season <> "0" and episode <> "" and episode <> "0"
+          episodeLine = "Season " + season + " Episode " + episode
+      else if episode <> "" and episode <> "0"
+          episodeLine = "Episode " + episode
+      end if
+
+      dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "air_date", "year", "create_time", "date"])
+      meta = ""
+      if showTitle <> "" then meta = showTitle
+      if episodeLine <> ""
+          if meta <> "" then meta = meta + chr(10)
+          meta = meta + episodeLine
+      end if
+      if dateText <> "" and dateText <> "0"
+          if meta <> "" then meta = meta + chr(10)
+          meta = meta + dateText
+      end if
+      return meta
+  end function
+
+  function playlistPathText(item as object) as string
+      text = safeStr(item, ["filePath", "path", "file_name", "filename", "title", "name"])
+      if text <> "" then return text
+      fileInfo = fileInfoFromItem(item)
+      if fileInfo.path <> invalid and fileInfo.path <> "" then return fileInfo.path
+      return ""
+  end function
+
+  function showTitleFromPlaylistPath(item as object) as string
+      text = playlistPathText(item)
+      if text = "" then return ""
+      slash = 0
+      i = 1
+      while i <= len(text)
+          if mid(text, i, 1) = "/" then slash = i
+          i = i + 1
+      end while
+      fileName = text
+      if slash > 0 then fileName = mid(text, slash + 1)
+      marker = instr(1, fileName, " - S")
+      if marker <= 1 then marker = instr(1, fileName, " - s")
+      if marker > 1 then return left(fileName, marker - 1).trim()
+      return ""
+  end function
+
+  function seasonEpisodeFromPlaylistPath(item as object) as object
+      result = { season: "", episode: "" }
+      text = playlistPathText(item)
+      if text = "" then return result
+      lower = lcase(text)
+      marker = instr(1, lower, "s")
+      while marker > 0 and marker + 5 <= len(lower)
+          if mid(lower, marker + 3, 1) = "e"
+              seasonText = mid(lower, marker + 1, 2)
+              episodeText = mid(lower, marker + 4, 2)
+              if isDigits(seasonText) and isDigits(episodeText)
+                  result.season = stripLeadingZero(seasonText)
+                  result.episode = stripLeadingZero(episodeText)
+                  return result
+              end if
+          end if
+          nextStart = marker + 1
+          marker = instr(nextStart, lower, "s")
+      end while
+      return result
+  end function
+
+  function isDigits(text as string) as boolean
+      if text = "" then return false
+      i = 1
+      while i <= len(text)
+          c = asc(mid(text, i, 1))
+          if c < 48 or c > 57 then return false
+          i = i + 1
+      end while
+      return true
+  end function
+
+  function stripLeadingZero(text as string) as string
+      while len(text) > 1 and left(text, 1) = "0"
+          text = mid(text, 2)
+      end while
+      return text
   end function
 
   function shouldDeferArtworkCache(category as string) as boolean
@@ -362,8 +464,8 @@ sub init()
       if m.items = invalid or m.items.count() = 0 then return
       cols = columnsForCategory(m.category)
       row = int(idx / cols)
-      startRow = row - 2
-      endRow = row + 2
+      startRow = row - 1
+      endRow = row + 1
       if startRow < 0 then startRow = 0
       maxRow = int((m.items.count() - 1) / cols)
       if endRow > maxRow then endRow = maxRow
@@ -389,7 +491,7 @@ sub init()
       if m.category = "playlists" then return
       if m.items = invalid or m.items.count() = 0 then return
       cols = columnsForCategory(m.category)
-      endIdx = (cols * 4) - 1
+      endIdx = cols - 1
       if endIdx >= m.items.count() then endIdx = m.items.count() - 1
 
       i = 0
@@ -419,7 +521,7 @@ sub init()
       m.initialPosterRetryPass = m.initialPosterRetryPass + 1
       scheduleInitialPosterRows()
       schedulePosterRows(m.focusedIndex)
-      if m.initialPosterRetryPass < 2
+      if m.initialPosterRetryPass < 1
           timer = m.top.findNode("initialPosterRetryTimer")
           if timer <> invalid
               timer.control = "stop"
@@ -446,6 +548,16 @@ sub init()
       m.posterRetryAttempts = {}
       m.posterRetryQueue = []
       m.posterRetryCursor = 0
+  end sub
+
+  sub stopArtworkTimers()
+      timer = m.top.findNode("posterRetryTimer")
+      if timer <> invalid then timer.control = "stop"
+      timer = m.top.findNode("initialPosterRetryTimer")
+      if timer <> invalid then timer.control = "stop"
+      timer = m.top.findNode("scrollPosterRetryTimer")
+      if timer <> invalid then timer.control = "stop"
+      m.posterRetryQueue = []
   end sub
 
   sub enqueuePosterRetry(idx as integer, forceFreshAttempts as boolean)
@@ -481,7 +593,7 @@ sub init()
           return
       end if
 
-      batchSize = 4
+      batchSize = 2
       processed = 0
       while processed < batchSize and m.posterRetryQueue.count() > 0
           idx = m.posterRetryQueue[0]
@@ -512,7 +624,7 @@ sub init()
   end function
 
   function maxPosterRetryAttempts() as integer
-      return 3
+      return 1
   end function
 
   function artworkNeedsRetry(idx as integer) as boolean
@@ -557,6 +669,7 @@ sub init()
   sub onItemSelected(event as object)
       idx = event.getData()
       if idx < 0 or idx >= m.items.count() then return
+      stopArtworkTimers()
 
       item = m.items[idx]
       authData = m.top.authData
@@ -605,6 +718,7 @@ sub init()
 	              title: safeStr(item, ["title", "name"]),
 	              mapperId: mapperId,
 	              libraryId: m.top.libraryId,
+	              sourceLibraryTitle: m.top.pageLabel,
 	              posterUrl: posterUrl(item, authData, category),
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
 	              backdropUrl: backdropUrl(item, authData),
@@ -688,6 +802,67 @@ sub init()
           if not found then merged.push(localItem)
       end for
       return merged
+  end function
+
+  function uniquePlaylistItems(items as object) as object
+      unique = []
+      if items = invalid then return unique
+      for each item in items
+          key = playlistUniqueKey(item)
+          existingIdx = -1
+          i = 0
+          while i < unique.count()
+              if playlistUniqueKey(unique[i]) = key
+                  existingIdx = i
+                  exit while
+              end if
+              i = i + 1
+          end while
+          if existingIdx < 0
+              unique.push(item)
+          else if playlistItemScore(item) > playlistItemScore(unique[existingIdx])
+              print "PLAYLIST_DEDUPE replace key="; key; " old="; safeStr(unique[existingIdx], ["title", "name", "file_name"]); " new="; safeStr(item, ["title", "name", "file_name"])
+              unique[existingIdx] = item
+          else
+              print "PLAYLIST_DEDUPE keep key="; key; " kept="; safeStr(unique[existingIdx], ["title", "name", "file_name"]); " skipped="; safeStr(item, ["title", "name", "file_name"])
+          end if
+      end for
+      return unique
+  end function
+
+  function playlistUniqueKey(item as object) as string
+      if item = invalid then return "invalid"
+      mapper = safeStr(item, ["mapper_id", "mapperId"])
+      if mapper <> "" and mapper <> "0" then return "mapper:" + mapper
+      mediaType = safeStr(item, ["type"])
+      if mediaType = "" then mediaType = "video"
+      idText = safeStr(item, ["id", "videoStationId"])
+      if idText <> "" and idText <> "0" then return mediaType + ":" + idText
+      fileInfo = fileInfoFromItem(item)
+      if fileInfo.path <> "" then return mediaType + ":path:" + lcase(fileInfo.path)
+      title = safeStr(item, ["title", "name", "file_name"])
+      return mediaType + ":title:" + lcase(title)
+  end function
+
+  function playlistItemScore(item as object) as integer
+      if item = invalid then return 0
+      score = 0
+      mediaType = lcase(safeStr(item, ["type"]))
+      if mediaType = "episode" or mediaType = "tvshow_episode" then score = score + 60
+      if mediaType = "movie" then score = score + 40
+      if mediaType = "homevideo" or mediaType = "home_video" then score = score + 30
+      idText = safeStr(item, ["id", "videoStationId"])
+      if idText <> "" and idText <> "0" and val(idText) > 0 then score = score + 80
+      mapper = safeStr(item, ["mapper_id", "mapperId"])
+      if mapper <> "" and mapper <> "0" then score = score + 20
+      if safeStr(item, ["showTitle", "show_title", "tvshow_title", "series_title", "parent_title"]) <> "" then score = score + 15
+      season = safeStr(item, ["seasonNumber", "season_number", "seasonText", "season", "season_num", "season_index"])
+      episode = safeStr(item, ["episodeNumber", "episode_number", "episodeText", "episode", "episode_num", "ep_num", "ep_index"])
+      if season <> "" and season <> "0" then score = score + 10
+      if episode <> "" and episode <> "0" then score = score + 10
+      if safeStr(item, ["summary", "description"]) <> "" then score = score + 5
+      if fileInfoFromItem(item).path <> "" then score = score + 5
+      return score
   end function
 
   function filterRemovedItems(items as object, removedKeys as object) as object
@@ -1039,6 +1214,7 @@ sub init()
 
   sub onNavSelected(event as object)
       idx = event.getData()
+      stopArtworkTimers()
       if idx >= 0 and idx < m.categories.count() then m.top.selectedCategory = categoryPayload(idx)
   end sub
 

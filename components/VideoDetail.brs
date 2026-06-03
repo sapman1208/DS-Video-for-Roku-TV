@@ -1,8 +1,11 @@
 sub init()
     m.actions = ["Play", "Favorite", "Watch List", "Share"]
     m.actionOverrides = {}
+    m.movieMetadataTask = invalid
+    m.pendingMovieSummary = ""
     grid = m.top.findNode("actionGrid")
     grid.observeField("itemSelected", "onActionSelected")
+    m.top.findNode("movieSummaryTimer").observeField("fire", "onMovieSummaryTimer")
     m.top.observeField("videoData", "onVideoDataSet")
 end sub
 
@@ -66,8 +69,9 @@ sub onVideoDataSet(event as object)
     if data.summary <> invalid then summary = data.summary
     if summary = "" and data.description <> invalid then summary = data.description
     if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
-    if summary = "" then summary = "No description available."
-    m.top.findNode("summaryLabel").text = summary
+    needsMovieMetadata = summary = "" and data.type <> invalid and data.type = "movie"
+    if summary = "" and not needsMovieMetadata then summary = "No description available."
+    m.pendingMovieSummary = ""
     poster = ""
 	    if data.posterUrl <> invalid then poster = data.posterUrl
 	    backdrop = ""
@@ -88,8 +92,48 @@ sub onVideoDataSet(event as object)
     else
         m.top.findNode("backdrop").visible = false
     end if
+    m.top.findNode("summaryLabel").text = summary
+    if needsMovieMetadata then startMovieMetadataFetch(data)
     populateActions()
     m.top.findNode("actionGrid").setFocus(true)
+end sub
+
+sub startMovieMetadataFetch(data as object)
+    if data = invalid or data.authData = invalid then return
+    movieId = ""
+    if data.id <> invalid then movieId = safeIntText(data.id)
+    if movieId = "" or movieId = "0" then return
+    task = createObject("roSGNode", "APITask")
+    task.observeField("response", "onMovieMetadata")
+    task.request = {
+        action: "movieMetadata",
+        baseUrl: data.authData.baseUrl,
+        sid: data.authData.sid,
+        synoToken: data.authData.synoToken,
+        id: movieId,
+        title: data.title
+    }
+    m.movieMetadataTask = task
+    print "MOVIE_METADATA_REQUEST id="; movieId; " title="; data.title
+    task.control = "RUN"
+end sub
+
+sub onMovieMetadata(event as object)
+    response = event.getData()
+    if response = invalid then return
+    summary = ""
+    if response.summary <> invalid then summary = response.summary
+    if summary = "" then return
+    m.pendingMovieSummary = summary
+    timer = m.top.findNode("movieSummaryTimer")
+    if timer <> invalid then timer.control = "start"
+    print "MOVIE_METADATA_APPLY id="; response.lookUp("id"); " source="; response.lookUp("source"); " summaryLen="; len(summary)
+end sub
+
+sub onMovieSummaryTimer(event as object)
+    if m.pendingMovieSummary = invalid or m.pendingMovieSummary = "" then return
+    m.top.findNode("summaryLabel").text = m.pendingMovieSummary
+    m.pendingMovieSummary = ""
 end sub
 
 function episodeMetaText(data as object) as string
@@ -217,22 +261,40 @@ end sub
 sub syncSynologyCollection(idx as integer, enabled as boolean)
     data = m.top.videoData
     if data = invalid or data.authData = invalid then return
-    videoId = safeIntText(data.id)
+    videoId = ""
+    if data.videoStationId <> invalid then videoId = safeIntText(data.videoStationId)
+    if videoId = "" or videoId = "0" then videoId = safeIntText(data.id)
     if videoId = "" or videoId = "0" then return
+    proxyBaseUrl = invalid
+    if data.authData.proxyBaseUrl <> invalid then proxyBaseUrl = data.authData.proxyBaseUrl
+    filePath = invalid
+    if data.filePath <> invalid then filePath = data.filePath
+    mapperId = invalid
+    if data.mapperId <> invalid then mapperId = data.mapperId
     task = createObject("roSGNode", "APITask")
     task.request = {
         action: "toggleCollectionVideo",
         baseUrl: data.authData.baseUrl,
+        proxyBaseUrl: proxyBaseUrl,
         sid: data.authData.sid,
         synoToken: data.authData.synoToken,
         localKey: actionKey(idx),
         collectionId: collectionIdForAction(idx),
         videoType: data.type,
         videoId: videoId,
+        mapperId: mapperId,
+        filePath: filePath,
         enabled: enabled
     }
+    task.observeField("response", "onCollectionSyncResponse")
     task.control = "RUN"
     m.collectionSyncTask = task
+end sub
+
+sub onCollectionSyncResponse(event as object)
+    response = event.getData()
+    if response = invalid then return
+    print "COLLECTION_SYNC success="; response.lookUp("success"); " error="; response.lookUp("error"); " detail="; response.lookUp("detail")
 end sub
 
 function collectionIdForAction(idx as integer) as string
@@ -338,6 +400,7 @@ function serializableVideo(data as object) as object
     end if
     if data.filePath <> invalid then item.filePath = data.filePath
     if data.title <> invalid then item.title = data.title
+    if data.showTitle <> invalid then item.showTitle = data.showTitle
     if data.summary <> invalid then item.summary = data.summary
     if data.posterRemoteUrl <> invalid and data.posterRemoteUrl <> ""
         item.posterUrl = data.posterRemoteUrl
@@ -351,7 +414,10 @@ function serializableVideo(data as object) as object
     else if data.backdropUrl <> invalid
         item.backdropUrl = data.backdropUrl
     end if
-    if data.originalAvailable <> invalid then item.originalAvailable = data.originalAvailable
+    if data.originalAvailable <> invalid
+        item.originalAvailable = data.originalAvailable
+        item.original_available = data.originalAvailable
+    end if
     if data.seasonNumber <> invalid then item.seasonNumber = data.seasonNumber
     if data.episodeNumber <> invalid then item.episodeNumber = data.episodeNumber
     if data.episodeMeta <> invalid then item.episodeMeta = data.episodeMeta
