@@ -55,8 +55,5 @@ end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-    content = m.top.itemContent
-    if content = invalid then return false
-    if key = "down" and content.preventWrapDown = "true" then return true
     return false
 end function

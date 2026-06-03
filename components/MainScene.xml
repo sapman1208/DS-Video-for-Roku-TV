@@ -5,5 +5,6 @@
     <children>
         <Rectangle id="background" color="#DF3540" width="1920" height="1080" />
         <Timer id="playbackFocusTimer" repeat="false" duration="0.15" />
+        <Timer id="autoplayContextTimer" repeat="false" duration="1.5" />
     </children>
 </component>

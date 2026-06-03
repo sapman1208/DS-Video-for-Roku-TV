@@ -6,11 +6,11 @@
           s = rawId
           return s.trim()
       end if
-      if t = "roInteger" or t = "Integer"
+      if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
           s = stri(rawId)
           return s.trim()
       end if
-      if t = "roFloat" or t = "Float"
+      if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
           s = stri(int(rawId))
           return s.trim()
       end if
@@ -34,6 +34,9 @@ sub init()
       if action = "listCollectionVideos" then listCollectionVideos(req)
       if action = "toggleCollectionVideo" then toggleCollectionVideo(req)
       if action = "updateWatchStatus" then updateWatchStatus(req)
+      if action = "setVideoWatched" then setVideoWatched(req)
+      if action = "setVideoRating" then setVideoRating(req)
+      if action = "detailState" then detailState(req)
       if action = "listLibraries" then listLibraries(req)
       if action = "listEpisodes" then listEpisodes(req)
       if action = "movieMetadata" then movieMetadata(req)
@@ -106,7 +109,7 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
 
       libraryParam = libraryParamFromReq(req)
-      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movie", "movies"])
       if key <> ""
@@ -117,7 +120,7 @@ sub init()
           return
       end if
 
-      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movies", "movie"])
       if key <> ""
@@ -229,7 +232,7 @@ sub init()
               return
           end if
       end if
-      url = apiUrl(baseUrl, "SYNO.VideoStation2.HomeVideo", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation2.HomeVideo", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["video", "videos"])
       if key <> ""
@@ -240,7 +243,7 @@ sub init()
           return
       end if
 
-      url = apiUrl(baseUrl, "SYNO.VideoStation.HomeVideo", "VideoStation/homevideo.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.HomeVideo", "VideoStation/homevideo.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["video", "videos"])
       if key <> ""
@@ -304,7 +307,7 @@ sub init()
       if collectionId = "" or collectionId = "0" then collectionId = collectionIdForKey(idToStr(req.localKey))
       if collectionId = "" then collectionId = "-1"
 
-      additional = "%5B%22watched_ratio%22,%22file%22,%22poster_mtime%22,%22backdrop_mtime%22,%22summary%22,%22extra%22,%22collection%22,%22originally_available%22%5D"
+      additional = "%5B%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22file%22,%22poster_mtime%22,%22backdrop_mtime%22,%22summary%22,%22extra%22,%22collection%22,%22originally_available%22%5D"
       params = "id=" + collectionId + "&offset=0&limit=500&sort_by=title&sort_direction=asc&additional=" + additional
       url = apiUrl(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "2", "video_list", params, sid, token)
       result = httpGet(url)
@@ -459,6 +462,335 @@ sub init()
           m.top.response = { success: false, error: "Synology watch status update failed", detail: left(result, 300) }
       end if
   end sub
+
+  sub setVideoWatched(req as object)
+      baseUrl = req.baseUrl
+      sid = req.sid
+      token = ""
+      if req.synoToken <> invalid then token = req.synoToken
+      videoId = idToStr(req.videoId)
+      mediaType = idToStr(req.videoType)
+      watchedText = "false"
+      if req.watched = true then watchedText = "true"
+      if videoId = "" or videoId = "0"
+          m.top.response = { success: false, error: "Missing watched id" }
+          return
+      end if
+
+      apiName = v2InfoApiForMediaType(mediaType)
+      url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
+      enc = createObject("roUrlTransfer")
+      baseBody = "api=" + enc.escape(apiName) + "&version=1&method=set_watched&watched=" + watchedText + "&id="
+      idForms = [
+          "%5B%22" + enc.escape(videoId) + "%22%5D",
+          "%5B" + enc.escape(videoId) + "%5D",
+          enc.escape(videoId)
+      ]
+      lastResult = ""
+      for each idForm in idForms
+          body = baseBody + idForm
+          result = httpPostForm(url, body)
+          if result <> invalid and result <> ""
+              lastResult = result
+              json = parseJSON(result)
+              if json <> invalid and json.success = true
+                  m.top.response = { success: true, result: json, watched: req.watched = true, idForm: idForm }
+                  return
+              end if
+          end if
+      end for
+      if lastResult = invalid or lastResult = ""
+          m.top.response = { success: false, error: "No response from Synology watched API" }
+      else
+          m.top.response = { success: false, error: "Synology watched update failed", detail: left(lastResult, 300) }
+      end if
+  end sub
+
+  sub setVideoRating(req as object)
+      baseUrl = req.baseUrl
+      sid = req.sid
+      token = ""
+      if req.synoToken <> invalid then token = req.synoToken
+      videoId = idToStr(req.videoId)
+      mediaType = idToStr(req.videoType)
+      rating = 0
+      if req.rating <> invalid then rating = int(req.rating)
+      if rating < 0 then rating = 0
+      if rating > 100 then rating = 100
+      if videoId = "" or videoId = "0"
+          m.top.response = { success: false, error: "Missing rating id" }
+          return
+      end if
+
+      apiName = legacyVideoApiForMediaType(mediaType)
+      enc = createObject("roUrlTransfer")
+      params = "id=" + enc.escape(videoId) + "&rating=" + stri(rating).trim()
+      result = httpGet(apiUrl(baseUrl, apiName, legacyVideoPathForMediaType(mediaType), "4", "set_rating", params, sid, token))
+      if result = invalid or result = ""
+          m.top.response = { success: false, error: "No response from Synology rating API" }
+          return
+      end if
+      json = parseJSON(result)
+      if json <> invalid and json.success = true
+          m.top.response = { success: true, result: json, rating: rating }
+      else
+          m.top.response = { success: false, error: "Synology rating update failed", detail: left(result, 300) }
+      end if
+  end sub
+
+  function legacyVideoApiForMediaType(mediaType as string) as string
+      if mediaType = "movie" then return "SYNO.VideoStation.Movie"
+      if mediaType = "homevideo" then return "SYNO.VideoStation.HomeVideo"
+      if mediaType = "homeVideo" then return "SYNO.VideoStation.HomeVideo"
+      if mediaType = "episode" then return "SYNO.VideoStation.TVShowEpisode"
+      return v2InfoApiForMediaType(mediaType)
+  end function
+
+  function legacyVideoPathForMediaType(mediaType as string) as string
+      if mediaType = "movie" then return "VideoStation/movie.cgi"
+      if mediaType = "homevideo" then return "VideoStation/homevideo.cgi"
+      if mediaType = "homeVideo" then return "VideoStation/homevideo.cgi"
+      if mediaType = "episode" then return "VideoStation/tvshow_episode.cgi"
+      return "entry.cgi"
+  end function
+
+  sub detailState(req as object)
+      baseUrl = req.baseUrl
+      sid = req.sid
+      token = ""
+      if req.synoToken <> invalid then token = req.synoToken
+      videoId = idToStr(req.videoId)
+      mediaType = idToStr(req.videoType)
+      if videoId = "" or videoId = "0"
+          m.top.response = { success: false, error: "Missing detail id" }
+          return
+      end if
+
+      candidates = []
+      if req.videoIds <> invalid
+          for each candidate in req.videoIds
+              pushUniqueString(candidates, candidate)
+          end for
+      end if
+      pushUniqueString(candidates, videoId)
+
+      item = invalid
+      usedId = ""
+      for each candidateId in candidates
+          item = fetchCollectionInfoItem(baseUrl, sid, token, candidateId, mediaType)
+          if item <> invalid
+              usedId = candidateId
+              exit for
+          end if
+      end for
+      if item = invalid
+          m.top.response = { success: false, error: "No detail state response", id: videoId, candidates: candidates.count() }
+          return
+      end if
+
+      rating = detailStateRating(item)
+      watched = detailStateWatchedPercent(item)
+      hasWatched = detailStateHas(item, ["watched_ratio", "watchedRatio"])
+      print "DETAIL_STATE_API type="; mediaType; " id="; usedId; " rating="; rating; " watchedRatio="; watched; " hasWatched="; hasWatched
+      m.top.response = { success: true, id: usedId, rating: rating, watchedRatio: watched, hasWatched: hasWatched }
+  end sub
+
+  function detailStateRating(item as object) as integer
+      rating = detailStateInt(item, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
+      if rating > 0 then return rating
+      return detailStateExtraRating(item)
+  end function
+
+  function detailStateExtraRating(item as object) as integer
+      candidates = []
+      if item <> invalid
+          extra = item.lookUp("extra")
+          if extra <> invalid then candidates.push(extra)
+          additional = item.lookUp("additional")
+          if additional <> invalid
+              extra = additional.lookUp("extra")
+              if extra <> invalid then candidates.push(extra)
+          end if
+      end if
+      for each candidate in candidates
+          extraObj = detailStateObject(candidate)
+          rating = detailStateNestedDbRating(extraObj)
+          if rating > 0 then return rating
+      end for
+      return 0
+  end function
+
+  function detailStateNestedDbRating(extraObj as dynamic) as integer
+      if extraObj = invalid or type(extraObj) <> "roAssociativeArray" then return 0
+      best = 0
+      for each dbKey in ["synoVideoDb", "synovideodb", "theMovieDb", "themoviedb", "theTVDb", "thetvdb"]
+          db = extraObj.lookUp(dbKey)
+          if db <> invalid and type(db) = "roAssociativeArray"
+              ratingObj = db.lookUp("rating")
+              if ratingObj <> invalid and type(ratingObj) = "roAssociativeArray"
+                  for each ratingKey in ["synovideodb", "synoVideoDb", "themoviedb", "theMovieDb", "thetvdb", "theTVDb", "rating"]
+                      value = ratingObj.lookUp(ratingKey)
+                      if value <> invalid
+                          num = detailStateValueToInt(value)
+                          if num > 0 and num <= 10 then num = num * 10
+                          if num > best then best = num
+                      end if
+                  end for
+              end if
+          end if
+      end for
+      if best > 100 then best = 100
+      return best
+  end function
+
+  function detailStateWatchedPercent(item as object) as integer
+      raw = detailStateValue(item, ["watched_ratio", "watchedRatio"])
+      if raw = invalid then return 0
+      return detailStateWatchedValueToPercent(raw)
+  end function
+
+  function detailStateValue(item as object, keys as object) as dynamic
+      if item = invalid then return invalid
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid then return value
+      end for
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          for each key in keys
+              value = additional.lookUp(key)
+              if value <> invalid then return value
+          end for
+          extra = detailStateObject(additional.lookUp("extra"))
+          if extra <> invalid
+              for each key in keys
+                  value = extra.lookUp(key)
+                  if value <> invalid then return value
+              end for
+          end if
+      end if
+      extra = detailStateObject(item.lookUp("extra"))
+      if extra <> invalid
+          for each key in keys
+              value = extra.lookUp(key)
+              if value <> invalid then return value
+          end for
+      end if
+      return invalid
+  end function
+
+  function detailStateInt(item as object, keys as object) as integer
+      if item = invalid then return 0
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid then return detailStateValueToInt(value)
+      end for
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          for each key in keys
+              value = additional.lookUp(key)
+              if value <> invalid then return detailStateValueToInt(value)
+          end for
+          extra = additional.lookUp("extra")
+          nested = detailStateIntFromObject(extra, keys)
+          if nested >= 0 then return nested
+      end if
+      extra = item.lookUp("extra")
+      nested = detailStateIntFromObject(extra, keys)
+      if nested >= 0 then return nested
+      return 0
+  end function
+
+  function detailStateIntFromObject(item as dynamic, keys as object) as integer
+      item = detailStateObject(item)
+      if item = invalid then return -1
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid then return detailStateValueToInt(value)
+      end for
+      return -1
+  end function
+
+  function detailStateHasInObject(item as dynamic, keys as object) as boolean
+      item = detailStateObject(item)
+      if item = invalid then return false
+      for each key in keys
+          if item.lookUp(key) <> invalid then return true
+      end for
+      return false
+  end function
+
+  function detailStateHasNested(item as object, keys as object) as boolean
+      if item = invalid then return false
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          extra = additional.lookUp("extra")
+          if detailStateHasInObject(extra, keys) then return true
+      end if
+      extra = item.lookUp("extra")
+      return detailStateHasInObject(extra, keys)
+  end function
+
+  function detailStateHas(item as object, keys as object) as boolean
+      if item = invalid then return false
+      for each key in keys
+          if item.lookUp(key) <> invalid then return true
+      end for
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          for each key in keys
+              if additional.lookUp(key) <> invalid then return true
+          end for
+      end if
+      if detailStateHasNested(item, keys) then return true
+      return false
+  end function
+
+  function detailStateValueToInt(value as dynamic) as integer
+      if value = invalid then return 0
+      t = type(value)
+      if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return value
+      if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return int(value)
+      if t = "roString" or t = "String"
+          trimmed = value.trim()
+          if trimmed = "" then return 0
+          return int(val(trimmed))
+      end if
+      return 0
+  end function
+
+  function detailStateWatchedValueToPercent(value as dynamic) as integer
+      if value = invalid then return 0
+      t = type(value)
+      if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+          if value >= 0 and value <= 1 then return int((value * 100) + 0.5)
+          return int(value)
+      end if
+      if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
+          if value = 1 then return 100
+          return value
+      end if
+      if t = "roString" or t = "String"
+          trimmed = value.trim()
+          if trimmed = "" then return 0
+          numberValue = val(trimmed)
+          if numberValue >= 0 and numberValue <= 1 then return int((numberValue * 100) + 0.5)
+          return int(numberValue)
+      end if
+      return 0
+  end function
+
+  function detailStateObject(value as dynamic) as dynamic
+      if value = invalid then return invalid
+      if type(value) = "roAssociativeArray" then return value
+      if type(value) = "roString" or type(value) = "String"
+          trimmed = value.trim()
+          if trimmed = "" then return invalid
+          parsed = parseJSON(trimmed)
+          if parsed <> invalid and type(parsed) = "roAssociativeArray" then return parsed
+      end if
+      return invalid
+  end function
 
   sub listLibraries(req as object)
       proxyBaseUrl = invalid
@@ -857,7 +1189,7 @@ sub init()
       apiName = v2InfoApiForMediaType(mediaType)
       url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
       enc = createObject("roUrlTransfer")
-      additional = "[%22extra%22,%22summary%22,%22file%22,%22actor%22,%22writer%22,%22director%22,%22genre%22,%22collection%22,%22watched_ratio%22,%22conversion_produced%22,%22backdrop_mtime%22,%22poster_mtime%22]"
+      additional = "[%22extra%22,%22summary%22,%22file%22,%22actor%22,%22writer%22,%22director%22,%22genre%22,%22collection%22,%22watched_ratio%22,%22rating%22,%22conversion_produced%22,%22backdrop_mtime%22,%22poster_mtime%22]"
       body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=%5B" + enc.escape(videoId) + "%5D&additional=" + additional
 
       print "V2_GETINFO api="; apiName; " id="; videoId
@@ -1394,8 +1726,8 @@ sub init()
           v = item.lookUp(k)
           if v <> invalid
               t = type(v)
-              if t = "roInteger" or t = "Integer" then return v
-              if t = "roFloat" or t = "Float" then return int(v)
+              if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return v
+              if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return int(v)
               if t = "roString" or t = "String" then return int(val(v))
           end if
       end for
@@ -1983,8 +2315,8 @@ sub init()
       id = idToStr(candidateId)
       if id = "" or id = "0" then return emptyResult
 
-      richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22%5D"
-      simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22,%22originally_available%22%5D"
+      richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22%5D"
+      simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22originally_available%22%5D"
       attempts = [
           { api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", idParam: "tvshow_id", keys: ["episodes", "episode"] },
           { api: "SYNO.VideoStation2.TVShowEpisode", path: "entry.cgi", version: "2", idParam: "tvshow_id", keys: ["episode", "episodes"] },
@@ -2139,16 +2471,40 @@ sub init()
   end function
 
   function fetchCollectionInfoItem(baseUrl as string, sid as string, token as string, videoId as string, mediaType as string) as dynamic
-      apiName = v2InfoApiForMediaType(mediaType)
-      url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
       enc = createObject("roUrlTransfer")
-      additional = "[%22summary%22,%22extra%22,%22file%22,%22collection%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22]"
-      body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=%5B" + enc.escape(videoId) + "%5D&additional=" + additional
-      r = httpPostForm(url, body)
+      additional = "[%22summary%22,%22extra%22,%22file%22,%22collection%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22]"
+      idForms = [
+          "%5B%22" + enc.escape(videoId) + "%22%5D",
+          "%5B" + enc.escape(videoId) + "%5D",
+          enc.escape(videoId)
+      ]
+      requests = []
+      apiName = v2InfoApiForMediaType(mediaType)
+      requests.push({ api: apiName, path: "entry.cgi", version: "1", method: "getinfo", ids: idForms })
+      if mediaType = "episode"
+          requests.push({ api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", method: "getinfo", ids: idForms })
+          requests.push({ api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", method: "list", ids: [enc.escape(videoId)] })
+          requests.push({ api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", method: "list", ids: [enc.escape(videoId)] })
+      end if
+      for each req in requests
+          url = apiEndpoint(baseUrl, req.api, req.path, sid, token)
+          for each idForm in req.ids
+              body = "api=" + enc.escape(req.api) + "&version=" + req.version + "&method=" + req.method + "&id=" + idForm + "&additional=" + additional
+              if req.method = "list" then body = "api=" + enc.escape(req.api) + "&version=" + req.version + "&method=list&offset=0&limit=1&id=" + idForm + "&additional=" + additional
+              r = httpPostForm(url, body)
+              item = collectionInfoItemFromResponse(r, mediaType)
+              if item <> invalid then return item
+          end for
+      end for
+      return invalid
+  end function
+
+  function collectionInfoItemFromResponse(r as dynamic, mediaType as string) as dynamic
       if r = invalid or r = "" then return invalid
       j = parseJSON(r)
       if j <> invalid and j.success = true and j.data <> invalid
-          return firstV2InfoItem(j.data, mediaType)
+          item = firstV2InfoItem(j.data, mediaType)
+          if item <> invalid then return item
       end if
       return invalid
   end function
@@ -2161,6 +2517,9 @@ sub init()
       copyEpisodeMetadataField(meta, item, "original_available")
       copyEpisodeMetadataField(meta, item, "originally_available")
       copyEpisodeMetadataField(meta, item, "year")
+      copyEpisodeMetadataField(meta, item, "rating")
+      copyEpisodeMetadataField(meta, item, "rate")
+      copyEpisodeMetadataField(meta, item, "user_rating")
       copyEpisodeMetadataField(meta, item, "additional")
       copyEpisodeMetadataField(meta, item, "mapper_id")
 
@@ -2584,8 +2943,8 @@ sub init()
           value = item.lookUp(key)
           if value <> invalid
               t = type(value)
-              if t = "roInteger" or t = "Integer" then return value
-              if t = "roFloat" or t = "Float" then return int(value)
+              if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return value
+              if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return int(value)
               if t = "roString" or t = "String" then return int(val(value))
           end if
       end for
@@ -2694,6 +3053,9 @@ sub init()
               copyEpisodeMetadataField(meta, item, "original_available")
               copyEpisodeMetadataField(meta, item, "originally_available")
               copyEpisodeMetadataField(meta, item, "year")
+              copyEpisodeMetadataField(meta, item, "rating")
+              copyEpisodeMetadataField(meta, item, "rate")
+              copyEpisodeMetadataField(meta, item, "user_rating")
               copyEpisodeMetadataField(meta, item, "additional")
               summary = episodeSummaryText(meta)
               if summary <> ""

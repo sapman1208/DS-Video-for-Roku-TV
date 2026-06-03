@@ -49,7 +49,7 @@ sub init()
   end function
 
   function fileInfoFromItem(item as object) as object
-      info = { id: invalid, path: "" }
+      info = { id: invalid, path: "", watched: invalid }
 
       additional = item.lookUp("additional")
       if additional <> invalid
@@ -57,6 +57,8 @@ sub init()
           if fileList <> invalid and fileList.count() > 0
               f = fileList[0]
               info.id = f.lookUp("id")
+              info.watched = f.lookUp("file_watched")
+              if info.watched = invalid then info.watched = f.lookUp("watched")
               p = f.lookUp("path")
               if p <> invalid then info.path = p
           end if
@@ -67,6 +69,10 @@ sub init()
           if fileList <> invalid and fileList.count() > 0
               f = fileList[0]
               if info.id = invalid then info.id = f.lookUp("id")
+              if info.watched = invalid
+                  info.watched = f.lookUp("file_watched")
+                  if info.watched = invalid then info.watched = f.lookUp("watched")
+              end if
               if info.path = ""
                   p = f.lookUp("path")
                   if p <> invalid then info.path = p
@@ -313,7 +319,7 @@ sub init()
   end sub
 
   function shouldAssignPosterInitially(category as string, idx as integer, cols as integer) as boolean
-      if shouldDeferArtworkCache(category) then return idx < cols * 2
+      if shouldDeferArtworkCache(category) then return idx < cols * 4
       return true
   end function
 
@@ -464,8 +470,8 @@ sub init()
       if m.items = invalid or m.items.count() = 0 then return
       cols = columnsForCategory(m.category)
       row = int(idx / cols)
-      startRow = row - 1
-      endRow = row + 1
+      startRow = row - 3
+      endRow = row + 3
       if startRow < 0 then startRow = 0
       maxRow = int((m.items.count() - 1) / cols)
       if endRow > maxRow then endRow = maxRow
@@ -491,7 +497,7 @@ sub init()
       if m.category = "playlists" then return
       if m.items = invalid or m.items.count() = 0 then return
       cols = columnsForCategory(m.category)
-      endIdx = cols - 1
+      endIdx = (cols * 4) - 1
       if endIdx >= m.items.count() then endIdx = m.items.count() - 1
 
       i = 0
@@ -593,7 +599,7 @@ sub init()
           return
       end if
 
-      batchSize = 2
+      batchSize = 5
       processed = 0
       while processed < batchSize and m.posterRetryQueue.count() > 0
           idx = m.posterRetryQueue[0]
@@ -753,6 +759,10 @@ sub init()
 		              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
 	              title: safeStr(item, ["title", "name", "file_name"]),
 	              summary: summaryForDetail(item),
+	              watchedRatio: numberForDetail(item, ["watched_ratio", "watchedRatio"]),
+	              fileWatched: fileInfo.watched,
+	              lastWatched: numberForDetail(item, ["last_watched", "lastWatched"]),
+	              rating: numberForDetail(item, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"]),
 	              posterUrl: posterUrl(item, authData, category),
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
 	              backdropUrl: backdropUrl(item, authData),
@@ -770,8 +780,46 @@ sub init()
   function summaryForDetail(item as object) as string
       title = safeStr(item, ["title", "name", "file_name"])
       summary = safeStr(item, ["summary", "description", "tagline"])
+      if summary = ""
+          additional = item.lookUp("additional")
+          if additional <> invalid
+              summary = safeStr(additional, ["summary", "description", "tagline"])
+              if summary = ""
+                  extra = additional.lookUp("extra")
+                  if extra <> invalid then summary = safeStr(extra, ["summary", "description", "tagline"])
+              end if
+          end if
+      end if
       if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then return ""
       return summary
+  end function
+
+  function numberForDetail(item as object, keys as object) as integer
+      value = firstNumberFromObject(item, keys)
+      if value >= 0 then return value
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          value = firstNumberFromObject(additional, keys)
+          if value >= 0 then return value
+      end if
+      return 0
+  end function
+
+  function firstNumberFromObject(item as object, keys as object) as integer
+      if item = invalid then return -1
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid
+              t = type(value)
+              if t = "roInteger" or t = "Integer" then return value
+              if t = "roFloat" or t = "Float" then return int(value)
+              if t = "roString" or t = "String"
+                  trimmed = value.trim()
+                  if trimmed <> "" then return int(val(trimmed))
+              end if
+          end if
+      end for
+      return -1
   end function
 
   function localListKeyForCategory(category as string) as string
@@ -1195,6 +1243,9 @@ sub init()
           m.focusArea = "items"
           return true
       end if
+      if key = "down" and m.focusArea = "items"
+          if focusNextAvailableGridRowItem() then return true
+      end if
       if key = "back"
           if m.focusArea = "nav" then return false
           if left(m.category, 6) = "local_"
@@ -1206,6 +1257,34 @@ sub init()
           return true
       end if
       return false
+  end function
+
+  function focusNextAvailableGridRowItem() as boolean
+      if m.items = invalid then return false
+      total = m.items.count()
+      if total = 0 then return false
+
+      grid = m.top.findNode("videoGrid")
+      if grid = invalid then return false
+
+      idx = m.focusedIndex
+      if grid.itemFocused >= 0 then idx = grid.itemFocused
+      if idx < 0 or idx >= total - 1 then return false
+
+      cols = 7
+      if m.category = "homevideos" or m.category = "tvrecordings" then cols = 3
+      belowIdx = idx + cols
+      if belowIdx < total then return false
+
+      nextRow = int(idx / cols) + 1
+      target = nextRow * cols
+      if target >= total then return false
+      grid.jumpToItem = target
+      grid.setFocus(true)
+      m.focusedIndex = target
+      m.focusArea = "items"
+      schedulePosterRows(target)
+      return true
   end function
 
   sub onNavFocus(event as object)

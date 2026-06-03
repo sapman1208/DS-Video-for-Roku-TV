@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="RatingStarItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" />
+        <field id="focusPercent" type="float" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/RatingStarItem.brs" />
+    <script type="text/brightscript" uri="pkg:/source/bslib.brs" />
+    <children>
+        <Poster id="starBase" uri="pkg:/images/detail-star.png" width="42" height="42" translation="[4, 2]" loadDisplayMode="scaleToFit" opacity="0.25" />
+        <Poster id="starFill" uri="pkg:/images/detail-star.png" width="42" height="42" translation="[4, 2]" loadDisplayMode="scaleToFit" opacity="0" />
+    </children>
+</component>

@@ -4,6 +4,7 @@
         <field id="authData" type="assocarray" />
         <field id="videoData" type="assocarray" />
         <field id="resumePosition" type="integer" value="0" />
+        <field id="playbackStarted" type="boolean" alwaysNotify="true" />
         <field id="playbackDone" type="boolean" alwaysNotify="true" />
         <field id="playbackResult" type="assocarray" alwaysNotify="true" />
     </interface>

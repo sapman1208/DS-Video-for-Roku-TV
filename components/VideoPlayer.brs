@@ -17,6 +17,7 @@ sub init()
       m.top.findNode("captionTimer").observeField("fire", "onCaptionTimer")
       m.hasError = false
       m.hasPlayed = false
+      m.reportedStart = false
       m.reportedDone = false
       m.userStopped = false
       m.captions = []
@@ -33,6 +34,7 @@ sub init()
       m.seekApplied = false
       m.seekAttempts = 0
       m.lastSyncedPosition = -1
+      m.watchStatusInFlight = false
       m.resumeSeekDoneAt = invalid
       m.captions = []
       hideCaptionOverlay()
@@ -275,6 +277,10 @@ sub init()
       print "VIDEO_STATE "; state
       if state = "playing"
           m.hasPlayed = true
+          if m.reportedStart <> true
+              m.reportedStart = true
+              m.top.playbackStarted = true
+          end if
           applyPendingSeek()
           startResumeSeekTimer()
           if m.captions <> invalid and m.captions.count() > 0
@@ -597,6 +603,7 @@ sub init()
   end sub
 
   sub syncWatchStatus(position as integer)
+      if m.watchStatusInFlight = true then return
       videoData = m.top.videoData
       if videoData = invalid then return
       authData = videoData.authData
@@ -609,6 +616,7 @@ sub init()
           if delta < 10 then return
       end if
       m.lastSyncedPosition = position
+      m.watchStatusInFlight = true
 
       task = createObject("roSGNode", "APITask")
       task.request = {
@@ -629,6 +637,7 @@ sub init()
 
   sub onWatchStatusSynced(event as object)
       if event = invalid then return
+      m.watchStatusInFlight = false
       response = event.getData()
       if response = invalid then return
       if response.success = true

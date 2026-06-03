@@ -1,6 +1,7 @@
 sub init()
       m.screenStack = []
       m.top.findNode("playbackFocusTimer").observeField("fire", "onPlaybackFocusTimer")
+      m.top.findNode("autoplayContextTimer").observeField("fire", "onAutoplayContextTimer")
       if hasSavedCredentials()
           autoLogin()
       else
@@ -333,8 +334,8 @@ sub init()
       detail.observeField("playVideo", "onDetailPlay")
       detail.observeField("backPressed", "onBackPressed")
       detail.observeField("listChanged", "onDetailListChanged")
-      m.top.appendChild(detail)
       detail.videoData = videoData
+      m.top.appendChild(detail)
       detail.setFocus(true)
       m.screenStack.push(detail)
       m.currentScreen = detail
@@ -371,10 +372,31 @@ sub init()
           m.lastPlaybackVideo = videoData
       end if
       player.observeField("playbackResult", "onPlaybackDone")
+      player.observeField("playbackStarted", "onPlaybackStarted")
       m.top.appendChild(player)
       player.setFocus(true)
       m.screenStack.push(player)
       m.currentScreen = player
+      if videoData <> invalid and videoData.lookUp("type") = "episode" and videoData.lookUp("autoplayEpisodes") = invalid
+          m.pendingAutoplayContextVideo = videoData
+      end if
+  end sub
+
+  sub onPlaybackStarted(event as object)
+      if event = invalid then return
+      if m.pendingAutoplayContextVideo = invalid then return
+      timer = m.top.findNode("autoplayContextTimer")
+      if timer <> invalid
+          timer.control = "stop"
+          timer.control = "start"
+      end if
+  end sub
+
+  sub onAutoplayContextTimer(event as object)
+      if event = invalid then return
+      if m.pendingAutoplayContextVideo = invalid then return
+      attachEpisodeAutoplayContext(m.pendingAutoplayContextVideo)
+      m.pendingAutoplayContextVideo = invalid
   end sub
 
   function shouldRefreshResumePosition(videoData as object) as boolean
@@ -524,7 +546,11 @@ sub init()
       if playedVideo = invalid and m.lastPlaybackVideo <> invalid
           playedVideo = m.lastPlaybackVideo
       end if
+      if playedVideo <> invalid and playedVideo.lookUp("autoplayEpisodes") = invalid and m.lastPlaybackVideo <> invalid and autoplayVideoKey(playedVideo) = autoplayVideoKey(m.lastPlaybackVideo)
+          playedVideo = m.lastPlaybackVideo
+      end if
       if result <> invalid and result.lookUp("reason") = "finished"
+          if playedVideo <> invalid and playedVideo.lookUp("autoplayEpisodes") = invalid then attachEpisodeAutoplayContext(playedVideo)
           nextVideo = nextAutoplayEpisode(playedVideo)
       end if
       if playedVideo <> invalid and playedVideo.lookUp("type") = "episode"
@@ -580,12 +606,188 @@ sub init()
       if idx < 0 then idx = autoplayIndexForVideo(videoData, episodes)
       nextIdx = idx + 1
       if nextIdx < 0 or nextIdx >= episodes.count() then return invalid
-      nextVideo = episodes[nextIdx]
+      nextVideo = cloneAutoplayVideo(episodes[nextIdx])
       nextVideo.autoplayEpisodes = episodes
       nextVideo.autoplayIndex = nextIdx
       nextVideo.resumeChoice = "start"
       nextVideo.resumePosition = 0
       return nextVideo
+  end function
+
+  sub attachEpisodeAutoplayContext(videoData as object)
+      if videoData = invalid then return
+      if videoData.lookUp("autoplayEpisodes") <> invalid then return
+      episodeScreen = activeEpisodeListScreen()
+      if episodeScreen = invalid or episodeScreen.subtype() <> "EpisodeList" then return
+      episodes = episodeScreen.episodeItems
+      if episodes = invalid or episodes.count() = 0 then return
+      playlist = autoplayEpisodeListForScene(episodes, episodeScreen.showData, m.authData)
+      videoData.autoplayEpisodes = playlist
+      videoData.autoplayIndex = autoplayIndexForVideo(videoData, playlist)
+      print "AUTOPLAY_CONTEXT count="; playlist.count(); " index="; safeDynamicString(videoData.lookUp("autoplayIndex")); " title="; safeDynamicString(videoData.lookUp("title"))
+  end sub
+
+  function activeEpisodeListScreen() as dynamic
+      if m.screenStack = invalid then return invalid
+      idx = m.screenStack.count() - 1
+      while idx >= 0
+          screen = m.screenStack[idx]
+          if screen <> invalid and screen.subtype() = "EpisodeList" then return screen
+          idx = idx - 1
+      end while
+      return invalid
+  end function
+
+  function autoplayEpisodeListForScene(episodes as object, showData as dynamic, authData as dynamic) as object
+      playlist = []
+      sorted = sortEpisodesForAutoplayInScene(episodes)
+      idx = 0
+      while idx < sorted.count()
+          playlist.push(autoplayEpisodePayloadForScene(sorted[idx], showData, authData, idx))
+          idx = idx + 1
+      end while
+      return playlist
+  end function
+
+  function sortEpisodesForAutoplayInScene(episodes as object) as object
+      sorted = []
+      if episodes = invalid then return sorted
+      for each ep in episodes
+          sorted.push(ep)
+      end for
+      i = 0
+      while i < sorted.count()
+          j = i + 1
+          while j < sorted.count()
+              leftSeason = sceneEpisodeSeason(sorted[i])
+              rightSeason = sceneEpisodeSeason(sorted[j])
+              leftNum = sceneEpisodeNumber(sorted[i])
+              rightNum = sceneEpisodeNumber(sorted[j])
+              shouldSwap = false
+              if rightSeason > 0 and (leftSeason <= 0 or rightSeason < leftSeason)
+                  shouldSwap = true
+              else if rightSeason = leftSeason and rightNum > 0 and (leftNum <= 0 or rightNum < leftNum)
+                  shouldSwap = true
+              end if
+              if shouldSwap
+                  tmp = sorted[i]
+                  sorted[i] = sorted[j]
+                  sorted[j] = tmp
+              end if
+              j = j + 1
+          end while
+          i = i + 1
+      end while
+      return sorted
+  end function
+
+  function autoplayEpisodePayloadForScene(ep as object, showData as dynamic, authData as dynamic, fallbackIndex as integer) as object
+      epId = ep.lookUp("id")
+      if epId = invalid then epId = "0"
+      fileInfo = sceneFileInfoFromItem(ep)
+      rawFileId = fileInfo.id
+      if rawFileId = invalid then rawFileId = epId
+      epNumber = sceneEpisodeNumber(ep)
+      if epNumber <= 0 then epNumber = fallbackIndex + 1
+      seasonNumber = sceneEpisodeSeason(ep)
+      episodeMeta = "Episode"
+      if seasonNumber > 0 and epNumber > 0
+          episodeMeta = "Season " + stri(seasonNumber).trim() + " - Episode " + stri(epNumber).trim()
+      else if epNumber > 0
+          episodeMeta = "Episode " + stri(epNumber).trim()
+      end if
+      showMapperId = invalid
+      showTitle = ""
+      if showData <> invalid
+          showMapperId = showData.lookUp("mapperId")
+          showTitle = sceneSafeStr(showData, ["title", "name"])
+      end if
+      return {
+          type: "episode",
+          id: epId,
+          fileId: rawFileId,
+          mapperId: ep.lookUp("mapper_id"),
+          showMapperId: showMapperId,
+          showTitle: showTitle,
+          filePath: fileInfo.path,
+          seasonNumber: seasonNumber,
+          episodeNumber: epNumber,
+          episodeMeta: episodeMeta,
+          originalAvailable: sceneSafeStr(ep, ["originalAvailable", "original_available", "originally_available", "air_date", "year", "date"]),
+          resumePosition: sceneFirstNumber(ep, ["resumePosition", "watch_position", "position"]),
+          title: sceneSafeStr(ep, ["title", "name"]),
+          authData: authData
+      }
+  end function
+
+  function sceneFileInfoFromItem(item as object) as object
+      info = { id: invalid, path: "" }
+      if item = invalid then return info
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          fileList = additional.lookUp("file")
+          if fileList <> invalid and fileList.count() > 0
+              f = fileList[0]
+              info.id = f.lookUp("id")
+              p = f.lookUp("path")
+              if p <> invalid then info.path = p
+          end if
+      end if
+      if info.id = invalid or info.path = ""
+          fileList = item.lookUp("file")
+          if fileList <> invalid and fileList.count() > 0
+              f = fileList[0]
+              if info.id = invalid then info.id = f.lookUp("id")
+              if info.path = ""
+                  p = f.lookUp("path")
+                  if p <> invalid then info.path = p
+              end if
+          end if
+      end if
+      return info
+  end function
+
+  function sceneEpisodeSeason(item as object) as integer
+      return sceneFirstNumber(item, ["seasonNumber", "season_number", "season", "season_num", "season_index"])
+  end function
+
+  function sceneEpisodeNumber(item as object) as integer
+      return sceneFirstNumber(item, ["episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"])
+  end function
+
+  function sceneFirstNumber(item as object, keys as object) as integer
+      if item = invalid then return 0
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid
+              t = type(value)
+              if t = "roInteger" or t = "Integer" then return value
+              if t = "roFloat" or t = "Float" then return int(value)
+              if t = "roString" or t = "String" then return int(val(value))
+          end if
+      end for
+      return 0
+  end function
+
+  function sceneSafeStr(item as object, keys as object) as string
+      if item = invalid then return ""
+      for each key in keys
+          value = item.lookUp(key)
+          text = safeDynamicString(value)
+          if text <> "" and text <> "0" then return text
+      end for
+      return ""
+  end function
+
+  function cloneAutoplayVideo(source as object) as object
+      clone = {}
+      if source = invalid then return clone
+      for each key in source
+          if key <> "autoplayEpisodes"
+              clone[key] = source[key]
+          end if
+      end for
+      return clone
   end function
 
   function autoplayIndexForVideo(videoData as object, episodes as object) as integer

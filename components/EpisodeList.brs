@@ -40,15 +40,15 @@ sub init()
           if v <> invalid
               t = type(v)
               if t = "roString" or t = "String" then return v
-              if t = "roInteger" or t = "Integer" then return stri(v)
-              if t = "roFloat" or t = "Float" then return stri(int(v))
+              if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return stri(v)
+              if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return stri(int(v))
           end if
       end for
       return ""
   end function
 
   function fileInfoFromItem(item as object) as object
-      info = { id: invalid, path: "" }
+      info = { id: invalid, path: "", watched: invalid }
 
       additional = item.lookUp("additional")
       if additional <> invalid
@@ -56,6 +56,8 @@ sub init()
           if fileList <> invalid and fileList.count() > 0
               f = fileList[0]
               info.id = f.lookUp("id")
+              info.watched = f.lookUp("file_watched")
+              if info.watched = invalid then info.watched = f.lookUp("watched")
               p = f.lookUp("path")
               if p <> invalid then info.path = p
           end if
@@ -66,6 +68,10 @@ sub init()
           if fileList <> invalid and fileList.count() > 0
               f = fileList[0]
               if info.id = invalid then info.id = f.lookUp("id")
+              if info.watched = invalid
+                  info.watched = f.lookUp("file_watched")
+                  if info.watched = invalid then info.watched = f.lookUp("watched")
+              end if
               if info.path = ""
                   p = f.lookUp("path")
                   if p <> invalid then info.path = p
@@ -130,6 +136,7 @@ sub init()
       end if
 
       m.episodes = episodes
+      m.top.episodeItems = episodes
       resetPosterRetryState()
       m.seasons = seasonsFromEpisodes(episodes)
       if m.seasons.count() > 0 then m.currentSeason = initialSeason(m.seasons)
@@ -235,7 +242,7 @@ sub init()
   end sub
 
   function shouldAssignEpisodePosterInitially(idx as integer) as boolean
-      return idx < 6
+      return idx < 12
   end function
 
   sub onRefreshArtwork(event as object)
@@ -426,8 +433,8 @@ sub init()
       focused = m.episodeFocusedIndex
       if focused < 0 then focused = 0
       row = int(focused / cols)
-      startRow = row - 1
-      endRow = row + 1
+      startRow = row - 3
+      endRow = row + 3
       if startRow < 0 then startRow = 0
       maxRow = int((seasonEpisodes.count() - 1) / cols)
       if endRow > maxRow then endRow = maxRow
@@ -506,7 +513,7 @@ sub init()
           return
       end if
       seasonEpisodes = episodesForCurrentSeason()
-      batchSize = 2
+      batchSize = 4
       processed = 0
       while processed < batchSize and m.posterRetryQueue.count() > 0
           idx = m.posterRetryQueue[0]
@@ -586,10 +593,10 @@ sub init()
       t = type(n)
       if t = "roString" or t = "String"
           nStr = n.trim()
-      else if t = "roInteger" or t = "Integer"
+      else if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
           nStr = stri(n)
           nStr = nStr.trim()
-      else if t = "roFloat" or t = "Float"
+      else if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
           nStr = stri(int(n))
           nStr = nStr.trim()
       else
@@ -672,6 +679,14 @@ sub init()
           n = numberValue(v)
           if n > 0 then return n
       end for
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          for each k in keys
+              v = additional.lookUp(k)
+              n = numberValue(v)
+              if n > 0 then return n
+          end for
+      end if
       return 0
   end function
 
@@ -841,8 +856,8 @@ sub init()
   function numberValue(n as dynamic) as integer
       if n = invalid then return -1
       t = type(n)
-      if t = "roInteger" or t = "Integer" then return n
-      if t = "roFloat" or t = "Float" then return int(n)
+      if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return int(n)
+      if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" or t = "roDouble" or t = "Double" then return int(n)
       if t = "roString" or t = "String" then return int(val(n))
       return -1
   end function
@@ -859,10 +874,7 @@ sub init()
 
       ep = seasonEpisodes[idx]
       authData = m.top.authData
-      playlist = autoplayEpisodeList(authData)
       selected = episodeVideoPayload(ep, authData, idx)
-      selected.autoplayEpisodes = playlist
-      selected.autoplayIndex = autoplayIndexForEpisode(selected, playlist)
       m.top.selectedVideo = selected
   end sub
 
@@ -872,7 +884,7 @@ sub init()
       seasonEpisodes = sortEpisodesForAutoplay(m.episodes)
       idx = 0
       while idx < seasonEpisodes.count()
-          playlist.push(episodeVideoPayload(seasonEpisodes[idx], authData, idx))
+          playlist.push(autoplayEpisodePayload(seasonEpisodes[idx], authData, idx))
           idx = idx + 1
       end while
       return playlist
@@ -909,6 +921,41 @@ sub init()
       return sorted
   end function
 
+  function autoplayEpisodePayload(ep as object, authData as object, fallbackIndex as integer) as object
+      epId = ep.lookUp("id")
+      if epId = invalid then epId = "0"
+
+      fileInfo = fileInfoFromItem(ep)
+      rawFileId = fileInfo.id
+      if rawFileId = invalid then rawFileId = epId
+      epNumber = episodeNumber(ep)
+      if epNumber <= 0 then epNumber = fallbackIndex + 1
+      seasonNumber = episodeSeason(ep)
+      episodeMeta = "Episode"
+      if seasonNumber > 0 and epNumber > 0
+          episodeMeta = "Season " + stri(seasonNumber).trim() + " - Episode " + stri(epNumber).trim()
+      else if epNumber > 0
+          episodeMeta = "Episode " + stri(epNumber).trim()
+      end if
+
+      return {
+          type: "episode",
+          id: epId,
+          fileId: rawFileId,
+          mapperId: ep.lookUp("mapper_id"),
+          showMapperId: m.top.showData.lookUp("mapperId"),
+          showTitle: safeStr(m.top.showData, ["title", "name"]),
+          filePath: fileInfo.path,
+          seasonNumber: seasonNumber,
+          episodeNumber: epNumber,
+          episodeMeta: episodeMeta,
+          originalAvailable: episodeDateText(ep),
+          resumePosition: firstNumber(ep, ["resumePosition", "watch_position", "position"]),
+          title: safeStr(ep, ["title", "name"]),
+          authData: authData
+      }
+  end function
+
   function episodeVideoPayload(ep as object, authData as object, fallbackIndex as integer) as object
       epId = ep.lookUp("id")
       if epId = invalid then epId = "0"
@@ -931,7 +978,8 @@ sub init()
       detailPoster = posterUrl(ep, authData)
       detailBackdrop = showBackdropUrl(authData)
       backdropSource = showBackdropSource(authData)
-      print "DETAIL_HANDOFF type=episode title="; safeStr(ep, ["title", "name"]); " date="; originalAvailable; " posterSource="; episodePosterSource(ep, authData); " backdropSource="; backdropSource; " summaryLen="; len(summary)
+      rating = firstNumber(ep, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
+      print "DETAIL_HANDOFF type=episode title="; safeStr(ep, ["title", "name"]); " date="; originalAvailable; " rating="; rating; " posterSource="; episodePosterSource(ep, authData); " backdropSource="; backdropSource; " summaryLen="; len(summary)
       return {
           type: "episode",
           id: epId,
@@ -945,6 +993,10 @@ sub init()
           episodeMeta: episodeMeta,
           originalAvailable: originalAvailable,
           resumePosition: firstNumber(ep, ["resumePosition", "watch_position", "position"]),
+          watchedRatio: firstNumber(ep, ["watched_ratio", "watchedRatio"]),
+          fileWatched: fileInfo.watched,
+          lastWatched: firstNumber(ep, ["last_watched", "lastWatched"]),
+          rating: rating,
           title: safeStr(ep, ["title", "name"]),
           summary: summary,
           posterUrl: detailPoster,
@@ -1000,6 +1052,9 @@ sub init()
           startInitialSeasonPosterRetryTimer()
           return true
       end if
+      if key = "down" and m.focusArea = "episodes"
+          if focusNextAvailableEpisodeRowItem() then return true
+      end if
       if (key = "left" or key = "right") and m.focusArea = "episodes"
           scheduleSeasonPosterRetry()
       end if
@@ -1017,6 +1072,34 @@ sub init()
           return true
       end if
       return false
+  end function
+
+  function focusNextAvailableEpisodeRowItem() as boolean
+      seasonEpisodes = episodesForCurrentSeason()
+      if seasonEpisodes = invalid then return false
+      total = seasonEpisodes.count()
+      if total = 0 then return false
+
+      grid = m.top.findNode("episodeGrid")
+      if grid = invalid then return false
+
+      idx = m.episodeFocusedIndex
+      if grid.itemFocused >= 0 then idx = grid.itemFocused
+      if idx < 0 or idx >= total - 1 then return false
+
+      cols = 3
+      belowIdx = idx + cols
+      if belowIdx < total then return false
+
+      nextRow = int(idx / cols) + 1
+      target = nextRow * cols
+      if target >= total then return false
+      grid.jumpToItem = target
+      grid.setFocus(true)
+      m.episodeFocusedIndex = target
+      m.focusArea = "episodes"
+      scheduleSeasonPosterRetry()
+      return true
   end function
 
   function episodeSummaryText(item as object) as string

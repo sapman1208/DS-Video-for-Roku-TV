@@ -2,11 +2,19 @@ sub init()
     m.actions = ["Play", "Favorite", "Watch List", "Share"]
     m.actionOverrides = {}
     m.movieMetadataTask = invalid
+    m.detailStateTask = invalid
     m.pendingMovieSummary = ""
     grid = m.top.findNode("actionGrid")
     grid.observeField("itemSelected", "onActionSelected")
+    grid.observeField("focus", "onActionFocus")
+    ratingGrid = m.top.findNode("ratingGrid")
+    ratingGrid.observeField("itemSelected", "onRatingSelected")
+    ratingGrid.observeField("focus", "onRatingFocus")
     m.top.findNode("movieSummaryTimer").observeField("fire", "onMovieSummaryTimer")
+    m.top.findNode("detailRevealTimer").observeField("fire", "onDetailRevealTimer")
+    m.top.findNode("backdrop").observeField("loadStatus", "onBackdropLoadStatus")
     m.top.observeField("videoData", "onVideoDataSet")
+    m.top.opacity = 0
 end sub
 
 sub populateActions()
@@ -23,6 +31,8 @@ sub populateActions()
         checkedText = "false"
         if checked then checkedText = "true"
         node.addFields({ rawTitle: action, checked: checkedText })
+        icon = actionIconUri(action)
+        if icon <> "" then node.addFields({ iconUri: icon })
         idx = idx + 1
     end for
     grid = m.top.findNode("actionGrid")
@@ -30,9 +40,22 @@ sub populateActions()
     grid.content = content
 end sub
 
+function actionIconUri(action as string) as string
+    if action = "Play" then return "pkg:/images/detail-play.png"
+    if action = "Favorite" then return "pkg:/images/playlist-favorites.png"
+    if action = "Watch List" then return "pkg:/images/playlist-watchlist.png"
+    if action = "Share" then return "pkg:/images/playlist-shared.png"
+    return ""
+end function
+
 sub onVideoDataSet(event as object)
     data = event.getData()
     if data = invalid then return
+    m.detailRevealed = false
+    m.waitForBackdrop = false
+    m.ratingOverride = invalid
+    m.ratingFocusIndex = -1
+    m.top.opacity = 0
     print "DETAIL_SET type="; data.lookUp("type"); " title="; data.lookUp("title")
     title = ""
     if data.title <> invalid then title = data.title
@@ -87,6 +110,7 @@ sub onVideoDataSet(event as object)
         m.top.findNode("posterFallback").visible = true
     end if
     if backdrop <> ""
+        m.waitForBackdrop = true
         m.top.findNode("backdrop").uri = backdrop
         m.top.findNode("backdrop").visible = true
     else
@@ -94,8 +118,44 @@ sub onVideoDataSet(event as object)
     end if
     m.top.findNode("summaryLabel").text = summary
     if needsMovieMetadata then startMovieMetadataFetch(data)
+    populateRatingStars()
+    if hasWatchedState(data)
+        populateWatchedState()
+    else
+        hideWatchedState()
+    end if
     populateActions()
+    m.top.findNode("actionGrid").jumpToItem = 0
     m.top.findNode("actionGrid").setFocus(true)
+    m.focusArea = "actions"
+    startDetailStateFetch(data)
+    startDetailRevealTimer()
+end sub
+
+sub startDetailRevealTimer()
+    timer = m.top.findNode("detailRevealTimer")
+    if timer = invalid then return
+    timer.control = "stop"
+    timer.control = "start"
+end sub
+
+sub onDetailRevealTimer(event as object)
+    revealDetail()
+end sub
+
+sub onBackdropLoadStatus(event as object)
+    if event = invalid then return
+    if m.waitForBackdrop <> true then return
+    status = event.getData()
+    if status = "ready" then revealDetail()
+end sub
+
+sub revealDetail()
+    if m.detailRevealed = true then return
+    m.detailRevealed = true
+    timer = m.top.findNode("detailRevealTimer")
+    if timer <> invalid then timer.control = "stop"
+    m.top.opacity = 1
 end sub
 
 sub startMovieMetadataFetch(data as object)
@@ -134,6 +194,56 @@ sub onMovieSummaryTimer(event as object)
     if m.pendingMovieSummary = invalid or m.pendingMovieSummary = "" then return
     m.top.findNode("summaryLabel").text = m.pendingMovieSummary
     m.pendingMovieSummary = ""
+end sub
+
+sub startDetailStateFetch(data as object)
+    if data = invalid or data.authData = invalid then return
+    videoId = videoIdForSync(data)
+    if videoId = "" or videoId = "0" then return
+    ids = []
+    addDetailStateId(ids, data.videoStationId)
+    addDetailStateId(ids, data.id)
+    addDetailStateId(ids, data.mapperId)
+    addDetailStateId(ids, data.fileId)
+    task = createObject("roSGNode", "APITask")
+    task.observeField("response", "onDetailState")
+    task.request = {
+        action: "detailState",
+        baseUrl: data.authData.baseUrl,
+        sid: data.authData.sid,
+        synoToken: data.authData.synoToken,
+        videoType: data.type,
+        videoId: videoId,
+        videoIds: ids
+    }
+    m.detailStateTask = task
+    print "DETAIL_STATE_REQUEST type="; data.lookUp("type"); " id="; videoId; " candidates="; ids.count()
+    task.control = "RUN"
+end sub
+
+sub addDetailStateId(ids as object, value as dynamic)
+    idText = safeIntText(value)
+    if idText = "" or idText = "0" then return
+    for each existing in ids
+        if existing = idText then return
+    end for
+    ids.push(idText)
+end sub
+
+sub onDetailState(event as object)
+    response = event.getData()
+    if response = invalid then return
+    print "DETAIL_STATE success="; response.lookUp("success"); " rating="; response.lookUp("rating"); " watchedRatio="; response.lookUp("watchedRatio"); " hasWatched="; response.lookUp("hasWatched"); " error="; response.lookUp("error")
+    if response.success <> true then return
+    if m.top.videoData = invalid then return
+    if response.rating <> invalid and response.rating >= 0
+        m.top.videoData.addReplace("rating", response.rating)
+        populateRatingStars()
+    end if
+    if response.hasWatched = true and response.watchedRatio <> invalid
+        m.top.videoData.addReplace("watchedRatio", response.watchedRatio)
+        populateWatchedState()
+    end if
 end sub
 
 function episodeMetaText(data as object) as string
@@ -176,12 +286,12 @@ sub configurePosterFrame(data as object)
     if data <> invalid and data.type <> invalid and data.type = "episode"
         poster.width = 630
         poster.height = 354
-        poster.translation = [70, 190]
+        poster.translation = [70, 230]
         poster.loadDisplayMode = "scaleToFit"
 
         fallback.width = 630
         fallback.height = 354
-        fallback.translation = [70, 190]
+        fallback.translation = [70, 230]
 
         m.top.findNode("titleLabel").translation = [760, 150]
         m.top.findNode("titleLabel").width = 1040
@@ -189,11 +299,15 @@ sub configurePosterFrame(data as object)
         m.top.findNode("metaLabel").width = 1000
         m.top.findNode("dateLabel").translation = [760, 285]
         m.top.findNode("dateLabel").width = 1000
-        m.top.findNode("summaryLabel").translation = [760, 365]
+        m.top.findNode("ratingLabel").translation = [760, 336]
+        m.top.findNode("ratingGrid").translation = [884, 330]
+        m.top.findNode("summaryLabel").translation = [760, 410]
         m.top.findNode("summaryLabel").width = 1040
         m.top.findNode("summaryLabel").height = 350
-        m.top.findNode("actionGrid").translation = [760, 780]
-        m.top.findNode("statusLabel").translation = [760, 880]
+        m.top.findNode("actionGrid").translation = [760, 770]
+        m.top.findNode("watchedStateLabel").translation = [70, 600]
+        m.top.findNode("watchedStateLabel").width = 630
+        m.top.findNode("statusLabel").translation = [760, 925]
     else
         poster.width = 360
         poster.height = 540
@@ -210,11 +324,15 @@ sub configurePosterFrame(data as object)
         m.top.findNode("metaLabel").width = 1100
         m.top.findNode("dateLabel").translation = [540, 285]
         m.top.findNode("dateLabel").width = 1100
-        m.top.findNode("summaryLabel").translation = [540, 350]
+        m.top.findNode("ratingLabel").translation = [540, 320]
+        m.top.findNode("ratingGrid").translation = [664, 314]
+        m.top.findNode("summaryLabel").translation = [540, 398]
         m.top.findNode("summaryLabel").width = 1180
         m.top.findNode("summaryLabel").height = 350
-        m.top.findNode("actionGrid").translation = [540, 760]
-        m.top.findNode("statusLabel").translation = [540, 860]
+        m.top.findNode("actionGrid").translation = [540, 736]
+        m.top.findNode("watchedStateLabel").translation = [110, 708]
+        m.top.findNode("watchedStateLabel").width = 360
+        m.top.findNode("statusLabel").translation = [540, 890]
     end if
 end sub
 
@@ -226,35 +344,70 @@ sub onActionSelected(event as object)
         checked = toggleAction(idx)
         m.top.listChanged = true
         syncSynologyCollection(idx, checked)
-        if checked
-            m.top.findNode("statusLabel").text = "Added to Favorites."
-        else
-            m.top.findNode("statusLabel").text = "Removed from Favorites."
-        end if
+        m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
     else if idx = 2
         checked = toggleAction(idx)
         m.top.listChanged = true
         syncSynologyCollection(idx, checked)
-        if checked
-            m.top.findNode("statusLabel").text = "Added to Watch List."
-        else
-            m.top.findNode("statusLabel").text = "Removed from Watch List."
-        end if
+        m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
     else if idx = 3
         checked = toggleAction(idx)
         m.top.listChanged = true
         syncSynologyCollection(idx, checked)
-        if checked
-            m.top.findNode("statusLabel").text = "Added to Shared Videos."
-        else
-            m.top.findNode("statusLabel").text = "Removed from Shared Videos."
-        end if
+        m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
+    end if
+end sub
+
+sub onRatingSelected(event as object)
+    idx = event.getData()
+    if idx < 0 then return
+    current = selectedRatingStars()
+    stars = idx + 1
+    if stars = current then stars = 0
+    rating = stars * 20
+    m.ratingFocusIndex = idx
+    print "RATING_SELECT idx="; idx; " currentStars="; current; " newRating="; rating
+    setLocalRating(rating)
+    populateRatingStars()
+    syncRating(rating)
+    grid = m.top.findNode("ratingGrid")
+    grid.jumpToItem = idx
+    grid.setFocus(true)
+end sub
+
+sub syncRating(rating as integer)
+    data = m.top.videoData
+    if data = invalid or data.authData = invalid then return
+    videoId = videoIdForSync(data)
+    if videoId = "" or videoId = "0" then return
+    task = createObject("roSGNode", "APITask")
+    task.request = {
+        action: "setVideoRating",
+        baseUrl: data.authData.baseUrl,
+        sid: data.authData.sid,
+        synoToken: data.authData.synoToken,
+        videoType: data.type,
+        videoId: videoId,
+        rating: rating
+    }
+    task.observeField("response", "onDetailStateSyncResponse")
+    task.control = "RUN"
+    m.ratingSyncTask = task
+end sub
+
+sub onDetailStateSyncResponse(event as object)
+    response = event.getData()
+    if response = invalid then return
+    print "DETAIL_STATE_SYNC success="; response.lookUp("success"); " rating="; response.lookUp("rating"); " error="; response.lookUp("error"); " detail="; response.lookUp("detail")
+    if response.success = true and response.rating <> invalid
+        setLocalRating(response.rating)
+        populateRatingStars()
     end if
 end sub
 
@@ -314,10 +467,370 @@ function safeIntText(value as dynamic) as string
     if value = invalid then return ""
     t = type(value)
     if t = "roString" or t = "String" then return value.trim()
-    if t = "roInteger" or t = "Integer" then return stri(value).trim()
-    if t = "roFloat" or t = "Float" then return stri(int(value)).trim()
+    if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return stri(value).trim()
+    if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return stri(int(value)).trim()
     return ""
 end function
+
+function videoIdForSync(data as object) as string
+    if data = invalid then return ""
+    if data.videoStationId <> invalid then return safeIntText(data.videoStationId)
+    if data.id <> invalid then return safeIntText(data.id)
+    return ""
+end function
+
+function numericField(data as object, key as string) as integer
+    if data = invalid then return 0
+    value = data.lookUp(key)
+    if value = invalid then return 0
+    t = type(value)
+    if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return value
+    if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return int(value)
+    if t = "roString" or t = "String" then return int(val(value))
+    return 0
+end function
+
+function firstNumericField(data as object, keys as object) as integer
+    if data = invalid then return 0
+    for each key in keys
+        value = data.lookUp(key)
+        if value <> invalid
+            t = type(value)
+            if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return normalizeRatingValue(value)
+            if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return normalizeRatingValue(value)
+            if t = "roString" or t = "String"
+                trimmed = value.trim()
+                if trimmed <> "" then return normalizeRatingValue(val(trimmed))
+            end if
+        end if
+    end for
+    additional = data.lookUp("additional")
+    if additional <> invalid
+        for each key in keys
+            value = additional.lookUp(key)
+            if value <> invalid
+                t = type(value)
+                if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return normalizeRatingValue(value)
+                if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return normalizeRatingValue(value)
+                if t = "roString" or t = "String"
+                    trimmed = value.trim()
+                    if trimmed <> "" then return normalizeRatingValue(val(trimmed))
+                end if
+            end if
+        end for
+        extra = parsedObject(additional.lookUp("extra"))
+        value = firstNumericFromObject(extra, keys)
+        if value >= 0 then return normalizeRatingValue(value)
+    end if
+    extra = parsedObject(data.lookUp("extra"))
+    value = firstNumericFromObject(extra, keys)
+    if value >= 0 then return normalizeRatingValue(value)
+    value = nestedDbRating(data)
+    if value > 0 then return normalizeRatingValue(value)
+    return 0
+end function
+
+function firstNumericFromObject(item as dynamic, keys as object) as integer
+    if item = invalid then return -1
+    if type(item) <> "roAssociativeArray" then return -1
+    for each key in keys
+        value = item.lookUp(key)
+        if value <> invalid
+            t = type(value)
+            if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return value
+            if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return int(value)
+            if t = "roString" or t = "String"
+                trimmed = value.trim()
+                if trimmed <> "" then return int(val(trimmed))
+            end if
+        end if
+    end for
+    return -1
+end function
+
+function numericValue(value as dynamic) as integer
+    if value = invalid then return 0
+    t = type(value)
+    if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return value
+    if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return int(value)
+    if t = "roString" or t = "String"
+        trimmed = value.trim()
+        if trimmed <> "" then return int(val(trimmed))
+    end if
+    return 0
+end function
+
+function parsedObject(value as dynamic) as dynamic
+    if value = invalid then return invalid
+    if type(value) = "roAssociativeArray" then return value
+    if type(value) = "roString" or type(value) = "String"
+        trimmed = value.trim()
+        if trimmed = "" then return invalid
+        parsed = parseJSON(trimmed)
+        if parsed <> invalid and type(parsed) = "roAssociativeArray" then return parsed
+    end if
+    return invalid
+end function
+
+function nestedDbRating(data as object) as integer
+    candidates = []
+    if data <> invalid
+        extra = parsedObject(data.lookUp("extra"))
+        if extra <> invalid then candidates.push(extra)
+        additional = data.lookUp("additional")
+        if additional <> invalid
+            extra = parsedObject(additional.lookUp("extra"))
+            if extra <> invalid then candidates.push(extra)
+        end if
+    end if
+    best = 0
+    for each extraObj in candidates
+        for each dbKey in ["synoVideoDb", "synovideodb", "theMovieDb", "themoviedb", "theTVDb", "thetvdb"]
+            db = extraObj.lookUp(dbKey)
+            if db <> invalid and type(db) = "roAssociativeArray"
+                ratingObj = db.lookUp("rating")
+                if ratingObj <> invalid and type(ratingObj) = "roAssociativeArray"
+                    for each ratingKey in ["synovideodb", "synoVideoDb", "themoviedb", "theMovieDb", "thetvdb", "theTVDb", "rating"]
+                        value = ratingObj.lookUp(ratingKey)
+                        if value <> invalid
+                            num = numericValue(value)
+                            if num > 0 and num <= 10 then num = num * 10
+                            if num > best then best = num
+                        end if
+                    end for
+                end if
+            end if
+        end for
+    end for
+    if best > 100 then best = 100
+    return best
+end function
+
+function hasNumericField(data as object, keys as object) as boolean
+    if data = invalid then return false
+    for each key in keys
+        if data.lookUp(key) <> invalid then return true
+    end for
+    additional = data.lookUp("additional")
+    if additional <> invalid
+        for each key in keys
+            if additional.lookUp(key) <> invalid then return true
+        end for
+        extra = parsedObject(additional.lookUp("extra"))
+        if extra <> invalid
+            for each key in keys
+                if extra.lookUp(key) <> invalid then return true
+            end for
+        end if
+    end if
+    extra = parsedObject(data.lookUp("extra"))
+    if extra <> invalid
+        for each key in keys
+            if extra.lookUp(key) <> invalid then return true
+        end for
+    end if
+    return false
+end function
+
+function normalizeRatingValue(value as dynamic) as integer
+    if value < 0 then return 0
+    if value > 0 and value <= 10 then return int((value * 10) + 0.5)
+    if value > 100 then return 100
+    return int(value)
+end function
+
+function ratingValue() as integer
+    if m.ratingOverride <> invalid then return m.ratingOverride
+    return firstNumericField(m.top.videoData, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
+end function
+
+function ratingStars() as integer
+    return int(ratingHalfSteps() / 2)
+end function
+
+function selectedRatingStars() as integer
+    halfSteps = ratingHalfSteps()
+    if halfSteps mod 2 <> 0 then return -1
+    return int(halfSteps / 2)
+end function
+
+function ratingHalfSteps() as integer
+    rating = ratingValue()
+    if rating <= 0 then return 0
+    halfSteps = int((rating / 10) + 0.5)
+    if halfSteps < 0 then halfSteps = 0
+    if halfSteps > 10 then halfSteps = 10
+    return halfSteps
+end function
+
+sub populateRatingStars()
+    content = createObject("roSGNode", "ContentNode")
+    halfSteps = ratingHalfSteps()
+    print "RATING_RENDER rating="; ratingValue(); " halfSteps="; halfSteps
+    i = 1
+    while i <= 5
+        node = content.createChild("ContentNode")
+        fill = "empty"
+        selected = "false"
+        if halfSteps >= i * 2
+            fill = "full"
+            selected = "true"
+        else if halfSteps = (i * 2) - 1
+            fill = "half"
+            selected = "true"
+        end if
+        node.title = stri(i).trim()
+        node.addFields({ fill: fill, selected: selected })
+        i = i + 1
+    end while
+    grid = m.top.findNode("ratingGrid")
+    grid.content = invalid
+    grid.content = content
+    if m.ratingFocusIndex <> invalid and m.ratingFocusIndex >= 0
+        grid.jumpToItem = m.ratingFocusIndex
+        if m.focusArea = "rating" then grid.setFocus(true)
+    end if
+end sub
+
+sub populateWatchedState()
+    label = m.top.findNode("watchedStateLabel")
+    if label = invalid then return
+    watchedState = explicitWatchedState()
+    print "WATCHED_RENDER state="; watchedState; " ratio="; watchedRatioValue()
+    if watchedState = 0 or (watchedState < 0 and watchedRatioValue() = 0)
+        label.text = "Unwatched"
+        label.color = "#D7DBDE"
+        label.visible = true
+    else
+        hideWatchedState()
+    end if
+end sub
+
+sub hideWatchedState()
+    label = m.top.findNode("watchedStateLabel")
+    if label = invalid then return
+    label.text = ""
+    label.visible = false
+end sub
+
+function watchedRatioValue() as integer
+    return watchedPercentField(m.top.videoData, ["watched_ratio", "watchedRatio"])
+end function
+
+function hasWatchedState(data as object) as boolean
+    if explicitWatchedStateFromData(data) >= 0 then return true
+    if hasNumericField(data, ["watched_ratio", "watchedRatio"]) then return true
+    return false
+end function
+
+function explicitWatchedState() as integer
+    return explicitWatchedStateFromData(m.top.videoData)
+end function
+
+function explicitWatchedStateFromData(data as object) as integer
+    if data = invalid then return -1
+    value = firstRawField(data, ["fileWatched", "file_watched", "watched", "is_watched", "isWatched"])
+    if value = invalid then return -1
+    t = type(value)
+    if t = "roBoolean" or t = "Boolean"
+        if value then return 1
+        return 0
+    end if
+    if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
+        if value <> 0 then return 1
+        return 0
+    end if
+    if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+        if value <> 0 then return 1
+        return 0
+    end if
+    if t = "roString" or t = "String"
+        trimmed = lcase(value.trim())
+        if trimmed = "" then return -1
+        if trimmed = "true" or trimmed = "yes" or trimmed = "watched" then return 1
+        if trimmed = "false" or trimmed = "no" or trimmed = "unwatched" then return 0
+        if val(trimmed) <> 0 then return 1
+        return 0
+    end if
+    return -1
+end function
+
+function watchedPercentField(data as object, keys as object) as integer
+    value = firstRawField(data, keys)
+    if value = invalid then return 0
+    return watchedValueToPercent(value)
+end function
+
+function firstRawField(data as object, keys as object) as dynamic
+    if data = invalid then return invalid
+    for each key in keys
+        value = data.lookUp(key)
+        if value <> invalid then return value
+    end for
+    additional = data.lookUp("additional")
+    if additional <> invalid
+        for each key in keys
+            value = additional.lookUp(key)
+            if value <> invalid then return value
+        end for
+        extra = parsedObject(additional.lookUp("extra"))
+        if extra <> invalid
+            for each key in keys
+                value = extra.lookUp(key)
+                if value <> invalid then return value
+            end for
+        end if
+    end if
+    extra = parsedObject(data.lookUp("extra"))
+    if extra <> invalid
+        for each key in keys
+            value = extra.lookUp(key)
+            if value <> invalid then return value
+        end for
+    end if
+    return invalid
+end function
+
+function watchedValueToPercent(value as dynamic) as integer
+    if value = invalid then return 0
+    t = type(value)
+    if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+        if value >= 0 and value <= 1 then return int((value * 100) + 0.5)
+        return int(value)
+    end if
+    if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
+        if value = 1 then return 100
+        return value
+    end if
+    if t = "roString" or t = "String"
+        trimmed = value.trim()
+        if trimmed = "" then return 0
+        numberValue = val(trimmed)
+        if numberValue >= 0 and numberValue <= 1 then return int((numberValue * 100) + 0.5)
+        return int(numberValue)
+    end if
+    return 0
+end function
+
+function nextRatingValue() as integer
+    stars = ratingStars() + 1
+    if stars > 5 then stars = 0
+    return stars * 20
+end function
+
+sub setLocalRating(rating as integer)
+    m.ratingOverride = rating
+    if m.top.videoData = invalid then return
+    m.top.videoData.addReplace("rating", rating)
+end sub
+
+sub onActionFocus(event as object)
+    if event <> invalid and event.getData() = true then m.focusArea = "actions"
+end sub
+
+sub onRatingFocus(event as object)
+    if event <> invalid and event.getData() = true then m.focusArea = "rating"
+end sub
 
 function actionKey(idx as integer) as string
     if idx = 1 then return "favorites"
@@ -402,6 +915,8 @@ function serializableVideo(data as object) as object
     if data.title <> invalid then item.title = data.title
     if data.showTitle <> invalid then item.showTitle = data.showTitle
     if data.summary <> invalid then item.summary = data.summary
+    if data.watchedRatio <> invalid then item.watchedRatio = data.watchedRatio
+    if data.rating <> invalid then item.rating = data.rating
     if data.posterRemoteUrl <> invalid and data.posterRemoteUrl <> ""
         item.posterUrl = data.posterRemoteUrl
         item.posterRemoteUrl = data.posterRemoteUrl
@@ -535,6 +1050,22 @@ end function
 
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if key = "up" and m.focusArea = "actions"
+        grid = m.top.findNode("ratingGrid")
+        idx = int((ratingHalfSteps() + 1) / 2) - 1
+        if idx < 0 then idx = 0
+        grid.jumpToItem = idx
+        grid.setFocus(true)
+        m.focusArea = "rating"
+        return true
+    end if
+    if key = "down" and m.focusArea = "rating"
+        grid = m.top.findNode("actionGrid")
+        grid.jumpToItem = 0
+        grid.setFocus(true)
+        m.focusArea = "actions"
+        return true
+    end if
     if key = "back"
         m.top.backPressed = true
         return true

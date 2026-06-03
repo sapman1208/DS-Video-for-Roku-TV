@@ -9,19 +9,44 @@ sub onContentSet(event as object)
         title = content.title
         m.top.findNode("titleLabel").text = title
         bg = m.top.findNode("bg")
-        if content.checked <> invalid and content.checked = "true"
-            bg.color = "#2E8B57"
+        icon = m.top.findNode("icon")
+        glyph = m.top.findNode("playGlyph")
+        label = m.top.findNode("titleLabel")
+
+        icon.visible = false
+        glyph.visible = false
+        bg.color = "#2A2F33"
+        bg.opacity = 0
+        label.opacity = 0.82
+
+        if content.iconUri <> invalid and content.iconUri <> ""
+            icon.uri = content.iconUri
+            icon.opacity = 1
+            icon.visible = true
         else
-            bg.color = "#DF3540"
+            glyph.visible = true
+        end if
+
+        if content.rawTitle <> invalid and content.rawTitle <> "Play"
+            icon.opacity = 0.34
+            if content.checked <> invalid and content.checked = "true"
+                icon.opacity = 1
+            end if
         end if
     end if
 end sub
 
 sub onFocusChange(event as object)
     pct = event.getData()
+    bg = m.top.findNode("bg")
+    label = m.top.findNode("titleLabel")
     if pct > 0.5
-        m.top.findNode("bg").opacity = 1
+        bg.opacity = 0
+        bg.color = "#2A2F33"
+        label.opacity = 1
     else
-        m.top.findNode("bg").opacity = 0.72
+        bg.opacity = 0
+        bg.color = "#2A2F33"
+        label.opacity = 0.82
     end if
 end sub

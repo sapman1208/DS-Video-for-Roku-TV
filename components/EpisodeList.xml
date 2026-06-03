@@ -6,6 +6,7 @@
         <field id="navCategories" type="array" />
         <field id="focusNavCategory" type="string" alwaysNotify="true" />
         <field id="selectedVideo" type="assocarray" alwaysNotify="true" />
+        <field id="episodeItems" type="array" />
         <field id="selectedCategory" type="assocarray" alwaysNotify="true" />
         <field id="refreshArtwork" type="boolean" alwaysNotify="true" />
         <field id="playbackFocusVideo" type="assocarray" alwaysNotify="true" />
