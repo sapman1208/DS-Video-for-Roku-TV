@@ -869,8 +869,7 @@ sub init()
   function autoplayEpisodeList(authData as object) as object
       playlist = []
       if m.episodes = invalid then return playlist
-      seasonEpisodes = episodesForCurrentSeason()
-      seasonEpisodes = sortEpisodesForAutoplay(seasonEpisodes)
+      seasonEpisodes = sortEpisodesForAutoplay(m.episodes)
       idx = 0
       while idx < seasonEpisodes.count()
           playlist.push(episodeVideoPayload(seasonEpisodes[idx], authData, idx))
@@ -888,9 +887,17 @@ sub init()
       while i < sorted.count()
           j = i + 1
           while j < sorted.count()
+              leftSeason = episodeSeason(sorted[i])
+              rightSeason = episodeSeason(sorted[j])
               leftNum = episodeNumber(sorted[i])
               rightNum = episodeNumber(sorted[j])
-              if rightNum > 0 and (leftNum <= 0 or rightNum < leftNum)
+              shouldSwap = false
+              if rightSeason > 0 and (leftSeason <= 0 or rightSeason < leftSeason)
+                  shouldSwap = true
+              else if rightSeason = leftSeason and rightNum > 0 and (leftNum <= 0 or rightNum < leftNum)
+                  shouldSwap = true
+              end if
+              if shouldSwap
                   tmp = sorted[i]
                   sorted[i] = sorted[j]
                   sorted[j] = tmp

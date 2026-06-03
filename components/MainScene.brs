@@ -583,6 +583,8 @@ sub init()
       nextVideo = episodes[nextIdx]
       nextVideo.autoplayEpisodes = episodes
       nextVideo.autoplayIndex = nextIdx
+      nextVideo.resumeChoice = "start"
+      nextVideo.resumePosition = 0
       return nextVideo
   end function
 
