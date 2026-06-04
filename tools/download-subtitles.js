@@ -16,6 +16,8 @@ const SUBDL_DOWNLOAD_BASE_URL = "https://dl.subdl.com";
 const OPEN_SUBTITLES_FALLBACK = process.env.ROKU_SUBTITLE_OPEN_SUBTITLES_FALLBACK === "1"
   || process.env.OPEN_SUBTITLES_FALLBACK === "1"
   || process.argv.includes("--open-fallback");
+const COMMENTARY_SALVAGE = process.env.ROKU_SUBTITLE_COMMENTARY_SALVAGE !== "0";
+const SUBTITLE_AUTOSYNC = process.env.ROKU_SUBTITLE_AUTOSYNC !== "0";
 
 const target = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 const FORCE = process.argv.includes("--force");
@@ -124,25 +126,93 @@ function hasSubtitle(filePath) {
   return subtitleTargets(filePath).some((candidate) => fs.existsSync(candidate));
 }
 
+const COMMENTARY_PHRASES = [
+  "audio commentary",
+  "commentary track",
+  "director commentary",
+  "director's commentary",
+  "fireside chat",
+  "with the creators of south park",
+  "matt stone and trey parker",
+  "matt stone",
+  "trey parker",
+];
+
+function hasCommentaryText(text) {
+  const lower = String(text || "").toLowerCase();
+  return COMMENTARY_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
 function subtitleTextLooksBad(filePath) {
   try {
-    const text = fs.readFileSync(filePath, "utf8").slice(0, 8000).toLowerCase();
-    return [
-      "audio commentary",
-      "commentary track",
-      "director commentary",
-      "director's commentary",
-      "fireside chat",
-      "with the creators of south park",
-      "matt stone and trey parker",
-    ].some((phrase) => text.includes(phrase));
+    return hasCommentaryText(fs.readFileSync(filePath, "utf8").slice(0, 8000));
   } catch {
     return false;
   }
 }
 
+function sanitizeCommentarySubtitle(filePath) {
+  if (!COMMENTARY_SALVAGE) return false;
+  let input = "";
+  try {
+    input = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  const blocks = input
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const kept = blocks.filter((block) => !hasCommentaryText(block));
+  if (kept.length < 5 || kept.length === blocks.length) return false;
+  const output = kept.map((block, index) => {
+    const lines = block.split("\n");
+    if (/^\d+$/.test(lines[0] || "")) lines.shift();
+    return [String(index + 1), ...lines].join("\n");
+  }).join("\n\n") + "\n";
+  if (hasCommentaryText(output.slice(0, 8000))) return false;
+  fs.writeFileSync(`${filePath}.commentary.bak`, input);
+  fs.writeFileSync(filePath, output);
+  console.log(`[subs] trimmed commentary blocks ${blocks.length - kept.length}/${blocks.length}`);
+  return true;
+}
+
+function commandAvailable(command, args = ["--version"]) {
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: 10000 });
+  return !result.error && result.status === 0;
+}
+
+function syncSubtitleWithAudio(filePath) {
+  if (!SUBTITLE_AUTOSYNC || !commandAvailable("ffsubsync")) return false;
+  const tmp = `${filePath}.sync`;
+  fs.rmSync(tmp, { force: true });
+  const result = spawnSync("ffsubsync", [target, "-i", filePath, "-o", tmp], {
+    encoding: "utf8",
+    timeout: 10 * 60 * 1000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.status !== 0 || !fs.existsSync(tmp)) {
+    fs.rmSync(tmp, { force: true });
+    console.log(`[subs] autosync skipped ${result.stderr || result.stdout || "ffsubsync failed"}`.trim());
+    return false;
+  }
+  fs.writeFileSync(`${filePath}.presync.bak`, fs.readFileSync(filePath));
+  fs.renameSync(tmp, filePath);
+  console.log("[subs] autosynced with audio");
+  return true;
+}
+
 function acceptSavedSubtitle(filePath, label) {
-  if (!subtitleTextLooksBad(filePath)) return true;
+  if (!subtitleTextLooksBad(filePath)) {
+    syncSubtitleWithAudio(filePath);
+    return true;
+  }
+  if (sanitizeCommentarySubtitle(filePath)) {
+    syncSubtitleWithAudio(filePath);
+    return true;
+  }
   fs.rmSync(filePath, { force: true });
   console.log(`[subs] rejected commentary ${label || filePath}`);
   return false;
@@ -490,7 +560,11 @@ function subdlSubtitleScore(entry, unpacked, info) {
   const hi = unpacked?.hi ?? entry.hi;
 
   for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
-    if (itemLabel.includes(bad)) return -10000;
+    if (itemLabel.includes(bad)) {
+      if (!COMMENTARY_SALVAGE || bad !== "commentary") return -10000;
+      score -= 850;
+      break;
+    }
   }
 
   if (info.type === "episode") {
@@ -547,7 +621,11 @@ function subtitleScore(entry) {
   const info = parseVideoInfo(target);
 
   for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
-    if (label.includes(bad)) return -10000;
+    if (label.includes(bad)) {
+      if (!COMMENTARY_SALVAGE || bad !== "commentary") return -10000;
+      score -= 850;
+      break;
+    }
   }
 
   if (info.type === "episode") {
