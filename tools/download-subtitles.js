@@ -238,17 +238,80 @@ function syncSubtitleWithAudio(filePath) {
 }
 
 function acceptSavedSubtitle(filePath, label) {
+  const info = parseVideoInfo(target);
   if (!subtitleTextLooksBad(filePath)) {
     syncSubtitleWithAudio(filePath);
+    trimLeadingCommentaryPrelude(filePath, info);
     return true;
   }
   if (sanitizeCommentarySubtitle(filePath)) {
     syncSubtitleWithAudio(filePath);
+    trimLeadingCommentaryPrelude(filePath, info);
     return true;
   }
   fs.rmSync(filePath, { force: true });
   console.log(`[subs] rejected commentary ${label || filePath}`);
   return false;
+}
+
+function trimLeadingCommentaryPrelude(filePath, info) {
+  if (info.type !== "episode" || !info.title) return false;
+  let input = "";
+  try {
+    input = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  const blocks = parseSrtBlocks(input);
+  if (blocks.length < 6) return false;
+  const titleNorm = compactText(info.title);
+  let keepIndex = -1;
+  for (let i = 1; i < Math.min(blocks.length, 30); i++) {
+    const block = blocks[i];
+    const startMs = srtTimeToMs(block.start);
+    if (startMs > 5 * 60 * 1000) break;
+    const textNorm = compactText(block.text.join(" "));
+    const titleCard = textNorm === titleNorm || (textNorm.includes(titleNorm) && textNorm.length <= titleNorm.length + 8);
+    if (titleCard) {
+      keepIndex = i;
+      break;
+    }
+  }
+  if (keepIndex <= 0) return false;
+  const output = srtFromBlocks(blocks.slice(keepIndex));
+  fs.writeFileSync(filePath, output);
+  console.log(`[subs] trimmed leading commentary cues ${keepIndex}`);
+  return true;
+}
+
+function compactText(value) {
+  return cleanNamePart(value).toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function parseSrtBlocks(input) {
+  return String(input || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split(/\n{2,}/)
+    .map((raw) => {
+      const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+      if (/^\d+$/.test(lines[0] || "")) lines.shift();
+      const timing = lines.shift() || "";
+      const match = timing.match(/^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})/);
+      if (!match || lines.length === 0) return null;
+      return { start: match[1], end: match[2], text: lines };
+    })
+    .filter(Boolean);
+}
+
+function srtFromBlocks(blocks) {
+  return blocks.map((block, index) => `${index + 1}\n${block.start} --> ${block.end}\n${block.text.join("\n")}\n`).join("\n");
+}
+
+function srtTimeToMs(value) {
+  const match = String(value || "").match(/^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/);
+  if (!match) return 0;
+  return (((Number(match[1]) * 60 + Number(match[2])) * 60 + Number(match[3])) * 1000) + Number(match[4]);
 }
 
 function requestOpenSubtitlesJson(method, endpoint, body, token = "", redirectCount = 0) {

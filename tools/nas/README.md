@@ -59,7 +59,7 @@ ROKU_SUBTITLE_POLL_SECONDS=900
 
 `ROKU_HLS_SAVE_MP4=1` keeps completed on-demand transcodes under `/volume1/video/@roku-transcodes`. `ROKU_HLS_REPLACE_ORIGINAL=1` copies a completed MP4 back only after Roku playback has gone idle; interrupted or failed transcodes leave the original file untouched.
 
-The subtitle watcher scans movie and TV-style library paths by default, such as `Movies` and `TV Shows`. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. Subtitles try SubDL first, then TVsubtitles.net for English TV episodes with cookie-based downloads and old-format normalization. Existing `.srt` sidecars are normalized, commentary-trimmed when possible, and autosynced when `ffsubsync` is installed. Set `ROKU_SUBTITLE_TVSUBTITLES=0` to disable the TVsubtitles fallback. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
+The subtitle watcher scans movie and TV-style library paths by default, such as `Movies` and `TV Shows`. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. Subtitles try SubDL first, then TVsubtitles.net for English TV episodes with cookie-based downloads and old-format normalization. Existing movie and episode `.srt` sidecars are normalized, commentary-trimmed when possible, and autosynced when `ffsubsync` is installed. Set `ROKU_SUBTITLE_TVSUBTITLES=0` to disable the TVsubtitles fallback. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
 
 ## Logs
 
