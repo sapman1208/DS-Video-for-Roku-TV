@@ -107,7 +107,7 @@ Starts:
 - `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. It does not update Video Station metadata, artwork, playlists, watched state, ratings, or subtitles for the Roku app.
 - `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured, then falls back to OpenSubtitles when configured.
 
-By default the subtitle watcher scans movie and TV-style library paths such as `Movies`, `New Stuff`, and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
+By default the subtitle watcher scans movie and TV-style library paths such as `Movies`, and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
 
 Logs:
 
