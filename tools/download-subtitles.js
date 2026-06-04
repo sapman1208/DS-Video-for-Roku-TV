@@ -60,11 +60,16 @@ function parseVideoInfo(filePath) {
   const library = libraryIndex >= 0 ? libraryNameForPart(parts[libraryIndex]) : "";
   if (episodeMatch && library === "TV Shows") {
     const show = cleanNamePart(parts[libraryIndex + 1] || base.slice(0, episodeMatch.index));
+    const title = cleanNamePart(base
+      .slice(episodeMatch.index + episodeMatch[0].length)
+      .replace(/^[-\s]+/, "")
+      .replace(/\b(2160p|1080p|720p|480p|web[-_. ]?dl|webrip|hdtv|bdrip|bluray|x264|x265|h264|h265|aac|dts)\b.*$/i, ""));
     return {
       type: "episode",
       query: show,
       season: Number(episodeMatch[1]),
       episode: Number(episodeMatch[2]),
+      title,
     };
   }
   let title = base;
@@ -92,6 +97,20 @@ function episodeMarker(value) {
   const match = text.match(/\bS(\d{1,2})E(\d{1,3})\b/i) || text.match(/\b(\d{1,2})x(\d{1,3})\b/i);
   if (!match) return null;
   return { season: Number(match[1]), episode: Number(match[2]) };
+}
+
+function meaningfulTitleTokens(value) {
+  const stop = new Set(["and", "the", "for", "with", "from", "that", "this", "into", "onto", "part", "episode"]);
+  return canonicalQueryValue(value)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 || /^\d+$/.test(token))
+    .filter((token) => !stop.has(token));
+}
+
+function titleTokenMatches(label, title) {
+  const tokens = meaningfulTitleTokens(title);
+  if (tokens.length === 0) return 0;
+  return tokens.filter((token) => label.includes(token)).length;
 }
 
 function subdlLanguage(value) {
@@ -467,6 +486,9 @@ function subdlSubtitleScore(entry, unpacked, info) {
     if (/(^|[\/\s._-])00([\/\s._-]|$)/.test(label)) return -10000;
     const marker = episodeMarker(label);
     if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
+    const titleMatches = titleTokenMatches(label, info.title);
+    if (info.title && titleMatches === 0) return -10000;
+    score += titleMatches * 25;
     if (season === info.season) score += 80;
     if (episode === info.episode) score += 100;
     if (season && season !== info.season) return -10000;
@@ -512,6 +534,9 @@ function subtitleScore(entry) {
   if (info.type === "episode") {
     const marker = episodeMarker(label);
     if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
+    const titleMatches = titleTokenMatches(label, info.title);
+    if (info.title && titleMatches === 0) return -10000;
+    score += titleMatches * 25;
     const details = attrs.feature_details || {};
     const season = Number(details.season_number || details.season || 0);
     const episode = Number(details.episode_number || details.episode || 0);
