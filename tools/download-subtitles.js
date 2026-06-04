@@ -13,11 +13,29 @@ const USER_AGENT = process.env.OPEN_SUBTITLES_USER_AGENT || "RokuDSVideo v1.0";
 const OPEN_SUBTITLES_BASE_URL = "https://api.opensubtitles.com/api/v1";
 const SUBDL_BASE_URL = "https://api.subdl.com/api/v1";
 const SUBDL_DOWNLOAD_BASE_URL = "https://dl.subdl.com";
+const TVSUBTITLES_BASE_URL = "https://www.tvsubtitles.net";
 const OPEN_SUBTITLES_FALLBACK = process.env.ROKU_SUBTITLE_OPEN_SUBTITLES_FALLBACK === "1"
   || process.env.OPEN_SUBTITLES_FALLBACK === "1"
   || process.argv.includes("--open-fallback");
+const TVSUBTITLES_FALLBACK = process.env.ROKU_SUBTITLE_TVSUBTITLES !== "0"
+  && !process.argv.includes("--no-tvsubtitles");
 const COMMENTARY_SALVAGE = process.env.ROKU_SUBTITLE_COMMENTARY_SALVAGE !== "0";
 const SUBTITLE_AUTOSYNC = process.env.ROKU_SUBTITLE_AUTOSYNC !== "0";
+const FFSUBSYNC_CANDIDATES = [
+  process.env.FFSUBSYNC_BIN,
+  path.join(__dirname, ".venv/bin/ffsubsync"),
+  "/volume1/docker/roku-ds-video-tools/.venv/bin/ffsubsync",
+  "ffsubsync",
+].filter(Boolean);
+const FFMPEG_PATH_DIRS = [
+  "/usr/local/bin",
+  "/usr/bin",
+  "/volume1/@appstore/ffmpeg7/bin",
+  "/volume1/@appstore/ffmpeg/bin",
+  "/volume1/@appstore/VideoStation/bin",
+  "/volume1/@appstore/MediaServer/bin",
+  "/volume1/@appstore/EmbyServer/bin",
+];
 
 const target = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 const FORCE = process.argv.includes("--force");
@@ -26,7 +44,7 @@ if (!target) {
   console.error("usage: SUBDL_API_KEY=... or OPEN_SUBTITLES_API_KEY=... node download-subtitles.js /path/video.mp4");
   process.exit(2);
 }
-if (!SUBDL_API_KEY && !OPEN_SUBTITLES_API_KEY) {
+if (!SUBDL_API_KEY && !OPEN_SUBTITLES_API_KEY && !TVSUBTITLES_FALLBACK) {
   console.log("[subs] skipped missing api key");
   process.exit(0);
 }
@@ -115,6 +133,13 @@ function titleTokenMatches(label, title) {
   return tokens.filter((token) => label.includes(token)).length;
 }
 
+function titleTokenScore(label, title) {
+  const tokens = meaningfulTitleTokens(title);
+  if (tokens.length === 0) return 0;
+  const lower = canonicalQueryValue(label);
+  return tokens.filter((token) => lower.includes(token)).length * 100 - Math.abs(tokens.length - titleTokenMatches(lower, title));
+}
+
 function subdlLanguage(value) {
   const code = String(value || "en").trim();
   if (!code) return "EN";
@@ -124,6 +149,10 @@ function subdlLanguage(value) {
 
 function hasSubtitle(filePath) {
   return subtitleTargets(filePath).some((candidate) => fs.existsSync(candidate));
+}
+
+function existingSubtitle(filePath) {
+  return subtitleTargets(filePath).find((candidate) => fs.existsSync(candidate)) || "";
 }
 
 const COMMENTARY_PHRASES = [
@@ -184,12 +213,18 @@ function commandAvailable(command, args = ["--version"]) {
   return !result.error && result.status === 0;
 }
 
+function ffsubsyncCommand() {
+  return FFSUBSYNC_CANDIDATES.find((candidate) => commandAvailable(candidate)) || "";
+}
+
 function syncSubtitleWithAudio(filePath) {
-  if (!SUBTITLE_AUTOSYNC || !commandAvailable("ffsubsync")) return false;
-  const tmp = `${filePath}.sync`;
+  const ffsubsync = SUBTITLE_AUTOSYNC ? ffsubsyncCommand() : "";
+  if (!ffsubsync) return false;
+  const tmp = `${filePath}.sync.srt`;
   fs.rmSync(tmp, { force: true });
-  const result = spawnSync("ffsubsync", [target, "-i", filePath, "-o", tmp], {
+  const result = spawnSync(ffsubsync, [target, "-i", filePath, "-o", tmp], {
     encoding: "utf8",
+    env: { ...process.env, PATH: `${FFMPEG_PATH_DIRS.join(":")}:${process.env.PATH || ""}` },
     timeout: 10 * 60 * 1000,
     maxBuffer: 1024 * 1024,
   });
@@ -285,6 +320,44 @@ function requestSubdlJson(endpoint, redirectCount = 0) {
   });
 }
 
+function requestTvSubtitles(endpoint, options = {}, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    const jar = options.jar || {};
+    const targetUrl = /^https?:\/\//i.test(endpoint) ? endpoint : `${TVSUBTITLES_BASE_URL}${endpoint}`;
+    const body = options.body || "";
+    const headers = {
+      "Accept": options.binary ? "*/*" : "text/html,application/xhtml+xml",
+      "User-Agent": USER_AGENT,
+      ...(Object.keys(jar).length ? { Cookie: Object.entries(jar).map(([key, value]) => `${key}=${value}`).join("; ") } : {}),
+      ...(body ? {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(body),
+      } : {}),
+    };
+    const req = https.request(targetUrl, { method: body ? "POST" : "GET", headers }, (res) => {
+      for (const cookie of res.headers["set-cookie"] || []) {
+        const first = cookie.split(";")[0] || "";
+        const idx = first.indexOf("=");
+        if (idx > 0) jar[first.slice(0, idx)] = first.slice(idx + 1);
+      }
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectCount < 5) {
+          const next = new URL(res.headers.location, targetUrl).href;
+          return requestTvSubtitles(next, { ...options, body: "" }, redirectCount + 1).then(resolve).catch(reject);
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`tvsubtitles ${res.statusCode}`));
+        resolve(options.binary ? buffer : buffer.toString("utf8"));
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 function downloadFile(url, filePath, redirectCount = 0, headers = {}) {
   return new Promise((resolve, reject) => {
     const tmp = `${filePath}.tmp`;
@@ -318,6 +391,10 @@ async function downloadZipSubtitle(url, filePath, preferredEntry = "") {
   const tmpZip = `${filePath}.ziptmp`;
   fs.rmSync(tmpZip, { force: true });
   await downloadFile(url, tmpZip);
+  extractZipSubtitle(tmpZip, filePath, preferredEntry);
+}
+
+function zipSubtitleEntries(tmpZip) {
   let archiveTool = "unzip";
   let list = spawnSync("unzip", ["-Z1", tmpZip], { encoding: "utf8", timeout: 30000 });
   let entries = [];
@@ -337,11 +414,16 @@ async function downloadZipSubtitle(url, filePath, preferredEntry = "") {
     }
   }
   if (list.status !== 0) {
-    fs.rmSync(tmpZip, { force: true });
     throw new Error("zip extractor not available or invalid subtitle zip");
   }
-  entries = entries
-    .filter((line) => /\.(srt|vtt)$/i.test(line) && !/^__MACOSX\//i.test(line));
+  return {
+    archiveTool,
+    entries: entries.filter((line) => /\.(srt|vtt)$/i.test(line) && !/^__MACOSX\//i.test(line)),
+  };
+}
+
+function extractZipSubtitle(tmpZip, filePath, preferredEntry = "") {
+  const { archiveTool, entries } = zipSubtitleEntries(tmpZip);
   const preferredBase = cleanNamePart(path.basename(preferredEntry || "")).toLowerCase();
   const entry = (preferredBase
     ? entries.find((line) => cleanNamePart(path.basename(line)).toLowerCase() === preferredBase)
@@ -363,6 +445,44 @@ async function downloadZipSubtitle(url, filePath, preferredEntry = "") {
   fs.renameSync(tmpOut, filePath);
 }
 
+function normalizeSubtitleFile(filePath) {
+  let input = "";
+  try {
+    input = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  if (/\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(input)) return false;
+  const lines = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const entries = [];
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].trim().match(/^(\d{2}:\d{2}:\d{2}[,.]\d{1,3}),(\d{2}:\d{2}:\d{2}[,.]\d{1,3})$/);
+    if (!match) continue;
+    const start = normalizeSubtitleTime(match[1]);
+    const end = normalizeSubtitleTime(match[2]);
+    const text = [];
+    for (i++; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) break;
+      if (/^\[.*\]$/.test(line)) continue;
+      text.push(line.replace(/\[br\]/gi, "\n"));
+    }
+    if (start && end && text.length) entries.push({ start, end, text: text.join("\n") });
+  }
+  if (entries.length === 0) return false;
+  const output = entries.map((entry, index) => `${index + 1}\n${entry.start} --> ${entry.end}\n${entry.text}\n`).join("\n");
+  fs.writeFileSync(`${filePath}.prenormalize.bak`, input);
+  fs.writeFileSync(filePath, output);
+  console.log(`[subs] normalized subtitle format ${entries.length} cues`);
+  return true;
+}
+
+function normalizeSubtitleTime(value) {
+  const match = String(value || "").trim().match(/^(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})$/);
+  if (!match) return "";
+  return `${match[1]}:${match[2]}:${match[3]},${match[4].padEnd(3, "0").slice(0, 3)}`;
+}
+
 async function login() {
   if (!OPEN_SUBTITLES_USERNAME || !OPEN_SUBTITLES_PASSWORD) return "";
   const response = await requestOpenSubtitlesJson("POST", "/login", { username: OPEN_SUBTITLES_USERNAME, password: OPEN_SUBTITLES_PASSWORD });
@@ -370,7 +490,10 @@ async function login() {
 }
 
 async function main() {
-  if (hasSubtitle(target) && !FORCE) {
+  const existing = existingSubtitle(target);
+  if (existing && !FORCE) {
+    normalizeSubtitleFile(existing);
+    acceptSavedSubtitle(existing, existing);
     console.log(`[subs] exists ${target}`);
     return;
   }
@@ -385,6 +508,15 @@ async function main() {
       return false;
     });
     if (saved) return;
+  }
+  if (TVSUBTITLES_FALLBACK && info.type === "episode" && LANGUAGE.toLowerCase() === "en") {
+    const saved = await saveFromTvSubtitles(info).catch((err) => {
+      console.log(`[subs] tvsubtitles error ${target}: ${err.message}`);
+      return false;
+    });
+    if (saved) return;
+  }
+  if (SUBDL_API_KEY) {
     if (OPEN_SUBTITLES_API_KEY && !OPEN_SUBTITLES_FALLBACK) {
       console.log(`[subs] none ${target} (OpenSubtitles fallback disabled)`);
       return;
@@ -452,6 +584,81 @@ async function saveFromSubdl(info) {
   const fileResults = await requestSubdlJson(`/subtitles?${fileParams.toString()}`);
   if (fileResults.status === false) throw new Error(fileResults.error || "SubDL file search failed");
   return saveFirstSubdl(fileResults, info, true);
+}
+
+async function saveFromTvSubtitles(info) {
+  const jar = {};
+  const search = await requestTvSubtitles("/search1.php", {
+    jar,
+    body: new URLSearchParams({ qs: info.query }).toString(),
+  });
+  const show = bestTvSubtitlesShow(search, info.query);
+  if (!show) {
+    console.log(`[subs] tvsubtitles none ${target}`);
+    return false;
+  }
+  await requestTvSubtitles("/setuser.php", { jar }).catch(() => "");
+  const seasonPath = `/subtitle-${show.id}-${info.season}-en.html`;
+  const seasonPage = await requestTvSubtitles(seasonPath, { jar });
+  if (!seasonPage.includes(`download-${show.id}-${info.season}-en.html`)) {
+    console.log(`[subs] tvsubtitles no season ${target}`);
+    return false;
+  }
+  const downloadHtml = await requestTvSubtitles(`/download-${show.id}-${info.season}-en.html`, { jar, binary: true });
+  const zip = zipBufferFromTvSubtitlesDownload(downloadHtml, jar);
+  const out = subtitleTargets(target)[0];
+  const tmpZip = `${out}.tvsubtitles.ziptmp`;
+  fs.rmSync(out, { force: true });
+  fs.writeFileSync(tmpZip, await zip);
+  try {
+    const entry = bestZipEntryForEpisode(tmpZip, info);
+    extractZipSubtitle(tmpZip, out, entry);
+  } finally {
+    fs.rmSync(tmpZip, { force: true });
+  }
+  normalizeSubtitleFile(out);
+  if (!acceptSavedSubtitle(out, `tvsubtitles ${show.title} s${info.season} ${info.title}`)) return false;
+  console.log(`[subs] tvsubtitles saved ${out}`);
+  return true;
+}
+
+function bestTvSubtitlesShow(html, query) {
+  const shows = [];
+  const re = /<a\s+href="\/tvshow-(\d+)\.html">([^<]+)<\/a>/gi;
+  let match;
+  while ((match = re.exec(html))) {
+    const title = cleanNamePart(match[2].replace(/\([^)]*\)/g, ""));
+    shows.push({ id: match[1], title, score: titleTokenScore(title, query) });
+  }
+  return shows.sort((a, b) => b.score - a.score)[0] || null;
+}
+
+async function zipBufferFromTvSubtitlesDownload(bufferOrHtml, jar) {
+  const buffer = Buffer.isBuffer(bufferOrHtml) ? bufferOrHtml : Buffer.from(String(bufferOrHtml || ""));
+  if (buffer.slice(0, 2).toString("binary") === "PK") return buffer;
+  const html = buffer.toString("utf8");
+  const vars = {};
+  for (const match of html.matchAll(/var\s+(s\d+)\s*=\s*'([^']*)'/g)) vars[match[1]] = match[2];
+  const order = [...html.matchAll(/document\.location\s*=\s*([^;]+)/g)][0]?.[1] || "";
+  const relative = (order.match(/s\d+/g) || []).map((key) => vars[key] || "").join("");
+  if (!relative) throw new Error("TVsubtitles download redirect missing");
+  const zip = await requestTvSubtitles(new URL(relative, TVSUBTITLES_BASE_URL).href, { jar, binary: true });
+  if (zip.slice(0, 2).toString("binary") !== "PK") throw new Error("TVsubtitles download was not a zip");
+  return zip;
+}
+
+function bestZipEntryForEpisode(tmpZip, info) {
+  const { entries } = zipSubtitleEntries(tmpZip);
+  if (entries.length === 0) throw new Error("TVsubtitles zip did not contain srt/vtt");
+  const marker = new RegExp(`\\b${info.season}\\s*x\\s*${String(info.episode).padStart(2, "0")}\\b|\\b${info.season}\\s*x\\s*${info.episode}\\b`, "i");
+  const ranked = entries.map((entry) => {
+    const base = cleanNamePart(path.basename(entry));
+    let score = titleTokenScore(base, info.title);
+    if (marker.test(base)) score += 1000;
+    if (/\ben\b/i.test(base)) score += 5;
+    return { entry, score };
+  }).sort((a, b) => b.score - a.score);
+  return ranked[0].entry;
 }
 
 async function saveFirstSubdl(results, info, quietNone = false) {

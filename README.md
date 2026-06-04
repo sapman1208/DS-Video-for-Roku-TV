@@ -83,6 +83,7 @@ Example `.env` for subtitles and HTTPS:
 SUBDL_API_KEY=your-subdl-api-key
 OPEN_SUBTITLES_API_KEY=your-api-key
 OPEN_SUBTITLES_LANGUAGE=en
+ROKU_SUBTITLE_TVSUBTITLES=1
 ROKU_HLS_HTTPS_CERT=/path/to/fullchain.pem
 ROKU_HLS_HTTPS_KEY=/path/to/privkey.pem
 ROKU_HLS_BASE_URL=https://your-hostname:8099
@@ -105,9 +106,9 @@ nas/start-on-demand.sh
 Starts:
 
 - `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. If `ROKU_HLS_SAVE_MP4=1`, completed MP4s are saved under `/volume1/video/@roku-transcodes`. If `ROKU_HLS_REPLACE_ORIGINAL=1`, the completed MP4 is copied back and indexed only after the Roku playback session has gone idle. Interrupted or failed transcodes leave the original file untouched. Direct-play files can also ask the proxy to create or download a missing subtitle sidecar when playback starts.
-- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured. OpenSubtitles fallback is opt-in with `ROKU_SUBTITLE_OPEN_SUBTITLES_FALLBACK=1` or `OPEN_SUBTITLES_FALLBACK=1`.
+- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured, then TVsubtitles.net for English TV episodes, including cookie-based downloads and old-format subtitle normalization. OpenSubtitles fallback is opt-in with `ROKU_SUBTITLE_OPEN_SUBTITLES_FALLBACK=1` or `OPEN_SUBTITLES_FALLBACK=1`.
 
-By default the subtitle watcher scans movie and TV-style library paths such as `Movies` and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
+By default the subtitle watcher scans movie and TV-style library paths such as `Movies` and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. Existing subtitle sidecars are normalized, commentary-trimmed when possible, and autosynced when `ffsubsync` is installed. Set `ROKU_SUBTITLE_TVSUBTITLES=0` to disable the TVsubtitles fallback. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
 
 Logs:
 
