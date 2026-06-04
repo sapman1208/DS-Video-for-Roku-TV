@@ -406,22 +406,28 @@ async function saveFirstSubdl(results, info, quietNone = false) {
     fs.rmSync(out, { force: true });
     const label = subdlSubtitleLabel(first.entry, first.unpacked);
     console.log(`[subs] subdl selected ${label} score=${first.score}`);
-    const relativeUrl = first.unpacked?.url || first.entry.url;
-    if (!relativeUrl) {
-      console.log(`[subs] subdl missing download url ${target}`);
-      continue;
-    }
-    const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
-    if (first.unpacked?.url) {
-      try {
-        await downloadFile(downloadUrl, out);
-      } catch (err) {
-        if (!first.entry.url) throw err;
-        const zipUrl = /^https?:\/\//i.test(first.entry.url) ? first.entry.url : `${SUBDL_DOWNLOAD_BASE_URL}${first.entry.url}`;
-        await downloadZipSubtitle(zipUrl, out, first.unpacked.name || first.unpacked.release_name || "");
+    try {
+      const relativeUrl = first.unpacked?.url || first.entry.url;
+      if (!relativeUrl) {
+        console.log(`[subs] subdl missing download url ${target}`);
+        continue;
       }
-    } else {
-      await downloadZipSubtitle(downloadUrl, out);
+      const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
+      if (first.unpacked?.url) {
+        try {
+          await downloadFile(downloadUrl, out);
+        } catch (err) {
+          if (!first.entry.url) throw err;
+          const zipUrl = /^https?:\/\//i.test(first.entry.url) ? first.entry.url : `${SUBDL_DOWNLOAD_BASE_URL}${first.entry.url}`;
+          await downloadZipSubtitle(zipUrl, out, first.unpacked.name || first.unpacked.release_name || "");
+        }
+      } else {
+        await downloadZipSubtitle(downloadUrl, out);
+      }
+    } catch (err) {
+      fs.rmSync(out, { force: true });
+      console.log(`[subs] subdl candidate failed ${label}: ${err.message}`);
+      continue;
     }
     if (!acceptSavedSubtitle(out, label)) continue;
     console.log(`[subs] saved ${out}`);
@@ -470,6 +476,12 @@ function subdlSubtitleLabel(entry, unpacked) {
 
 function subdlSubtitleScore(entry, unpacked, info) {
   const label = subdlSubtitleLabel(entry, unpacked).toLowerCase();
+  const itemLabel = cleanNamePart([
+    unpacked?.release_name,
+    unpacked?.name,
+    unpacked ? "" : entry.release_name,
+    unpacked ? "" : entry.name,
+  ].filter(Boolean).join(" | ")).toLowerCase();
   let score = 0;
   const season = Number(unpacked?.season || entry.season || 0);
   const episode = Number(unpacked?.episode || entry.episode || 0);
@@ -478,21 +490,28 @@ function subdlSubtitleScore(entry, unpacked, info) {
   const hi = unpacked?.hi ?? entry.hi;
 
   for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
-    if (label.includes(bad)) return -10000;
+    if (itemLabel.includes(bad)) return -10000;
   }
 
   if (info.type === "episode") {
-    if (unpacked && Number(unpacked.episode || 0) === 0 && /\b00\b/.test(label)) return -10000;
-    if (/(^|[\/\s._-])00([\/\s._-]|$)/.test(label)) return -10000;
+    if (unpacked && Number(unpacked.episode || 0) === 0 && /\b00\b/.test(itemLabel)) return -10000;
+    if (/(^|[\/\s._-])00([\/\s._-]|$)/.test(itemLabel)) return -10000;
     const marker = episodeMarker(label);
-    if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
     const titleMatches = titleTokenMatches(label, info.title);
     if (info.title && titleMatches === 0) return -10000;
     score += titleMatches * 25;
+    if (marker && marker.season !== info.season) return -10000;
+    if (marker && marker.episode !== info.episode) {
+      if (titleMatches > 0) score -= 80;
+      else return -10000;
+    }
     if (season === info.season) score += 80;
     if (episode === info.episode) score += 100;
     if (season && season !== info.season) return -10000;
-    if (episode && episode !== info.episode) return -10000;
+    if (episode && episode !== info.episode) {
+      if (titleMatches > 0) score -= 80;
+      else return -10000;
+    }
   }
   if (format === "srt") score += 30;
   if (format === "vtt") score += 10;
