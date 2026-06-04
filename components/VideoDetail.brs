@@ -92,17 +92,23 @@ sub onVideoDataSet(event as object)
     if data.summary <> invalid then summary = data.summary
     if summary = "" and data.description <> invalid then summary = data.description
     if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
-    needsMovieMetadata = summary = "" and data.type <> invalid and data.type = "movie"
+    needsMovieMetadata = data.type <> invalid and data.type = "movie" and len(summary) < 220
+    m.movieFallbackSummary = ""
+    if needsMovieMetadata and summary <> ""
+        m.movieFallbackSummary = summary
+        summary = ""
+    end if
     if summary = "" and not needsMovieMetadata then summary = "No description available."
     m.pendingMovieSummary = ""
     poster = ""
 	    if data.posterUrl <> invalid then poster = data.posterUrl
 	    backdrop = ""
 	    if data.backdropUrl <> invalid then backdrop = data.backdropUrl
+    m.detailPosterFallbackUrl = poster
 	    print "DETAIL_ARTWORK type="; data.lookUp("type"); " title="; title; " posterSource="; artworkSourceFromUrl(poster); " backdropSource="; artworkSourceFromUrl(backdrop); " backdropUrl="; left(backdrop, 120)
 	    configurePosterFrame(data)
     if poster <> ""
-        m.top.findNode("poster").uri = poster
+        m.top.findNode("poster").uri = detailArtworkUrl(poster)
         m.top.findNode("poster").visible = true
         m.top.findNode("posterFallback").visible = false
     else
@@ -111,12 +117,13 @@ sub onVideoDataSet(event as object)
     end if
     if backdrop <> ""
         m.waitForBackdrop = true
-        m.top.findNode("backdrop").uri = backdrop
+        m.top.findNode("backdrop").uri = detailArtworkUrl(backdrop)
         m.top.findNode("backdrop").visible = true
     else
         m.top.findNode("backdrop").visible = false
     end if
     m.top.findNode("summaryLabel").text = summary
+    applySummaryFit(summary, data)
     if needsMovieMetadata then startMovieMetadataFetch(data)
     populateRatingStars()
     if hasWatchedState(data)
@@ -131,6 +138,16 @@ sub onVideoDataSet(event as object)
     startDetailStateFetch(data)
     startDetailRevealTimer()
 end sub
+
+function detailArtworkUrl(url as dynamic) as string
+    if url = invalid then return ""
+    if type(url) <> "roString" and type(url) <> "String" then return ""
+    lower = lcase(url)
+    if left(lower, 7) <> "http://" and left(lower, 8) <> "https://" then return url
+    sep = "?"
+    if instr(1, url, "?") > 0 then sep = "&"
+    return url + sep + "roku_detail_img=1"
+end function
 
 sub startDetailRevealTimer()
     timer = m.top.findNode("detailRevealTimer")
@@ -148,6 +165,16 @@ sub onBackdropLoadStatus(event as object)
     if m.waitForBackdrop <> true then return
     status = event.getData()
     if status = "ready" then revealDetail()
+    if status = "failed" or status = "invalid"
+        fallback = ""
+        if m.detailPosterFallbackUrl <> invalid then fallback = m.detailPosterFallbackUrl
+        if fallback <> ""
+            m.waitForBackdrop = false
+            m.top.findNode("backdrop").uri = detailArtworkUrl(fallback)
+            m.top.findNode("backdrop").visible = true
+            revealDetail()
+        end if
+    end if
 end sub
 
 sub revealDetail()
@@ -183,6 +210,9 @@ sub onMovieMetadata(event as object)
     if response = invalid then return
     summary = ""
     if response.summary <> invalid then summary = response.summary
+    if summary = ""
+        if m.movieFallbackSummary <> invalid then summary = m.movieFallbackSummary
+    end if
     if summary = "" then return
     m.pendingMovieSummary = summary
     timer = m.top.findNode("movieSummaryTimer")
@@ -193,6 +223,7 @@ end sub
 sub onMovieSummaryTimer(event as object)
     if m.pendingMovieSummary = invalid or m.pendingMovieSummary = "" then return
     m.top.findNode("summaryLabel").text = m.pendingMovieSummary
+    applySummaryFit(m.pendingMovieSummary, m.top.videoData)
     m.pendingMovieSummary = ""
 end sub
 
@@ -243,6 +274,11 @@ sub onDetailState(event as object)
     if response.hasWatched = true and response.watchedRatio <> invalid
         m.top.videoData.addReplace("watchedRatio", response.watchedRatio)
         populateWatchedState()
+    end if
+    if m.actionOverrides <> invalid
+        if response.favorite <> invalid then m.actionOverrides.addReplace("favorites", response.favorite = true)
+        if response.watchlist <> invalid then m.actionOverrides.addReplace("watchlist", response.watchlist = true)
+        populateActions()
     end if
 end sub
 
@@ -303,11 +339,12 @@ sub configurePosterFrame(data as object)
         m.top.findNode("ratingGrid").translation = [884, 330]
         m.top.findNode("summaryLabel").translation = [760, 410]
         m.top.findNode("summaryLabel").width = 1040
-        m.top.findNode("summaryLabel").height = 350
-        m.top.findNode("actionGrid").translation = [760, 770]
+        m.top.findNode("summaryLabel").height = 390
+        m.top.findNode("summaryLabel").font = "font:SmallSystemFont"
+        m.top.findNode("actionGrid").translation = [760, 835]
         m.top.findNode("watchedStateLabel").translation = [70, 600]
         m.top.findNode("watchedStateLabel").width = 630
-        m.top.findNode("statusLabel").translation = [760, 925]
+        m.top.findNode("statusLabel").translation = [760, 965]
     else
         poster.width = 360
         poster.height = 540
@@ -324,15 +361,60 @@ sub configurePosterFrame(data as object)
         m.top.findNode("metaLabel").width = 1100
         m.top.findNode("dateLabel").translation = [540, 285]
         m.top.findNode("dateLabel").width = 1100
-        m.top.findNode("ratingLabel").translation = [540, 320]
-        m.top.findNode("ratingGrid").translation = [664, 314]
-        m.top.findNode("summaryLabel").translation = [540, 398]
+        m.top.findNode("ratingLabel").translation = [540, 288]
+        m.top.findNode("ratingGrid").translation = [664, 282]
+        m.top.findNode("summaryLabel").translation = [540, 386]
         m.top.findNode("summaryLabel").width = 1180
-        m.top.findNode("summaryLabel").height = 350
-        m.top.findNode("actionGrid").translation = [540, 736]
+        m.top.findNode("summaryLabel").height = 470
+        m.top.findNode("summaryLabel").font = "font:SmallSystemFont"
+        m.top.findNode("actionGrid").translation = [540, 870]
         m.top.findNode("watchedStateLabel").translation = [110, 708]
         m.top.findNode("watchedStateLabel").width = 360
-        m.top.findNode("statusLabel").translation = [540, 890]
+        m.top.findNode("statusLabel").translation = [540, 985]
+    end if
+end sub
+
+sub applySummaryFit(summary as string, data as dynamic)
+    if data = invalid then return
+    label = m.top.findNode("summaryLabel")
+    actions = m.top.findNode("actionGrid")
+    status = m.top.findNode("statusLabel")
+    if label = invalid or actions = invalid then return
+
+    textLen = len(summary)
+    if data.type <> invalid and data.type = "episode"
+        label.translation = [760, 410]
+        label.width = 1040
+        label.font = "font:SmallSystemFont"
+        label.height = 390
+        actions.translation = [760, 835]
+        if status <> invalid then status.translation = [760, 965]
+        if textLen > 760
+            label.font = "font:TinySystemFont"
+            label.height = 430
+            actions.translation = [760, 875]
+            if status <> invalid then status.translation = [760, 1010]
+        end if
+    else
+        label.translation = [540, 386]
+        label.width = 1180
+        label.font = "font:SmallSystemFont"
+        label.height = 470
+        actions.translation = [540, 870]
+        if status <> invalid then status.translation = [540, 1005]
+        if textLen > 760
+            label.font = "font:TinySystemFont"
+            label.translation = [540, 374]
+            label.height = 500
+            actions.translation = [540, 890]
+            if status <> invalid then status.translation = [540, 1015]
+        end if
+        if textLen > 1150
+            label.translation = [540, 366]
+            label.height = 510
+            actions.translation = [540, 898]
+            if status <> invalid then status.translation = [540, 1020]
+        end if
     end if
 end sub
 
@@ -342,21 +424,18 @@ sub onActionSelected(event as object)
         m.top.playVideo = m.top.videoData
     else if idx = 1
         checked = toggleAction(idx)
-        m.top.listChanged = true
         syncSynologyCollection(idx, checked)
         m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
     else if idx = 2
         checked = toggleAction(idx)
-        m.top.listChanged = true
         syncSynologyCollection(idx, checked)
         m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
     else if idx = 3
         checked = toggleAction(idx)
-        m.top.listChanged = true
         syncSynologyCollection(idx, checked)
         m.top.findNode("statusLabel").text = ""
         populateActions()
@@ -424,6 +503,9 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
     if data.filePath <> invalid then filePath = data.filePath
     mapperId = invalid
     if data.mapperId <> invalid then mapperId = data.mapperId
+    print "COLLECTION_SYNC_REQUEST key="; actionKey(idx); " enabled="; enabled; " type="; data.lookUp("type"); " title="; data.lookUp("title"); " videoId="; videoId; " mapper="; mapperId
+    m.pendingCollectionIdx = idx
+    m.pendingCollectionEnabled = enabled
     task = createObject("roSGNode", "APITask")
     task.request = {
         action: "toggleCollectionVideo",
@@ -448,6 +530,19 @@ sub onCollectionSyncResponse(event as object)
     response = event.getData()
     if response = invalid then return
     print "COLLECTION_SYNC success="; response.lookUp("success"); " error="; response.lookUp("error"); " detail="; response.lookUp("detail")
+    if response.success = true
+        m.top.listChanged = true
+        if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0
+            restoreActionFocus(m.pendingCollectionIdx)
+        end if
+    else if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0
+        key = actionKey(m.pendingCollectionIdx)
+        if key <> "" and m.pendingCollectionEnabled <> invalid and m.actionOverrides <> invalid
+            m.actionOverrides.addReplace(key, not m.pendingCollectionEnabled)
+            populateActions()
+            restoreActionFocus(m.pendingCollectionIdx)
+        end if
+    end if
 end sub
 
 function collectionIdForAction(idx as integer) as string
@@ -900,6 +995,7 @@ function serializableVideo(data as object) as object
     item = {}
     item.listKey = videoKey(data)
     item.key = item.listKey
+    item.pendingAdd = "true"
     if data.type <> invalid then item.type = data.type
     if data.id <> invalid then item.id = data.id
     if data.fileId <> invalid then item.fileId = data.fileId

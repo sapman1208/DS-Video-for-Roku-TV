@@ -1,12 +1,12 @@
 # Synology DS Video for Roku
 
-A Roku channel for browsing and playing Synology Video Station libraries, with optional NAS-side helpers for Roku-friendly transcoding and subtitle downloads.
+A Roku channel for browsing and playing Synology Video Station libraries, with optional NAS-side tools for Roku-friendly transcoding, background conversion, and subtitle downloads.
 
 ## Features
 
 - Browse Movie, TV Show, Home Video, TV Recording, custom Video Station libraries, playlists, favorites, watch list, and shared videos.
 - Show TV seasons, episode metadata, resume points, posters, episode thumbnails, and backdrops.
-- Load artwork and captions directly from Synology when possible.
+- Load artwork, metadata, playlists, watched state, ratings, and captions directly from Synology.
 - Stream Roku-compatible MP4/M4V/MOV files directly.
 - Transcode incompatible files through a NAS FFmpeg HLS service.
 - Optionally convert incompatible files to MP4 on the NAS and write `.vsmeta` sidecars.
@@ -94,7 +94,7 @@ ROKU_HLS_BASE_URL=https://your-hostname:8099
 
 ### On-Demand Mode
 
-Use this mode when you want subtitles downloaded automatically, but videos converted only when Roku plays an incompatible file.
+Use this mode when you want subtitles downloaded automatically, with incompatible videos transcoded only while Roku plays them.
 
 ```sh
 cd /volume1/docker/roku-ds-video-tools
@@ -104,7 +104,7 @@ nas/start-on-demand.sh
 
 Starts:
 
-- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback.
+- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. It does not update Video Station metadata, artwork, playlists, watched state, ratings, or subtitles for the Roku app.
 - `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured, then falls back to OpenSubtitles when configured.
 
 By default the subtitle watcher scans movie and TV-style library paths such as `Movies`, `New Stuff`, and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
@@ -208,6 +208,13 @@ Expected:
 ```json
 {"ok":true,"sessions":0}
 ```
+
+The Roku app uses this service only when a file needs on-the-fly FFmpeg/HLS transcoding. Normal app data paths are direct Synology calls:
+
+- Posters, backdrops, episode thumbnails, and detail metadata come from Video Station/FileStation URLs.
+- Captions are loaded from Synology/FileStation subtitle files.
+- Favorites, watch list, shared videos, watched state, and ratings sync directly with Video Station.
+- Background subtitle download and MP4 conversion are separate NAS tools, not Roku runtime proxy fallbacks.
 
 ## HTTPS Proxy Mode
 

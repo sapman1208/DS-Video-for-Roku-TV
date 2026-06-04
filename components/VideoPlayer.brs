@@ -14,13 +14,11 @@ sub init()
       m.top.findNode("overlayRefreshTimer").observeField("fire", "onOverlayRefreshTimer")
       m.top.findNode("overlayTimer").observeField("fire", "onOverlayTimer")
       m.top.findNode("resumeSeekTimer").observeField("fire", "onResumeSeekTimer")
-      m.top.findNode("captionTimer").observeField("fire", "onCaptionTimer")
       m.hasError = false
       m.hasPlayed = false
       m.reportedStart = false
       m.reportedDone = false
       m.userStopped = false
-      m.captions = []
       m.top.setFocus(true)
   end sub
 
@@ -36,8 +34,6 @@ sub init()
       m.lastSyncedPosition = -1
       m.watchStatusInFlight = false
       m.resumeSeekDoneAt = invalid
-      m.captions = []
-      hideCaptionOverlay()
       m.resumePosition = resumePositionForVideo(videoData)
       if (m.resumePosition = invalid or m.resumePosition <= 0) and m.top.resumePosition <> invalid
           m.resumePosition = int(m.top.resumePosition)
@@ -117,33 +113,6 @@ sub init()
       if response.subtitleUrl <> invalid then m.subtitleUrl = response.subtitleUrl
       if m.subtitleUrl <> invalid and m.subtitleUrl <> "" then print "VIDEO_SUBTITLE url="; m.subtitleUrl
       startPlayback(streamUrl, fmt, isLive)
-  end sub
-
-  sub fetchSubtitleOverlay()
-      if m.subtitleUrl = invalid or m.subtitleUrl = "" then return
-      task = createObject("roSGNode", "APITask")
-      task.request = {
-          action: "fetchTextUrl",
-          url: m.subtitleUrl
-      }
-      task.observeField("response", "onSubtitleTextReady")
-      task.control = "RUN"
-      m.subtitleTask = task
-  end sub
-
-  sub onSubtitleTextReady(event as object)
-      if event = invalid then return
-      response = event.getData()
-      if response = invalid or response.success <> true
-          print "SUBTITLE_OVERLAY_FETCH failed"
-          return
-      end if
-      m.captions = parseSrtCaptions(response.text)
-      print "SUBTITLE_OVERLAY_LOADED count="; m.captions.count()
-      if m.captions.count() > 0 and m.hasPlayed = true
-          timer = m.top.findNode("captionTimer")
-          if timer <> invalid then timer.control = "start"
-      end if
   end sub
 
   sub startPlayback(streamUrl as string, fmt as string, isLive as boolean)
@@ -283,10 +252,6 @@ sub init()
           end if
           applyPendingSeek()
           startResumeSeekTimer()
-          if m.captions <> invalid and m.captions.count() > 0
-              captionTimer = m.top.findNode("captionTimer")
-              if captionTimer <> invalid then captionTimer.control = "start"
-          end if
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "start"
       else if state = "buffering"
@@ -296,12 +261,9 @@ sub init()
       else if state = "finished" or state = "stopped"
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "stop"
-          captionTimer = m.top.findNode("captionTimer")
-          if captionTimer <> invalid then captionTimer.control = "stop"
           seekTimer = m.top.findNode("resumeSeekTimer")
           if seekTimer <> invalid then seekTimer.control = "stop"
           endResumeHold()
-          hideCaptionOverlay()
           if state = "finished" and not m.userStopped
               clearResumePosition()
           else
@@ -316,7 +278,6 @@ sub init()
       else if state = "error"
           m.hasError = true
           endResumeHold()
-          hideCaptionOverlay()
           dbg = ""
           if m.streamDebug <> invalid and m.streamDebug <> "" then dbg = chr(10) + m.streamDebug
           showError("Playback error (fmt=" + m.streamFmt + ")." + dbg)
@@ -336,95 +297,9 @@ sub init()
   sub onProgressTimer(event as object)
       if event = invalid then return
       applyPendingSeek()
-      updateCaptionOverlay()
       saveResumePosition()
       if m.top.findNode("controlOverlay").visible then updatePlaybackOverlay()
   end sub
-
-  sub onCaptionTimer(event as object)
-      if event = invalid then return
-      updateCaptionOverlay()
-  end sub
-
-  sub updateCaptionOverlay()
-      if m.captions = invalid or m.captions.count() = 0
-          hideCaptionOverlay()
-          return
-      end if
-      posMs = int(m.videoNode.position * 1000)
-      text = ""
-      for each cap in m.captions
-          if posMs >= cap.startMs and posMs <= cap.endMs
-              text = cap.text
-              exit for
-          end if
-      end for
-      overlay = m.top.findNode("captionOverlay")
-      label = m.top.findNode("captionLabel")
-      if text = ""
-          if overlay <> invalid then overlay.visible = false
-          return
-      end if
-      if label <> invalid then label.text = text
-      if overlay <> invalid then overlay.visible = true
-  end sub
-
-  sub hideCaptionOverlay()
-      overlay = m.top.findNode("captionOverlay")
-      if overlay <> invalid then overlay.visible = false
-      label = m.top.findNode("captionLabel")
-      if label <> invalid then label.text = ""
-  end sub
-
-  function parseSrtCaptions(text as string) as object
-      captions = []
-      if text = invalid or text = "" then return captions
-      newlineRx = createObject("roRegex", "\r\n|\n|\r", "")
-      tagRx = createObject("roRegex", "<[^>]+>", "")
-      lines = newlineRx.split(text)
-      i = 0
-      while i < lines.count()
-          line = lines[i].trim()
-          if line = ""
-              i = i + 1
-          else if instr(1, line, "-->") > 0
-              timeLine = line
-              arrow = instr(1, timeLine, "-->")
-              startText = left(timeLine, arrow - 1).trim()
-              endText = mid(timeLine, arrow + 3).trim()
-              spaceAt = instr(1, endText, " ")
-              if spaceAt > 0 then endText = left(endText, spaceAt - 1)
-              i = i + 1
-              captionText = ""
-              while i < lines.count() and lines[i].trim() <> ""
-                  cleanLine = tagRx.replaceAll(lines[i].trim(), "")
-                  if captionText <> "" then captionText = captionText + chr(10)
-                  captionText = captionText + cleanLine
-                  i = i + 1
-              end while
-              if captionText <> ""
-                  captions.push({
-                      startMs: srtTimeToMs(startText),
-                      endMs: srtTimeToMs(endText),
-                      text: captionText
-                  })
-              end if
-          else
-              i = i + 1
-          end if
-      end while
-      return captions
-  end function
-
-  function srtTimeToMs(value as string) as integer
-      t = value.trim()
-      if len(t) < 12 then return 0
-      h = val(left(t, 2))
-      m = val(mid(t, 4, 2))
-      s = val(mid(t, 7, 2))
-      ms = val(mid(t, 10, 3))
-      return ((h * 3600) + (m * 60) + s) * 1000 + ms
-  end function
 
   sub startResumeSeekTimer()
       if m.seekApplied = true then return

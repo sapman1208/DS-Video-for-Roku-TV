@@ -191,26 +191,17 @@ sub init()
                   return
               end if
           end if
-          if screenToRemove.subtype() = "VideoDetail" and m.currentScreen <> invalid and m.currentScreen.subtype() = "VideoGrid"
-              currentCategory = m.currentScreen.category
-              if currentCategory <> invalid and left(currentCategory, 6) = "local_" and m.screenStack.count() > 1
-                  localListScreen = m.currentScreen
-                  m.top.removeChild(localListScreen)
-                  m.screenStack.pop()
-                  m.currentScreen = m.screenStack[m.screenStack.count() - 1]
-              end if
-          end if
           ' Focus the Group first, then the actual inner navigable widget
           m.currentScreen.setFocus(true)
           if m.listsChanged = true and m.currentScreen.subtype() = "VideoGrid"
               m.currentScreen.refreshLists = true
               m.listsChanged = false
           end if
-          innerIds = ["videoGrid", "episodeGrid", "categoryList"]
+          innerIds = ["videoGrid", "playlistMovieGrid", "playlistEpisodeGrid", "episodeGrid", "categoryList"]
           innerIdx = 0
           while innerIdx < innerIds.count()
               inner = m.currentScreen.findNode(innerIds[innerIdx])
-              if inner <> invalid
+              if inner <> invalid and inner.visible <> false
                   inner.setFocus(true)
                   innerIdx = innerIds.count()
               end if

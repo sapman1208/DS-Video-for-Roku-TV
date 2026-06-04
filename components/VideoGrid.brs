@@ -35,11 +35,11 @@ sub init()
           if v <> invalid
               t = type(v)
               if t = "roString" or t = "String" then return v
-              if t = "roInteger" or t = "Integer"
+              if t = "roInteger" or t = "Integer" or t = "roLongInteger" or t = "LongInteger"
                   s = stri(v)
                   return s.trim()
               end if
-              if t = "roFloat" or t = "Float"
+              if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
                   s = stri(int(v))
                   return s.trim()
               end if
@@ -48,39 +48,97 @@ sub init()
       return ""
   end function
 
+  function firstNonZeroStr(item as object, keys as object) as string
+      for each k in keys
+          v = safeStr(item, [k])
+          v = v.trim()
+          if v <> "" and v <> "0" then return v
+      end for
+      return ""
+  end function
+
+  function fileInfoFromFileObject(f as dynamic, info as object) as object
+      if f = invalid or type(f) <> "roAssociativeArray" then return info
+      if info.id = invalid
+          fid = f.lookUp("id")
+          if fid = invalid then fid = f.lookUp("file_id")
+          if fid <> invalid then info.id = fid
+      end if
+      if info.watched = invalid
+          info.watched = f.lookUp("file_watched")
+          if info.watched = invalid then info.watched = f.lookUp("watched")
+      end if
+      if info.path = ""
+          p = f.lookUp("path")
+          if p = invalid then p = f.lookUp("sharepath")
+          if p = invalid then p = f.lookUp("file_path")
+          if p <> invalid then info.path = p
+      end if
+      return info
+  end function
+
+  function fileInfoFromValue(value as dynamic, info as object) as object
+      if value = invalid then return info
+      valueType = type(value)
+      if valueType = "roArray"
+          if value.count() > 0 then info = fileInfoFromFileObject(value[0], info)
+      else if valueType = "roAssociativeArray"
+          info = fileInfoFromFileObject(value, info)
+      end if
+      return info
+  end function
+
   function fileInfoFromItem(item as object) as object
       info = { id: invalid, path: "", watched: invalid }
 
       additional = item.lookUp("additional")
       if additional <> invalid
-          fileList = additional.lookUp("file")
-          if fileList <> invalid and fileList.count() > 0
-              f = fileList[0]
-              info.id = f.lookUp("id")
-              info.watched = f.lookUp("file_watched")
-              if info.watched = invalid then info.watched = f.lookUp("watched")
-              p = f.lookUp("path")
-              if p <> invalid then info.path = p
-          end if
+          info = fileInfoFromValue(additional.lookUp("file"), info)
+          info = fileInfoFromValue(additional.lookUp("files"), info)
       end if
 
-      if info.id = invalid or info.path = ""
-          fileList = item.lookUp("file")
-          if fileList <> invalid and fileList.count() > 0
-              f = fileList[0]
-              if info.id = invalid then info.id = f.lookUp("id")
-              if info.watched = invalid
-                  info.watched = f.lookUp("file_watched")
-                  if info.watched = invalid then info.watched = f.lookUp("watched")
-              end if
-              if info.path = ""
-                  p = f.lookUp("path")
-                  if p <> invalid then info.path = p
-              end if
-          end if
+      info = fileInfoFromValue(item.lookUp("file"), info)
+      info = fileInfoFromValue(item.lookUp("files"), info)
+
+      if info.id = invalid
+          fid = item.lookUp("file_id")
+          if fid = invalid then fid = item.lookUp("fid")
+          if fid <> invalid then info.id = fid
+      end if
+      if info.path = ""
+          p = item.lookUp("filePath")
+          if p = invalid then p = item.lookUp("path")
+          if p = invalid then p = item.lookUp("sharepath")
+          if p = invalid then p = item.lookUp("file_path")
+          if p <> invalid then info.path = p
       end if
 
       return info
+  end function
+
+  function hasPlaylistEpisodeFields(item as object) as boolean
+      if item = invalid then return false
+      season = safeStr(item, ["seasonNumber", "season_number", "seasonText", "season", "season_num", "season_index"])
+      episode = safeStr(item, ["episodeNumber", "episode_number", "episodeText", "episode", "episode_num", "ep_num", "ep_index"])
+      if season <> "" and season <> "0" then return true
+      if episode <> "" and episode <> "0" then return true
+      if safeStr(item, ["episodeTitle", "episode_title"]) <> "" then return true
+      if safeStr(item, ["showTitle", "show_title", "tvshow_title", "seriesTitle"]) <> "" then return true
+      return false
+  end function
+
+  function playbackTypeForItem(item as object, category as string, fallbackType as string) as string
+      savedType = ""
+      if item <> invalid then savedType = lcase(safeStr(item, ["type"]))
+      if savedType = "tvshow_episode" or savedType = "episode" then return "episode"
+      if savedType = "home_video" or savedType = "homevideo" then return "homevideo"
+      if savedType = "tv_record" then return "homevideo"
+      if savedType = "movie" then return "movie"
+      if savedType = "video"
+          if hasPlaylistEpisodeFields(item) then return "episode"
+          return "movie"
+      end if
+      return fallbackType
   end function
 
   sub onDataReady(event as object)
@@ -156,11 +214,17 @@ sub init()
       localItems = loadLocalList(m.localListKey)
       removedItems = loadLocalList(m.localListKey + "_removed")
       items = []
+      useLocalFallback = true
       if response <> invalid and response.success = true and response.items <> invalid
           items = response.items
+          useLocalFallback = false
       end if
-      items = filterRemovedItems(items, removedItems)
-      items = mergeLocalItems(items, filterRemovedItems(localItems, removedItems))
+      if useLocalFallback
+          items = filterRemovedItems(items, removedItems)
+          items = mergeLocalItems(items, filterRemovedItems(localItems, removedItems))
+      else
+          items = mergeLocalItems(items, filterRemovedItems(pendingLocalItems(localItems), removedItems))
+      end if
       items = uniquePlaylistItems(items)
       m.items = items
       resetPosterRetryState()
@@ -216,6 +280,10 @@ sub init()
 
   sub applyGridLayout(category as string)
       grid = m.top.findNode("videoGrid")
+      movieGrid = m.top.findNode("playlistMovieGrid")
+      episodeGrid = m.top.findNode("playlistEpisodeGrid")
+      if movieGrid <> invalid then movieGrid.visible = false
+      if episodeGrid <> invalid then episodeGrid.visible = false
       titleLabel = m.top.findNode("pageTitleLabel")
       title = pageTitleForCategory(category)
       titleLabel.text = title
@@ -249,12 +317,20 @@ sub init()
   sub populateGrid(items as object)
       category = m.category
       grid = m.top.findNode("videoGrid")
+      if left(category, 6) = "local_"
+          populatePlaylistSplitGrid(items)
+          return
+      end if
       content = createObject("roSGNode", "ContentNode")
       idx = 0
 
       for each item in items
           node = content.createChild("ContentNode")
-          node.title = safeStr(item, ["title", "name", "file_name"])
+          if left(category, 6) = "local_"
+              node.title = playlistItemTitle(item)
+          else
+              node.title = safeStr(item, ["title", "name", "file_name"])
+          end if
           if node.title = "" then node.title = "Untitled"
           iconUrl = safeStr(item, ["iconUrl"])
           if category = "homevideos"
@@ -265,6 +341,9 @@ sub init()
               cols = 3
           else if iconUrl <> ""
               node.addFields({ layoutMode: "icon" })
+              cols = 7
+          else if left(category, 6) = "local_" and not playlistItemIsMovie(item)
+              node.addFields({ layoutMode: "playlistEpisode" })
               cols = 7
           else if category = "movies" or category = "tvshows" or left(category, 6) = "local_" or m.top.libraryId <> invalid
               node.addFields({ layoutMode: "compactPortrait" })
@@ -318,6 +397,95 @@ sub init()
       grid.observeField("itemSelected", "onItemSelected")
   end sub
 
+  sub populatePlaylistSplitGrid(items as object)
+      grid = m.top.findNode("videoGrid")
+      movieGrid = m.top.findNode("playlistMovieGrid")
+      episodeGrid = m.top.findNode("playlistEpisodeGrid")
+      if grid <> invalid then grid.visible = false
+      if movieGrid = invalid or episodeGrid = invalid then return
+
+      m.playlistMovieItems = []
+      m.playlistEpisodeItems = []
+      movieContent = createObject("roSGNode", "ContentNode")
+      episodeContent = createObject("roSGNode", "ContentNode")
+
+      for each item in items
+          if playlistItemIsMovie(item)
+              m.playlistMovieItems.push(item)
+              node = playlistContentNode(item, "playlistMovie", m.playlistMovieItems.count() - 1)
+              movieContent.appendChild(node)
+          else
+              m.playlistEpisodeItems.push(item)
+              node = playlistContentNode(item, "playlistWide", m.playlistEpisodeItems.count() - 1)
+              episodeContent.appendChild(node)
+          end if
+      end for
+
+      movieGrid.content = movieContent
+      episodeGrid.content = episodeContent
+      movieRows = 0
+      movieCount = movieContent.getChildCount()
+      if movieCount > 0 then movieRows = int((movieCount + 6) / 7)
+      if movieRows < 1 then movieGrid.numRows = 1 else movieGrid.numRows = movieRows
+      episodeY = 150
+      if movieRows > 0 then episodeY = 150 + (movieRows * 395)
+      episodeGrid.translation = [48, episodeY]
+      movieGrid.visible = movieContent.getChildCount() > 0
+      episodeGrid.visible = episodeContent.getChildCount() > 0
+      movieGrid.observeField("itemFocused", "onPlaylistMovieFocused")
+      movieGrid.observeField("itemSelected", "onPlaylistMovieSelected")
+      episodeGrid.observeField("itemFocused", "onPlaylistEpisodeFocused")
+      episodeGrid.observeField("itemSelected", "onPlaylistEpisodeSelected")
+      if movieGrid.visible
+          movieGrid.setFocus(true)
+          m.focusArea = "playlistMovies"
+      else if episodeGrid.visible
+          episodeGrid.setFocus(true)
+          m.focusArea = "playlistEpisodes"
+      end if
+  end sub
+
+  function playlistContentNode(item as object, layoutMode as string, idx as integer) as object
+      node = createObject("roSGNode", "ContentNode")
+      node.title = playlistItemTitle(item)
+      if node.title = "" then node.title = "Untitled"
+      node.description = playlistItemMeta(item)
+      node.addFields({ layoutMode: layoutMode, playlistIndex: idx })
+      poster = posterUrl(item, m.top.authData, m.category)
+      if poster <> ""
+          printArtworkPick("grid", categoryLabel(m.category), item, posterSource(item, m.top.authData, m.category))
+          item.addReplace("posterRemoteUrl", poster)
+          item.addReplace("posterUrl", poster)
+          node.HDPosterUrl = poster
+          node.SDPosterUrl = poster
+      end if
+      return node
+  end function
+
+  sub onPlaylistMovieFocused(event as object)
+      m.focusedIndex = event.getData()
+      m.focusArea = "playlistMovies"
+  end sub
+
+  sub onPlaylistEpisodeFocused(event as object)
+      m.focusedIndex = event.getData()
+      m.focusArea = "playlistEpisodes"
+  end sub
+
+  sub onPlaylistMovieSelected(event as object)
+      idx = event.getData()
+      if m.playlistMovieItems = invalid or idx < 0 or idx >= m.playlistMovieItems.count() then return
+      stopArtworkTimers()
+      selectVideoItem(m.playlistMovieItems[idx], m.category)
+  end sub
+
+  sub onPlaylistEpisodeSelected(event as object)
+      idx = event.getData()
+      if m.playlistEpisodeItems = invalid or idx < 0 or idx >= m.playlistEpisodeItems.count() then return
+      stopArtworkTimers()
+      selectVideoItem(m.playlistEpisodeItems[idx], m.category)
+  end sub
+
   function shouldAssignPosterInitially(category as string, idx as integer, cols as integer) as boolean
       if shouldDeferArtworkCache(category) then return idx < cols * 4
       return true
@@ -325,6 +493,11 @@ sub init()
 
   function playlistItemMeta(item as object) as string
       mediaType = lcase(safeStr(item, ["type"]))
+      if playlistItemIsMovie(item)
+          dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "air_date", "year", "create_time", "date"])
+          if dateText <> "" and dateText <> "0" then return dateText
+          return ""
+      end if
       showTitle = safeStr(item, ["showTitle", "show_title", "tvshow_title", "series_title", "parent_title"])
       if showTitle = "" then showTitle = showTitleFromPlaylistPath(item)
       if showTitle = "" and mediaType = "tvshow" then showTitle = safeStr(item, ["title", "name"])
@@ -338,30 +511,59 @@ sub init()
       end if
       episodeLine = ""
       if season <> "" and season <> "0" and episode <> "" and episode <> "0"
-          episodeLine = "Season " + season + " Episode " + episode
+          episodeLine = "Season " + season + " - Episode " + episode
       else if episode <> "" and episode <> "0"
           episodeLine = "Episode " + episode
       end if
 
-      dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "air_date", "year", "create_time", "date"])
+      episodeTitle = playlistEpisodeTitle(item)
       meta = ""
-      if showTitle <> "" then meta = showTitle
       if episodeLine <> ""
-          if meta <> "" then meta = meta + chr(10)
           meta = meta + episodeLine
       end if
-      if dateText <> "" and dateText <> "0"
+      if episodeTitle <> ""
           if meta <> "" then meta = meta + chr(10)
-          meta = meta + dateText
+          meta = meta + episodeTitle
       end if
       return meta
   end function
 
+  function playlistItemIsMovie(item as object) as boolean
+      mediaType = lcase(safeStr(item, ["type"]))
+      if mediaType = "movie" then return true
+      path = lcase(playlistPathText(item))
+      if instr(1, path, "/movies/") > 0 then return true
+      return false
+  end function
+
+  function playlistItemTitle(item as object) as string
+      if playlistItemIsMovie(item) then return safeStr(item, ["title", "name", "file_name"])
+      showTitle = safeStr(item, ["showTitle", "show_title", "tvshow_title", "series_title", "parent_title"])
+      if showTitle = "" then showTitle = showTitleFromPlaylistPath(item)
+      if showTitle <> "" then return showTitle
+      return safeStr(item, ["title", "name", "file_name"])
+  end function
+
+  function playlistEpisodeTitle(item as object) as string
+      mediaType = lcase(safeStr(item, ["type"]))
+      if mediaType = "movie" then return ""
+      showTitle = playlistItemTitle(item)
+      title = safeStr(item, ["episodeTitle", "episode_title"])
+      if title <> "" and lcase(title.trim()) <> lcase(showTitle.trim()) then return title
+      pathTitle = episodeTitleFromPlaylistPath(item)
+      if pathTitle <> "" then return pathTitle
+      title = safeStr(item, ["title", "name"])
+      if title <> "" and lcase(title.trim()) <> lcase(showTitle.trim()) then return title
+      return ""
+  end function
+
   function playlistPathText(item as object) as string
-      text = safeStr(item, ["filePath", "path", "file_name", "filename", "title", "name"])
+      text = safeStr(item, ["filePath", "path"])
       if text <> "" then return text
       fileInfo = fileInfoFromItem(item)
       if fileInfo.path <> invalid and fileInfo.path <> "" then return fileInfo.path
+      text = safeStr(item, ["file_name", "filename", "title", "name"])
+      if text <> "" then return text
       return ""
   end function
 
@@ -402,6 +604,36 @@ sub init()
           marker = instr(nextStart, lower, "s")
       end while
       return result
+  end function
+
+  function episodeTitleFromPlaylistPath(item as object) as string
+      text = playlistPathText(item)
+      if text = "" then return ""
+      slash = 0
+      i = 1
+      while i <= len(text)
+          if mid(text, i, 1) = "/" then slash = i
+          i = i + 1
+      end while
+      fileName = text
+      if slash > 0 then fileName = mid(text, slash + 1)
+      dot = 0
+      i = len(fileName)
+      while i >= 1
+          if mid(fileName, i, 1) = "."
+              dot = i
+              exit while
+          end if
+          i = i - 1
+      end while
+      if dot > 1 then fileName = left(fileName, dot - 1)
+      lower = lcase(fileName)
+      marker = instr(1, lower, " - s")
+      if marker <= 0 then marker = instr(1, lower, " s")
+      if marker <= 0 then return ""
+      titleMarker = instr(marker + 1, fileName, " - ")
+      if titleMarker <= 0 then return ""
+      return mid(fileName, titleMarker + 3).trim()
   end function
 
   function isDigits(text as string) as boolean
@@ -729,12 +961,21 @@ sub init()
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
 	              backdropUrl: backdropUrl(item, authData),
 	              backdropRemoteUrl: safeStr(item, ["backdropRemoteUrl"]),
-		              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
+		              originalAvailable: firstNonZeroStr(item, ["originalAvailable", "original_available", "originally_available", "date", "air_date", "year", "create_time"]),
 		              authData: authData
 		          }
               print "DETAIL_HANDOFF type=tvshow category="; categoryLabel(category); " title="; safeStr(item, ["title", "name"]); " posterSource="; posterSource(item, authData, category); " backdropSource="; backdropSource(item, authData)
 	          return
 	      end if
+
+      selectVideoItem(item, category)
+  end sub
+
+  sub selectVideoItem(item as object, category as string)
+      if item = invalid then return
+      authData = m.top.authData
+      rawId = item.lookUp("id")
+      if rawId = invalid then rawId = "0"
 
       fileInfo = fileInfoFromItem(item)
       rawFileId = fileInfo.id
@@ -744,8 +985,10 @@ sub init()
       if category = "movies" then itemType = "movie"
       if category = "homevideos" then itemType = "homevideo"
       if category = "tvrecordings" then itemType = "homevideo"
-      savedType = item.lookUp("type")
-      if savedType <> invalid and savedType <> "" then itemType = savedType
+      itemType = playbackTypeForItem(item, category, itemType)
+      if itemType = "movie"
+          print "MOVIE_SELECT title="; safeStr(item, ["title", "name", "file_name"]); " id="; safeStr({ value: rawId }, ["value"]); " fileId="; safeStr({ value: rawFileId }, ["value"]); " pathLen="; len(fileInfo.path)
+      end if
       sourceListKey = localListKeyForCategory(category)
       sourceItemKey = savedItemKey(item)
 
@@ -756,7 +999,7 @@ sub init()
 	              mapperId: item.lookUp("mapper_id"),
 	              libraryId: m.top.libraryId,
 		              filePath: fileInfo.path,
-		              originalAvailable: safeStr(item, ["original_available", "year", "create_time"]),
+		              originalAvailable: firstNonZeroStr(item, ["originalAvailable", "original_available", "originally_available", "date", "air_date", "year", "create_time"]),
 	              title: safeStr(item, ["title", "name", "file_name"]),
 	              summary: summaryForDetail(item),
 	              watchedRatio: numberForDetail(item, ["watched_ratio", "watchedRatio"]),
@@ -779,17 +1022,17 @@ sub init()
 
   function summaryForDetail(item as object) as string
       title = safeStr(item, ["title", "name", "file_name"])
-      summary = safeStr(item, ["summary", "description", "tagline"])
-      if summary = ""
-          additional = item.lookUp("additional")
-          if additional <> invalid
-              summary = safeStr(additional, ["summary", "description", "tagline"])
-              if summary = ""
-                  extra = additional.lookUp("extra")
-                  if extra <> invalid then summary = safeStr(extra, ["summary", "description", "tagline"])
-              end if
+      summary = ""
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          summary = safeStr(additional, ["summary", "description"])
+          if summary = ""
+              extra = additional.lookUp("extra")
+              if extra <> invalid then summary = safeStr(extra, ["summary", "description"])
           end if
       end if
+      if summary = "" then summary = safeStr(item, ["summary", "description"])
+      if summary = "" then summary = safeStr(item, ["tagline"])
       if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then return ""
       return summary
   end function
@@ -850,6 +1093,16 @@ sub init()
           if not found then merged.push(localItem)
       end for
       return merged
+  end function
+
+  function pendingLocalItems(items as object) as object
+      pending = []
+      if items = invalid then return pending
+      for each item in items
+          value = item.lookUp("pendingAdd")
+          if value <> invalid and (value = true or value = "true") then pending.push(item)
+      end for
+      return pending
   end function
 
   function uniquePlaylistItems(items as object) as object
@@ -1074,8 +1327,8 @@ sub init()
 	      token = ""
 	      if authData.synoToken <> invalid then token = authData.synoToken
 
-	      id = safeStr(item, ["posterId", "videoStationId", "id"])
-	      if id = "" or id = "0" then id = safeStr(item, ["mapper_id", "mapperId"])
+	      id = firstNonZeroStr(item, ["posterId", "id", "videoStationId"])
+	      if id = "" or id = "0" then id = firstNonZeroStr(item, ["mapper_id", "mapperId"])
 	      id = id.trim()
 	      if id = "" or id = "0" then return ""
 
@@ -1171,7 +1424,7 @@ sub init()
           baseUrl = authData.baseUrl
           sid = authData.sid
           if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = "" then return ""
-          id = safeStr(item, ["videoStationId", "id", "mapper_id", "mapperId"])
+          id = firstNonZeroStr(item, ["id", "videoStationId", "mapper_id", "mapperId"])
           id = id.trim()
           if id = "" or id = "0" then return ""
           mediaType = "movie"
@@ -1219,6 +1472,19 @@ sub init()
     ' redirect to the inner grid node so the d-pad works immediately.
     sub onGroupFocusChange(event as object)
         if event.getData() = true
+            if left(m.category, 6) = "local_"
+                movieGrid = m.top.findNode("playlistMovieGrid")
+                episodeGrid = m.top.findNode("playlistEpisodeGrid")
+                if movieGrid <> invalid and movieGrid.visible = true
+                    movieGrid.setFocus(true)
+                    m.focusArea = "playlistMovies"
+                    return
+                else if episodeGrid <> invalid and episodeGrid.visible = true
+                    episodeGrid.setFocus(true)
+                    m.focusArea = "playlistEpisodes"
+                    return
+                end if
+            end if
             innerGrid = m.top.findNode("videoGrid")
             if innerGrid <> invalid and innerGrid.visible = true
                 innerGrid.setFocus(true)
@@ -1238,9 +1504,46 @@ sub init()
               return true
           end if
       end if
+      if key = "up" and m.focusArea = "playlistEpisodes"
+          movieGrid = m.top.findNode("playlistMovieGrid")
+          if movieGrid <> invalid and movieGrid.visible = true
+              movieGrid.setFocus(true)
+              m.focusArea = "playlistMovies"
+              return true
+          end if
+          m.top.findNode("categoryList").setFocus(true)
+          m.focusArea = "nav"
+          return true
+      end if
+      if key = "up" and m.focusArea = "playlistMovies"
+          m.top.findNode("categoryList").setFocus(true)
+          m.focusArea = "nav"
+          return true
+      end if
       if key = "down" and m.focusArea = "nav"
-          m.top.findNode("videoGrid").setFocus(true)
-          m.focusArea = "items"
+          if left(m.category, 6) = "local_"
+              movieGrid = m.top.findNode("playlistMovieGrid")
+              episodeGrid = m.top.findNode("playlistEpisodeGrid")
+              if movieGrid <> invalid and movieGrid.visible = true
+                  movieGrid.setFocus(true)
+                  m.focusArea = "playlistMovies"
+              else if episodeGrid <> invalid and episodeGrid.visible = true
+                  episodeGrid.setFocus(true)
+                  m.focusArea = "playlistEpisodes"
+              end if
+          else
+              m.top.findNode("videoGrid").setFocus(true)
+              m.focusArea = "items"
+          end if
+          return true
+      end if
+      if key = "down" and m.focusArea = "playlistMovies"
+          episodeGrid = m.top.findNode("playlistEpisodeGrid")
+          if episodeGrid <> invalid and episodeGrid.visible = true
+              episodeGrid.setFocus(true)
+              m.focusArea = "playlistEpisodes"
+              return true
+          end if
           return true
       end if
       if key = "down" and m.focusArea = "items"

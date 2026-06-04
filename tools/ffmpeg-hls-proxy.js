@@ -59,7 +59,9 @@ function stopSession(id, reason = "idle") {
   } catch (err) {
     console.log(`[proxy] stop error ${id} ${err.message}`);
   }
-  cleanupPartialMp4(session);
+  if (!session.child || session.exited) {
+    cleanupPartialMp4(session);
+  }
   setTimeout(() => {
     try {
       fs.rmSync(session.dir, { recursive: true, force: true });
@@ -94,7 +96,7 @@ function cleanupUnownedMp4Temps(dir) {
   }
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".tmp")) continue;
+    if (!entry.isFile() || (!entry.name.endsWith(".tmp") && !entry.name.endsWith(".tmp.mp4"))) continue;
     const filePath = path.join(dir, entry.name);
     if (activeTemps.has(path.resolve(filePath))) continue;
     try {
@@ -152,7 +154,7 @@ function cleanupStaleMp4Temps(rootDir = MP4_DIR) {
         } else {
           visit(filePath);
         }
-      } else if (entry.isFile() && entry.name.endsWith(".tmp")) {
+      } else if (entry.isFile() && (entry.name.endsWith(".tmp") || entry.name.endsWith(".tmp.mp4"))) {
         try {
           fs.rmSync(filePath, { force: true });
           removed += 1;
@@ -528,7 +530,7 @@ function homeVideoInfoFromPath(filePath) {
 
 function mp4CachePaths(src, id) {
   const fallbackFinal = path.join(MP4_DIR, `${id}.mp4`);
-  const tmpFor = (finalPath) => `${finalPath}.tmp.mp4`;
+  const tmpFor = (finalPath) => `${finalPath}.${id}.tmp.mp4`;
   const filePath = sourceFilePath(src);
   const info = episodeInfoFromPath(filePath);
   if (info) {
@@ -672,38 +674,6 @@ function downloadSubtitlesForPath(targetPath) {
   } catch (err) {
     console.log(`[proxy] subtitle error ${targetPath} ${err.message}`);
   }
-}
-
-function subtitleCandidatesForPath(filePath, lang = "en") {
-  const candidates = [];
-  for (const sourcePath of nasPathCandidates(filePath)) {
-    const parsed = path.parse(sourcePath);
-    candidates.push(path.join(parsed.dir, `${parsed.name}.${lang}.srt`));
-    candidates.push(path.join(parsed.dir, `${parsed.name}.srt`));
-  }
-  return [...new Set(candidates)];
-}
-
-function findSubtitleForPath(filePath, lang = "en") {
-  for (const candidate of subtitleCandidatesForPath(filePath, lang)) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return "";
-}
-
-function ensureSubtitleForPath(filePath, lang = "en") {
-  let subtitle = findSubtitleForPath(filePath, lang);
-  if (subtitle) return subtitle;
-  if (!process.env.SUBDL_API_KEY && !process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return "";
-  const sourcePath = sourceExistingPathFromFilePath(filePath);
-  if (!sourcePath) return "";
-  downloadSubtitlesForPath(sourcePath);
-  subtitle = findSubtitleForPath(filePath, lang);
-  return subtitle;
 }
 
 function sourceExistingPathFromFilePath(filePath) {
@@ -1211,19 +1181,6 @@ function isVideoFileName(fileName) {
 
 function fileStationPath(nasPath) {
   return String(nasPath || "").replace(/^\/volume\d+/, "") || nasPath;
-}
-
-async function libraries() {
-  const sql = `
-    select coalesce(json_agg(row_to_json(x) order by x.id), '[]'::json)
-    from (
-      select id, title, type
-      from library
-      where is_public = true
-      order by id
-    ) x`;
-  const output = await runVideoStationSql(sql);
-  return output || "[]";
 }
 
 async function posterBuffer(mapperId, fallbackMapperId = "") {
@@ -1754,162 +1711,6 @@ async function handleRequest(req, res) {
 
   if (requestPath === "/health") {
     return send(res, 200, { "content-type": "application/json" }, JSON.stringify({ ok: true, sessions: sessions.size }));
-  }
-
-  if (requestPath === "/tvmeta") {
-    const title = url.searchParams.get("title") || "";
-    if (!title) return send(res, 400, { "content-type": "application/json" }, JSON.stringify({ success: false, error: "missing title" }));
-    try {
-      const items = await tvMetadata(title);
-      return send(res, 200, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify({ success: true, items: JSON.parse(items) }));
-    } catch (err) {
-      console.log(`[proxy] tvmeta error ${err.message}`);
-      return send(res, 500, { "content-type": "application/json" }, JSON.stringify({ success: false, error: err.message }));
-    }
-  }
-
-  if (requestPath === "/episodes") {
-    const tvshowId = url.searchParams.get("tvshow_id") || "";
-    const title = url.searchParams.get("title") || "";
-    try {
-      const items = await tvEpisodes(tvshowId, title);
-      return send(res, 200, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify({ success: true, items: JSON.parse(items) }));
-    } catch (err) {
-      console.log(`[proxy] episodes error ${err.message}`);
-      return send(res, 500, { "content-type": "application/json" }, JSON.stringify({ success: false, error: err.message }));
-    }
-  }
-
-  if (requestPath === "/libraries") {
-    try {
-      const items = await libraries();
-      return send(res, 200, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify({ success: true, items: JSON.parse(items) }));
-    } catch (err) {
-      console.log(`[proxy] libraries error ${err.message}`);
-      return send(res, 500, { "content-type": "application/json" }, JSON.stringify({ success: false, error: err.message }));
-    }
-  }
-
-  if (requestPath === "/collection-toggle") {
-    const key = url.searchParams.get("key") || "";
-    const collectionId = collectionIdForKey(key, url.searchParams.get("collection_id") || "");
-    const mapperId = url.searchParams.get("mapper_id") || url.searchParams.get("mapper") || "";
-    const enabled = url.searchParams.get("enabled") === "1" || url.searchParams.get("enabled") === "true";
-    try {
-      const item = await toggleCollection(collectionId, mapperId, enabled);
-      return sendJson(res, 200, { success: true, item });
-    } catch (err) {
-      console.log(`[proxy] collection-toggle error ${err.message}`);
-      return sendJson(res, 500, { success: false, error: err.message });
-    }
-  }
-
-  if (requestPath === "/libraryitems") {
-    const libraryId = url.searchParams.get("library_id") || "";
-    const type = url.searchParams.get("type") || "";
-    try {
-      const items = await libraryItems(libraryId, type);
-      return send(res, 200, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify({ success: true, items: JSON.parse(items) }));
-    } catch (err) {
-      console.log(`[proxy] libraryitems error ${err.message}`);
-      return send(res, 500, { "content-type": "application/json" }, JSON.stringify({ success: false, error: err.message }));
-    }
-  }
-
-  if (requestPath === "/poster") {
-    const mapperId = url.searchParams.get("mapper_id") || url.searchParams.get("mapper") || "";
-    const fallbackMapperId = url.searchParams.get("fallback_mapper_id") || "";
-    try {
-      const image = await posterBuffer(mapperId, fallbackMapperId);
-      return send(res, 200, {
-        "content-type": "image/jpeg",
-        "content-length": String(image.length),
-        "cache-control": "public, max-age=2592000, immutable",
-      }, image);
-    } catch (err) {
-      console.log(`[proxy] poster error mapper=${mapperId} fallback=${fallbackMapperId} ${err.message}`);
-      return send(res, 404, { "content-type": "text/plain" }, "poster not found");
-    }
-  }
-
-  if (requestPath === "/backdrop") {
-    const mapperId = url.searchParams.get("mapper_id") || url.searchParams.get("mapper") || "";
-    try {
-      const image = await backdropBuffer(mapperId);
-      return send(res, 200, {
-        "content-type": "image/jpeg",
-        "content-length": String(image.length),
-        "cache-control": "public, max-age=2592000, immutable",
-      }, image);
-    } catch (err) {
-      console.log(`[proxy] backdrop error mapper=${mapperId} ${err.message}`);
-      return send(res, 404, { "content-type": "text/plain" }, "backdrop not found");
-    }
-  }
-
-  if (requestPath === "/subtitle" || requestPath === "/subtitle.srt" || requestPath.startsWith("/subtitle/")) {
-    const filePath = url.searchParams.get("path") || "";
-    const lang = url.searchParams.get("lang") || "en";
-    if (!filePath) return send(res, 400, { "content-type": "text/plain" }, "missing path");
-    const subtitle = ensureSubtitleForPath(filePath, lang);
-    if (!subtitle) return send(res, 404, { "content-type": "text/plain" }, "subtitle not found");
-    const stat = fs.statSync(subtitle);
-    console.log(`[proxy] subtitle serve ${subtitle}`);
-    return fs.createReadStream(subtitle)
-      .on("error", () => send(res, 404, { "content-type": "text/plain" }, "subtitle not found"))
-      .pipe(res.writeHead(200, {
-        "content-type": "application/x-subrip; charset=utf-8",
-        "content-length": String(stat.size),
-        "cache-control": "no-store",
-      }));
-  }
-
-  if (requestPath.startsWith("/subtitle-path/")) {
-    let encodedPath = requestPath.slice("/subtitle-path/".length);
-    if (encodedPath.endsWith(".srt")) encodedPath = encodedPath.slice(0, -4);
-    const filePath = decodeURIComponent(encodedPath);
-    const subtitle = ensureSubtitleForPath(filePath, "en");
-    if (!subtitle) return send(res, 404, { "content-type": "text/plain" }, "subtitle not found");
-    const stat = fs.statSync(subtitle);
-    console.log(`[proxy] subtitle serve ${subtitle}`);
-    return fs.createReadStream(subtitle)
-      .on("error", () => send(res, 404, { "content-type": "text/plain" }, "subtitle not found"))
-      .pipe(res.writeHead(200, {
-        "content-type": "application/x-subrip; charset=utf-8",
-        "content-length": String(stat.size),
-        "cache-control": "no-store",
-      }));
-  }
-
-  if (requestPath === "/file" || requestPath === "/file.mp4" || requestPath.startsWith("/file/")) {
-    const filePath = url.searchParams.get("path") || "";
-    if (!filePath) return send(res, 400, { "content-type": "text/plain" }, "missing path");
-    return serveVideoFile(req, res, filePath);
-  }
-
-  if (requestPath === "/resolve") {
-    const filePath = url.searchParams.get("path") || "";
-    if (!filePath) return sendJson(res, 400, { success: false, error: "missing path" });
-    try {
-      const item = await resolveVideoStationItem(filePath);
-      return sendJson(res, 200, { success: true, item: item || null });
-    } catch (err) {
-      console.log(`[proxy] resolve error ${err.message}`);
-      return sendJson(res, 500, { success: false, error: err.message });
-    }
-  }
-
-  if (requestPath === "/watchstatus") {
-    const filePath = url.searchParams.get("path") || "";
-    const position = url.searchParams.get("position") || "0";
-    if (!filePath) return sendJson(res, 400, { success: false, error: "missing path" });
-    try {
-      const item = await updateVideoStationWatchStatus(filePath, position);
-      return sendJson(res, 200, { success: true, item });
-    } catch (err) {
-      console.log(`[proxy] watchstatus error ${err.message}`);
-      return sendJson(res, 500, { success: false, error: err.message });
-    }
   }
 
   if (requestPath === "/transcode") {

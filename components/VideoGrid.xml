@@ -27,5 +27,7 @@
         <Label id="loadingLabel" text="" color="#8BAFD1" font="font:MediumSystemFont" translation="[840, 530]" visible="false" />
         <Label id="errorLabel" text="" color="#FF6B6B" font="font:MediumSystemFont" translation="[600, 500]" width="720" wrap="true" visible="false" />
         <MarkupGrid id="videoGrid" translation="[48, 120]" itemComponentName="VideoItem" numColumns="7" itemSize="[220, 430]" itemSpacing="[45, 22]" vertFocusAnimationStyle="floatingFocus" numRows="2" visible="false" />
+        <MarkupGrid id="playlistMovieGrid" translation="[48, 150]" itemComponentName="VideoItem" numColumns="7" itemSize="[220, 370]" itemSpacing="[45, 22]" vertFocusAnimationStyle="floatingFocus" numRows="1" visible="false" />
+        <MarkupGrid id="playlistEpisodeGrid" translation="[48, 545]" itemComponentName="VideoItem" numColumns="3" itemSize="[520, 430]" itemSpacing="[82, 30]" vertFocusAnimationStyle="floatingFocus" numRows="1" visible="false" />
     </children>
 </component>

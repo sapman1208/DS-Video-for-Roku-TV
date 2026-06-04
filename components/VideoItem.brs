@@ -56,6 +56,7 @@ sub setContentArtworkState(value as string)
 end sub
 
 sub adjustSecondaryLine(mode as string, titleText as string)
+    if mode = "playlistEpisode" then return
     if mode <> "compactPortrait" and mode <> "moviePortrait" then return
     year = m.top.findNode("yearLabel")
     if titleText = invalid then titleText = ""
@@ -80,14 +81,15 @@ sub applyLayoutMode(mode as string)
     year.maxLines = 1
     year.wrap = false
     year.height = 34
+    year.color = "#8BAFD1"
 
-    if mode = "landscape" or mode = "homeLandscape" or mode = "showLandscape"
+    if mode = "landscape" or mode = "homeLandscape" or mode = "showLandscape" or mode = "playlistWide"
         bg.width = 520
         bg.height = 292
         poster.width = 520
         poster.height = 292
         poster.loadDisplayMode = "scaleToZoom"
-        if mode = "showLandscape" then poster.loadDisplayMode = "scaleToFit"
+        if mode = "showLandscape" or mode = "playlistWide" then poster.loadDisplayMode = "scaleToFit"
         m.top.findNode("iconPoster").width = 132
         m.top.findNode("iconPoster").height = 132
         m.top.findNode("iconPoster").translation = [194, 80]
@@ -106,7 +108,63 @@ sub applyLayoutMode(mode as string)
             title.height = 76
             title.maxLines = 3
             year.translation = [0, 386]
+        else if mode = "playlistWide"
+            bg.height = 260
+            poster.height = 260
+            poster.loadDisplayMode = "scaleToZoom"
+            title.translation = [0, 274]
+            title.height = 42
+            title.font = "font:SmallBoldSystemFont"
+            title.maxLines = 1
+            year.translation = [0, 320]
+            year.height = 96
+            year.font = "font:TinySystemFont"
+            year.maxLines = 3
+            year.wrap = true
+            year.color = "#FFFFFF"
         end if
+    else if mode = "playlistMovie"
+        bg.width = 220
+        bg.height = 300
+        poster.width = 220
+        poster.height = 300
+        poster.loadDisplayMode = "scaleToFill"
+        m.top.findNode("iconPoster").width = 100
+        m.top.findNode("iconPoster").height = 100
+        m.top.findNode("iconPoster").translation = [60, 100]
+        title.translation = [0, 308]
+        title.width = 220
+        title.height = 38
+        title.font = "font:TinySystemFont"
+        title.maxLines = 1
+        title.lineSpacing = -1
+        year.translation = [0, 344]
+        year.width = 220
+        year.height = 28
+        year.font = "font:TinySystemFont"
+        year.maxLines = 1
+        year.wrap = false
+    else if mode = "playlistEpisode"
+        bg.width = 220
+        bg.height = 124
+        poster.width = 220
+        poster.height = 124
+        poster.loadDisplayMode = "scaleToFit"
+        m.top.findNode("iconPoster").width = 96
+        m.top.findNode("iconPoster").height = 96
+        m.top.findNode("iconPoster").translation = [62, 14]
+        title.translation = [0, 142]
+        title.width = 220
+        title.height = 54
+        title.font = "font:TinySystemFont"
+        title.maxLines = 2
+        title.lineSpacing = -1
+        year.translation = [0, 202]
+        year.width = 220
+        year.height = 120
+        year.font = "font:TinySystemFont"
+        year.maxLines = 4
+        year.wrap = true
     else if mode = "icon"
         bg.width = 220
         bg.height = 220
