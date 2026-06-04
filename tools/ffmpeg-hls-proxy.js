@@ -42,6 +42,9 @@ function touchSession(session) {
 function stopSession(id, reason = "idle") {
   const session = sessions.get(id);
   if (!session) return;
+  if (reason === "idle" && session.exited && !session.mp4Finalized && !session.interrupted && session.exitCode === 0) {
+    finalizeMp4(session, session.exitCode);
+  }
   if (reason === "idle" && session.mp4Finalized && !session.replacementAttempted) {
     session.replacementAttempted = true;
     installReplacementForSession(session);
@@ -63,7 +66,7 @@ function stopSession(id, reason = "idle") {
   } catch (err) {
     console.log(`[proxy] stop error ${id} ${err.message}`);
   }
-  if (!session.child || session.exited) {
+  if ((!session.child || session.exited) && !session.mp4Finalized) {
     cleanupPartialMp4(session);
   }
   setTimeout(() => {
@@ -79,6 +82,8 @@ function cleanupPartialMp4(session) {
   if (!session || !session.cacheTmp) return;
   try {
     if (fs.existsSync(session.cacheTmp)) fs.rmSync(session.cacheTmp, { force: true });
+    cleanupMetadataForVideoPath(session.cacheTmp);
+    cleanupFolderMetadata(path.dirname(session.cacheTmp));
     cleanupUnownedMp4Temps(path.dirname(session.cacheTmp));
     pruneEmptyDirs(path.dirname(session.cacheTmp), MP4_DIR, true);
   } catch (err) {
@@ -191,6 +196,7 @@ function cleanupStaleMp4Temps(rootDir = MP4_DIR) {
 
 function finalizeMp4(session, code) {
   if (!session || !session.cacheTmp || !session.cacheFinal) return;
+  if (session.mp4Finalized) return;
   if (session.interrupted || code !== 0) {
     cleanupPartialMp4(session);
     return;
@@ -201,6 +207,8 @@ function finalizeMp4(session, code) {
       console.log(`[proxy] mp4 saved ${session.id} ${session.cacheFinal}`);
       copyVsmetaForSession(session);
       session.mp4Finalized = true;
+    } else if (!fs.existsSync(session.cacheFinal)) {
+      console.log(`[proxy] mp4 finalize wait ${session.id} missing ${session.cacheTmp}`);
     }
   } catch (err) {
     console.log(`[proxy] mp4 finalize error ${session.id} ${err.message}`);
@@ -651,6 +659,31 @@ function safeRemoveFile(filePath) {
   }
 }
 
+function cleanupMetadataForVideoPath(videoPath) {
+  if (!videoPath) return;
+  try {
+    const metadataDir = path.join(path.dirname(videoPath), "@eaDir", path.basename(videoPath));
+    fs.rmSync(metadataDir, { recursive: true, force: true });
+    const metadataParent = path.dirname(metadataDir);
+    if (fs.existsSync(metadataParent) && fs.readdirSync(metadataParent).length === 0) {
+      fs.rmdirSync(metadataParent);
+    }
+  } catch (err) {
+    console.log(`[proxy] metadata cleanup error ${videoPath} ${err.message}`);
+  }
+}
+
+function cleanupFolderMetadata(dir) {
+  if (!dir) return;
+  for (const name of [".DS_Store", "@eaDir"]) {
+    try {
+      fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+    } catch {
+      // Best-effort metadata cleanup.
+    }
+  }
+}
+
 function indexReplacement(sourcePath, targetPath) {
   const indexer = "/usr/syno/bin/synoindex";
   if (!fs.existsSync(indexer)) return;
@@ -776,15 +809,16 @@ function installReplacementForSession(session) {
     console.log(`[proxy] replace skip ${session.id} source already target`);
     return;
   }
-  if (fs.existsSync(targetPath)) {
-    console.log(`[proxy] replace skip ${session.id} target exists ${targetPath}`);
-    return;
-  }
 
   try {
-    safeCopyFile(session.cacheFinal, targetPath);
     const cacheVsmeta = `${session.cacheFinal}.vsmeta`;
     const targetVsmeta = `${targetPath}.vsmeta`;
+    if (fs.existsSync(targetPath)) {
+      if (fs.statSync(targetPath).size === 0) throw new Error(`replacement target exists but is empty ${targetPath}`);
+      console.log(`[proxy] replace target exists ${session.id} ${targetPath}`);
+    } else {
+      safeCopyFile(session.cacheFinal, targetPath);
+    }
     if (fs.existsSync(cacheVsmeta)) {
       safeCopyFile(cacheVsmeta, targetVsmeta);
     } else if (!generateVsmetaForSession({ ...session, cacheFinal: targetPath }, targetVsmeta)) {
@@ -802,6 +836,8 @@ function installReplacementForSession(session) {
     indexReplacement(sourcePath, targetPath);
     safeRemoveFile(session.cacheFinal);
     safeRemoveFile(cacheVsmeta);
+    cleanupMetadataForVideoPath(session.cacheFinal);
+    cleanupFolderMetadata(path.dirname(session.cacheFinal));
     pruneEmptyDirs(path.dirname(session.cacheFinal), MP4_DIR, false);
     console.log(`[proxy] replaced ${session.id} ${sourcePath} -> ${targetPath}`);
   } catch (err) {
@@ -1625,6 +1661,9 @@ function sessionFor(src) {
   });
   child.on("exit", (code, signal) => {
     console.log(`[proxy] ffmpeg exit ${id} code=${code} signal=${signal}`);
+  });
+  child.on("close", (code, signal) => {
+    console.log(`[proxy] ffmpeg close ${id} code=${code} signal=${signal}`);
     const s = session || sessions.get(id);
     if (s) {
       s.exited = true;
