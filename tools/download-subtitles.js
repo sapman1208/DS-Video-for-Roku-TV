@@ -13,6 +13,9 @@ const USER_AGENT = process.env.OPEN_SUBTITLES_USER_AGENT || "RokuDSVideo v1.0";
 const OPEN_SUBTITLES_BASE_URL = "https://api.opensubtitles.com/api/v1";
 const SUBDL_BASE_URL = "https://api.subdl.com/api/v1";
 const SUBDL_DOWNLOAD_BASE_URL = "https://dl.subdl.com";
+const OPEN_SUBTITLES_FALLBACK = process.env.ROKU_SUBTITLE_OPEN_SUBTITLES_FALLBACK === "1"
+  || process.env.OPEN_SUBTITLES_FALLBACK === "1"
+  || process.argv.includes("--open-fallback");
 
 const target = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 const FORCE = process.argv.includes("--force");
@@ -269,6 +272,10 @@ async function main() {
       return false;
     });
     if (saved) return;
+    if (OPEN_SUBTITLES_API_KEY && !OPEN_SUBTITLES_FALLBACK) {
+      console.log(`[subs] none ${target} (OpenSubtitles fallback disabled)`);
+      return;
+    }
   }
   if (!OPEN_SUBTITLES_API_KEY) {
     console.log(`[subs] none ${target}`);

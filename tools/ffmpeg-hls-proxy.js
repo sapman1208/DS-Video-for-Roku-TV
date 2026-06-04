@@ -24,6 +24,7 @@ const MP4_DIR = process.env.ROKU_HLS_MP4_DIR || path.join(ROOT, "mp4-cache");
 const COPY_VSMETA = process.env.ROKU_HLS_COPY_VSMETA !== "0";
 const VSMETA_GENERATOR = process.env.ROKU_HLS_VSMETA_GENERATOR || path.join(__dirname, "generate-vsmeta.js");
 const SUBTITLE_DOWNLOADER = process.env.ROKU_HLS_SUBTITLE_DOWNLOADER || path.join(__dirname, "download-subtitles.js");
+const SUBTITLE_LANGUAGE = process.env.OPEN_SUBTITLES_LANGUAGE || process.env.OPENSUBTITLES_LANGUAGE || process.env.SUBDL_LANGUAGE || "en";
 const NODE_BIN = process.env.ROKU_HLS_NODE || process.execPath;
 const REPLACE_ORIGINAL = process.env.ROKU_HLS_REPLACE_ORIGINAL === "1";
 const DELETE_REPLACED_ORIGINAL = process.env.ROKU_HLS_DELETE_REPLACED_ORIGINAL !== "0";
@@ -705,6 +706,78 @@ function indexReplacement(sourcePath, targetPath) {
   }
 }
 
+function subtitleTargetsForVideo(videoPath) {
+  const parsed = path.parse(videoPath);
+  return [
+    path.join(parsed.dir, `${parsed.name}.${SUBTITLE_LANGUAGE}.srt`),
+    path.join(parsed.dir, `${parsed.name}.srt`),
+    path.join(parsed.dir, `${parsed.name}.${SUBTITLE_LANGUAGE}.vtt`),
+    path.join(parsed.dir, `${parsed.name}.vtt`),
+  ];
+}
+
+function hasSubtitleForVideo(videoPath) {
+  return subtitleTargetsForVideo(videoPath).some((candidate) => {
+    try {
+      return fs.existsSync(candidate) && fs.statSync(candidate).size > 0;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function copySidecarSubtitle(sourcePath, targetPath) {
+  const sourceCandidates = subtitleTargetsForVideo(sourcePath);
+  const targetCandidates = subtitleTargetsForVideo(targetPath);
+  for (const source of sourceCandidates) {
+    try {
+      if (!fs.existsSync(source) || fs.statSync(source).size === 0) continue;
+      const ext = path.extname(source).toLowerCase() === ".vtt" ? ".vtt" : ".srt";
+      const target = targetCandidates.find((candidate) => candidate.endsWith(`${SUBTITLE_LANGUAGE}${ext}`)) || targetCandidates[0];
+      safeCopyFile(source, target);
+      console.log(`[proxy] subtitle copied ${source} -> ${target}`);
+      return true;
+    } catch (err) {
+      console.log(`[proxy] subtitle copy error ${source} ${err.message}`);
+    }
+  }
+  return false;
+}
+
+function extractEmbeddedSubtitle(sourcePath, targetPath) {
+  if (!sourcePath || !targetPath || !fs.existsSync(sourcePath)) return false;
+  const target = subtitleTargetsForVideo(targetPath)[0];
+  try {
+    fs.rmSync(target, { force: true });
+    const result = spawnSync(FFMPEG, [
+      "-hide_banner",
+      "-loglevel", "error",
+      "-y",
+      "-i", sourcePath,
+      "-map", "0:s:0",
+      target,
+    ], { encoding: "utf8", timeout: 120000 });
+    if (result.status === 0 && fs.existsSync(target) && fs.statSync(target).size > 0) {
+      console.log(`[proxy] subtitle extracted ${sourcePath} -> ${target}`);
+      return true;
+    }
+    fs.rmSync(target, { force: true });
+    const detail = (result.stderr || result.stdout || `exit ${result.status}`).trim();
+    if (detail) console.log(`[proxy] subtitle extract skipped ${sourcePath} ${detail}`);
+  } catch (err) {
+    fs.rmSync(target, { force: true });
+    console.log(`[proxy] subtitle extract error ${sourcePath} ${err.message}`);
+  }
+  return false;
+}
+
+function ensureLocalSubtitleForReplacement(sourcePath, targetPath) {
+  if (hasSubtitleForVideo(targetPath)) return true;
+  if (copySidecarSubtitle(sourcePath, targetPath)) return true;
+  if (extractEmbeddedSubtitle(sourcePath, targetPath)) return true;
+  return hasSubtitleForVideo(targetPath);
+}
+
 async function reconcileIndexedEpisodeShow(targetPath) {
   const info = episodeInfoFromPath(targetPath);
   if (!info || !info.show || !info.season || !info.episode) return;
@@ -887,7 +960,9 @@ function installReplacementForSession(session) {
       safeRemoveFile(sourcePath);
       safeRemoveFile(`${sourcePath}.vsmeta`);
     }
-    downloadSubtitlesForPath(targetPath);
+    if (!ensureLocalSubtitleForReplacement(sourcePath, targetPath)) {
+      downloadSubtitlesForPath(targetPath);
+    }
     indexReplacement(sourcePath, targetPath);
     reconcileIndexedEpisodeShow(targetPath);
     safeRemoveFile(session.cacheFinal);
