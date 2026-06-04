@@ -705,6 +705,51 @@ function indexReplacement(sourcePath, targetPath) {
   }
 }
 
+async function reconcileIndexedEpisodeShow(targetPath) {
+  const info = episodeInfoFromPath(targetPath);
+  if (!info || !info.show || !info.season || !info.episode) return;
+  const escapedPath = sqlEscape(targetPath);
+  const escapedShow = sqlEscape(info.show);
+  const sql = `
+    with file_episode as (
+      select e.id as episode_id, e.tvshow_id as current_show_id
+      from video_file vf
+      join tvshow_episode e on e.mapper_id = vf.mapper_id
+      where vf.path = '${escapedPath}'
+      limit 1
+    ),
+    preferred_show as (
+      select t.id as preferred_show_id
+      from tvshow t
+      where lower(replace(replace(t.title, ':', ''), '!', '')) = lower(replace(replace('${escapedShow}', ':', ''), '!', ''))
+      order by
+        (select count(*) from tvshow_episode sibling where sibling.tvshow_id = t.id) desc,
+        case when lower(t.title) = lower('${escapedShow}') then 0 else 1 end
+      limit 1
+    ),
+    updated_episode as (
+      update tvshow_episode e
+      set tvshow_id = preferred_show.preferred_show_id
+      from file_episode, preferred_show
+      where e.id = file_episode.episode_id
+        and preferred_show.preferred_show_id is not null
+        and e.tvshow_id <> preferred_show.preferred_show_id
+      returning file_episode.current_show_id, preferred_show.preferred_show_id
+    )
+    delete from tvshow t
+    using updated_episode
+    where t.id = updated_episode.current_show_id
+      and t.id <> updated_episode.preferred_show_id
+      and not exists (select 1 from tvshow_episode e where e.tvshow_id = t.id)
+    returning t.id`;
+  try {
+    const result = await runVideoStationSql(sql, 30000);
+    if (result) console.log(`[proxy] reconciled show ${targetPath} removed=${result}`);
+  } catch (err) {
+    console.log(`[proxy] reconcile show error ${targetPath} ${err.message}`);
+  }
+}
+
 function downloadSubtitlesForPath(targetPath) {
   if (!process.env.SUBDL_API_KEY && !process.env.OPEN_SUBTITLES_API_KEY && !process.env.OPENSUBTITLES_API_KEY) return;
   if (!targetPath || !fs.existsSync(SUBTITLE_DOWNLOADER)) return;
@@ -844,6 +889,7 @@ function installReplacementForSession(session) {
     }
     downloadSubtitlesForPath(targetPath);
     indexReplacement(sourcePath, targetPath);
+    reconcileIndexedEpisodeShow(targetPath);
     safeRemoveFile(session.cacheFinal);
     safeRemoveFile(cacheVsmeta);
     cleanupMetadataForVideoPath(session.cacheFinal);
