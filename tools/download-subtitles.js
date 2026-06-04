@@ -44,9 +44,7 @@ function withoutVideoExtension(value) {
 function libraryNameForPart(part) {
   const norm = cleanNamePart(part).toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
   if (norm === "tv shows") return "TV Shows";
-  if (norm === "ians shows") return "Ian's Shows";
   if (norm === "movies" || norm === "movie") return "Movies";
-  if (norm === "new stuff") return "New Stuff";
   return "";
 }
 
@@ -57,7 +55,7 @@ function parseVideoInfo(filePath) {
   const episodeMatch = base.match(/\bS(\d{1,2})E(\d{1,3})\b/i) || base.match(/\b(\d{1,2})x(\d{1,3})\b/i);
   const libraryIndex = parts.findIndex((part) => libraryNameForPart(part));
   const library = libraryIndex >= 0 ? libraryNameForPart(parts[libraryIndex]) : "";
-  if (episodeMatch && (library === "TV Shows" || library === "Ian's Shows")) {
+  if (episodeMatch && library === "TV Shows") {
     const show = cleanNamePart(parts[libraryIndex + 1] || base.slice(0, episodeMatch.index));
     return {
       type: "episode",

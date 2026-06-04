@@ -118,7 +118,6 @@ function normalizeForCompare(value) {
 function libraryNameForPart(part) {
   const norm = normalizeForCompare(part);
   if (norm === "tv shows") return "TV Shows";
-  if (norm === "ians shows") return "Ian's Shows";
   return "";
 }
 

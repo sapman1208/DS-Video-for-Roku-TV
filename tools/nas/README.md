@@ -19,21 +19,6 @@ Stop:
 nas/stop-on-demand.sh
 ```
 
-### Full Automation
-
-Downloads missing subtitles and converts incompatible videos in the background. The converter scans on first start, then polls for newly indexed files. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`; when none are available, the converter tries to download/copy a sidecar `.srt`/`.vtt` and remux it into the MP4 as an internal `mov_text` track.
-
-```sh
-cd /volume1/docker/roku-ds-video-tools
-nas/start-full-automation.sh
-```
-
-Stop:
-
-```sh
-nas/stop-full-automation.sh
-```
-
 ## Individual Services
 
 Start only the playback/transcode proxy:
@@ -48,17 +33,11 @@ Start only the subtitle watcher:
 nas/start-subtitle-watcher.sh
 ```
 
-Start only the background converter:
-
-```sh
-nas/start-library-converter.sh
-```
-
 ## Manual Tools
 
 The tools folder also includes maintenance scripts such as `normalize-media-plan.js`, `apply-normalize-plan.js`, `cleanup-normalize-leftovers.js`, `migrate-transcodes.js`, `generate-vsmeta.js`, and `generate-episode-posters.js`.
 
-These are manual utilities. They are not run by `nas/start-on-demand.sh`, `nas/start-full-automation.sh`, or any individual service start script. Run them directly only after reviewing their dry-run output or script options.
+These are manual utilities. They are not run by `nas/start-on-demand.sh` or any individual service start script. Run them directly only after reviewing their dry-run output or script options.
 
 ## Environment
 
@@ -72,18 +51,20 @@ OPEN_SUBTITLES_LANGUAGE=en
 SUBDL_API_KEY=your-subdl-api-key
 ROKU_HLS_PORT=8099
 ROKU_HLS_BASE_URL=https://your-hostname:8099
+ROKU_HLS_SAVE_MP4=1
+ROKU_HLS_REPLACE_ORIGINAL=1
 ROKU_SUBTITLE_POLL_SECONDS=900
-ROKU_CONVERT_POLL_SECONDS=900
 ```
 
-The subtitle watcher scans movie and TV-style library paths by default, such as `Movies`, `New Stuff`, and `TV Shows`. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
+`ROKU_HLS_SAVE_MP4=1` keeps completed on-demand transcodes under `/volume1/video/@roku-transcodes`. `ROKU_HLS_REPLACE_ORIGINAL=1` copies a completed MP4 back only after Roku playback has gone idle; interrupted or failed transcodes leave the original file untouched.
+
+The subtitle watcher scans movie and TV-style library paths by default, such as `Movies` and `TV Shows`. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` to include Home/Home Videos folders. When OpenSubtitles quota is reached, the watcher logs `subtitle-quota-pause` and waits for the next poll.
 
 ## Logs
 
 ```text
 /tmp/roku-hls-proxy.log
 /tmp/roku-subtitle-watcher.log
-/tmp/roku-library-converter.log
 ```
 
 ## DSM Task Scheduler
@@ -94,10 +75,4 @@ On-demand:
 
 ```sh
 cd /volume1/docker/roku-ds-video-tools && nas/start-on-demand.sh
-```
-
-Full automation:
-
-```sh
-cd /volume1/docker/roku-ds-video-tools && nas/start-full-automation.sh
 ```

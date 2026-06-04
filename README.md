@@ -1,6 +1,6 @@
 # Synology DS Video for Roku
 
-A Roku channel for browsing and playing Synology Video Station libraries, with optional NAS-side tools for Roku-friendly transcoding, background conversion, and subtitle downloads.
+A Roku channel for browsing and playing Synology Video Station libraries, with optional NAS-side tools for on-demand Roku-friendly transcoding and subtitle downloads.
 
 ## Features
 
@@ -9,7 +9,7 @@ A Roku channel for browsing and playing Synology Video Station libraries, with o
 - Load artwork, metadata, playlists, watched state, ratings, and captions directly from Synology.
 - Stream Roku-compatible MP4/M4V/MOV files directly.
 - Transcode incompatible files through a NAS FFmpeg HLS service.
-- Optionally convert incompatible files to MP4 on the NAS and write `.vsmeta` sidecars.
+- Optionally save completed on-demand transcodes to MP4 on the NAS, then replace the source only after Roku playback has gone idle.
 - Optionally download `.srt` subtitles for existing and newly indexed files.
 
 ## Requirements
@@ -70,11 +70,9 @@ Copy the whole `tools` folder to the NAS. The expected layout is:
 /volume1/docker/roku-ds-video-tools/ffmpeg-hls-proxy.js
 /volume1/docker/roku-ds-video-tools/download-subtitles.js
 /volume1/docker/roku-ds-video-tools/subtitle-watcher.js
-/volume1/docker/roku-ds-video-tools/library-converter.js
 /volume1/docker/roku-ds-video-tools/generate-vsmeta.js
 /volume1/docker/roku-ds-video-tools/nas/start-hls-proxy.sh
 /volume1/docker/roku-ds-video-tools/nas/start-on-demand.sh
-/volume1/docker/roku-ds-video-tools/nas/start-full-automation.sh
 ```
 
 The launcher scripts read `/volume1/docker/roku-ds-video-tools/.env` when present.
@@ -88,6 +86,8 @@ OPEN_SUBTITLES_LANGUAGE=en
 ROKU_HLS_HTTPS_CERT=/path/to/fullchain.pem
 ROKU_HLS_HTTPS_KEY=/path/to/privkey.pem
 ROKU_HLS_BASE_URL=https://your-hostname:8099
+ROKU_HLS_SAVE_MP4=1
+ROKU_HLS_REPLACE_ORIGINAL=1
 ```
 
 ## Build Modes
@@ -104,10 +104,10 @@ nas/start-on-demand.sh
 
 Starts:
 
-- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. It does not update Video Station metadata, artwork, playlists, watched state, ratings, or subtitles for the Roku app.
+- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. If `ROKU_HLS_SAVE_MP4=1`, completed MP4s are saved under `/volume1/video/@roku-transcodes`. If `ROKU_HLS_REPLACE_ORIGINAL=1`, the completed MP4 is copied back and indexed only after the Roku playback session has gone idle. Interrupted or failed transcodes leave the original file untouched.
 - `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured, then falls back to OpenSubtitles when configured.
 
-By default the subtitle watcher scans movie and TV-style library paths such as `Movies`, and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
+By default the subtitle watcher scans movie and TV-style library paths such as `Movies` and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
 
 Logs:
 
@@ -122,43 +122,6 @@ Stop:
 cd /volume1/docker/roku-ds-video-tools && nas/stop-on-demand.sh
 ```
 
-### Full Automation Mode
-
-Use this mode when you want the NAS to keep the library Roku-ready in the background.
-
-```sh
-cd /volume1/docker/roku-ds-video-tools
-chmod +x nas/*.sh
-nas/start-full-automation.sh
-```
-
-Starts:
-
-- `ffmpeg-hls-proxy.js`: on-demand playback fallback.
-- `subtitle-watcher.js`: subtitles for existing and newly indexed files.
-- `library-converter.js --watch --delete-original`: scans on first start, then polls for newly indexed incompatible videos, converts them to MP4, writes `.vsmeta`, indexes the replacement, and removes the original after the replacement succeeds. Compatible embedded text subtitle streams are written into the MP4 as `mov_text`; when none are available, the converter tries to download/copy a sidecar `.srt`/`.vtt` and remux it into the MP4 as an internal `mov_text` track.
-
-Logs:
-
-```text
-/tmp/roku-hls-proxy.log
-/tmp/roku-subtitle-watcher.log
-/tmp/roku-library-converter.log
-```
-
-Stop:
-
-```sh
-cd /volume1/docker/roku-ds-video-tools && nas/stop-full-automation.sh
-```
-
-Preview conversion without changing files:
-
-```sh
-cd /volume1/docker/roku-ds-video-tools
-/volume1/@appstore/homebridge/app/bin/node library-converter.js --once --dry-run
-```
-
 Run subtitle scan once without changing files:
 
 ```sh
@@ -168,14 +131,14 @@ cd /volume1/docker/roku-ds-video-tools
 
 ## Manual Maintenance Tools
 
-The NAS tools package also includes helper scripts for one-off cleanup and media-library maintenance. These are not run by `nas/start-on-demand.sh`, `nas/start-full-automation.sh`, or any other auto-start script.
+The NAS tools package also includes helper scripts for one-off cleanup and media-library maintenance. These are not run by `nas/start-on-demand.sh` or any other auto-start script.
 
 Included manual tools:
 
 - `normalize-media-plan.js`: previews media filename/folder normalization work.
 - `apply-normalize-plan.js`: applies a previously reviewed normalization plan.
 - `cleanup-normalize-leftovers.js`: removes leftover files from normalization work.
-- `migrate-transcodes.js`: moves completed `@roku-transcodes` MP4s back into regular library folders.
+- `migrate-transcodes.js`: moves completed `@roku-transcodes` MP4s back into regular library folders when run manually.
 - `generate-vsmeta.js`: writes `.vsmeta` sidecars when run directly.
 - `generate-episode-posters.js`: generates episode poster images when run directly.
 
@@ -187,12 +150,6 @@ For on-demand mode at boot, create a triggered task as root:
 
 ```sh
 cd /volume1/docker/roku-ds-video-tools && nas/start-on-demand.sh
-```
-
-For full automation at boot:
-
-```sh
-cd /volume1/docker/roku-ds-video-tools && nas/start-full-automation.sh
 ```
 
 ## Proxy Health
@@ -214,7 +171,7 @@ The Roku app uses this service only when a file needs on-the-fly FFmpeg/HLS tran
 - Posters, backdrops, episode thumbnails, and detail metadata come from Video Station/FileStation URLs.
 - Captions are loaded from Synology/FileStation subtitle files.
 - Favorites, watch list, shared videos, watched state, and ratings sync directly with Video Station.
-- Background subtitle download and MP4 conversion are separate NAS tools, not Roku runtime proxy fallbacks.
+- Background subtitle download is handled by `subtitle-watcher.js`; on-demand MP4 saving is handled by the HLS proxy.
 
 ## HTTPS Proxy Mode
 
@@ -269,11 +226,11 @@ If subtitles are missing:
 - OpenSubtitles free/API quotas may pause downloads until the reset time in the log.
 - Run `node subtitle-watcher.js --once --dry-run` to see what would be processed.
 
-If conversion is not happening:
+If completed transcodes are not being saved or replaced:
 
-- Check `/tmp/roku-library-converter.log`.
-- Confirm Video Station has indexed the file.
-- Run `node library-converter.js --once --dry-run`.
+- Confirm `.env` contains `ROKU_HLS_SAVE_MP4=1`.
+- To replace the source after playback idles, also set `ROKU_HLS_REPLACE_ORIGINAL=1`.
+- Check `/tmp/roku-hls-proxy.log` for `mp4 saved`, `replaced`, or `replace skip` messages.
 
 If artwork is missing:
 

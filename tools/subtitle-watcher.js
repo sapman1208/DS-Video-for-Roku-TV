@@ -24,10 +24,7 @@ const MAX_DEPTH = Number(process.env.ROKU_SUBTITLE_MAX_DEPTH || 12);
 function isSubtitleLibraryPath(filePath) {
   const norm = String(filePath || "").replace(/\\/g, "/").toLowerCase();
   if (norm.includes("/tv shows/")) return true;
-  if (norm.includes("/ian's shows/")) return true;
-  if (norm.includes("/ians shows/")) return true;
   if (norm.includes("/movies/")) return true;
-  if (norm.includes("/new stuff/")) return true;
   if (INCLUDE_HOME && (norm.includes("/home/") || norm.includes("/home videos/"))) return true;
   return false;
 }

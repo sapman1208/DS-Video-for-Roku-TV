@@ -42,6 +42,10 @@ function touchSession(session) {
 function stopSession(id, reason = "idle") {
   const session = sessions.get(id);
   if (!session) return;
+  if (reason === "idle" && session.mp4Finalized && !session.replacementAttempted) {
+    session.replacementAttempted = true;
+    installReplacementForSession(session);
+  }
   sessions.delete(id);
   console.log(`[proxy] stop ${id} reason=${reason}`);
   try {
@@ -196,7 +200,7 @@ function finalizeMp4(session, code) {
       fs.renameSync(session.cacheTmp, session.cacheFinal);
       console.log(`[proxy] mp4 saved ${session.id} ${session.cacheFinal}`);
       copyVsmetaForSession(session);
-      installReplacementForSession(session);
+      session.mp4Finalized = true;
     }
   } catch (err) {
     console.log(`[proxy] mp4 finalize error ${session.id} ${err.message}`);
@@ -402,9 +406,7 @@ function normalizeForCompare(value) {
 function libraryNameForPart(part) {
   const norm = normalizeForCompare(part);
   if (norm === "tv shows") return "TV Shows";
-  if (norm === "ians shows") return "Ian's Shows";
   if (norm === "movies" || norm === "movie") return "Movies";
-  if (norm === "new stuff") return "New Stuff";
   if (norm === "home videos" || norm === "home video") return "Home Videos";
   return "";
 }
@@ -447,7 +449,7 @@ function episodeInfoFromPath(filePath) {
   const parts = cleanPath.split("/").filter(Boolean);
   const libraryIndex = parts.findIndex((part) => {
     const library = libraryNameForPart(part);
-    return library === "TV Shows" || library === "Ian's Shows";
+    return library === "TV Shows";
   });
   if (libraryIndex < 0 || parts.length <= libraryIndex + 2) return null;
 
@@ -487,7 +489,7 @@ function seriesFallbackInfoFromPath(filePath) {
   const parts = cleanPath.split("/").filter(Boolean);
   const libraryIndex = parts.findIndex((part) => {
     const library = libraryNameForPart(part);
-    return library === "TV Shows" || library === "Ian's Shows";
+    return library === "TV Shows";
   });
   if (libraryIndex < 0 || parts.length <= libraryIndex + 2) return null;
 
@@ -506,7 +508,7 @@ function movieInfoFromPath(filePath) {
   const parts = cleanPath.split("/").filter(Boolean);
   const libraryIndex = parts.findIndex((part) => {
     const library = libraryNameForPart(part);
-    return library === "Movies" || library === "New Stuff";
+    return library === "Movies";
   });
   if (libraryIndex < 0 || parts.length <= libraryIndex + 1) return null;
 
@@ -798,6 +800,9 @@ function installReplacementForSession(session) {
     }
     downloadSubtitlesForPath(targetPath);
     indexReplacement(sourcePath, targetPath);
+    safeRemoveFile(session.cacheFinal);
+    safeRemoveFile(cacheVsmeta);
+    pruneEmptyDirs(path.dirname(session.cacheFinal), MP4_DIR, false);
     console.log(`[proxy] replaced ${session.id} ${sourcePath} -> ${targetPath}`);
   } catch (err) {
     safeRemoveFile(targetPath);

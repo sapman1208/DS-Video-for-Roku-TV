@@ -41,10 +41,7 @@ function libraryRootForPath(filePath) {
   const p = String(filePath || "").replace(/\\/g, "/");
   const known = [
     "/volume1/video/Movies",
-    "/volume1/video/New Stuff",
-    "/volume1/video/New stuff",
     "/volume1/video/TV Shows",
-    "/volume1/video/Ian's Shows",
     "/volume1/video/Home",
   ];
   return known.find((root) => p === root || p.startsWith(`${root}/`)) || "";
@@ -73,7 +70,7 @@ function movieTarget(row) {
 }
 
 function episodeTarget(row) {
-  const root = String(row.path || "").includes("/Ian's Shows/") ? "/volume1/video/Ian's Shows" : "/volume1/video/TV Shows";
+  const root = libraryRootForPath(row.path) || "/volume1/video/TV Shows";
   const show = cleanPart(row.showTitle);
   const season = String(Number(row.season) || 0).padStart(2, "0");
   const episode = String(Number(row.episode) || 0).padStart(2, "0");
