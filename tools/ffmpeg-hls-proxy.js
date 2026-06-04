@@ -28,6 +28,7 @@ const SUBTITLE_LANGUAGE = process.env.OPEN_SUBTITLES_LANGUAGE || process.env.OPE
 const NODE_BIN = process.env.ROKU_HLS_NODE || process.execPath;
 const REPLACE_ORIGINAL = process.env.ROKU_HLS_REPLACE_ORIGINAL === "1";
 const DELETE_REPLACED_ORIGINAL = process.env.ROKU_HLS_DELETE_REPLACED_ORIGINAL !== "0";
+const subtitleEnsureInFlight = new Set();
 
 fs.mkdirSync(ROOT, { recursive: true });
 if (SAVE_MP4) {
@@ -479,7 +480,7 @@ function episodeInfoFromPath(filePath) {
   if (episodeMatch && episodeMatch.index > 0) {
     fileShow = cleanNamePart(baseName.slice(0, episodeMatch.index).replace(/[._-]+/g, " "));
   }
-  const outputShow = fileShow && normalizeForCompare(fileShow).length >= normalizeForCompare(show).length ? fileShow : show;
+  const outputShow = fileShow && normalizeForCompare(fileShow).length > normalizeForCompare(show).length ? fileShow : show;
 
   let title = baseName;
   const showNorm = normalizeForCompare(outputShow);
@@ -776,6 +777,35 @@ function ensureLocalSubtitleForReplacement(sourcePath, targetPath) {
   if (copySidecarSubtitle(sourcePath, targetPath)) return true;
   if (extractEmbeddedSubtitle(sourcePath, targetPath)) return true;
   return hasSubtitleForVideo(targetPath);
+}
+
+function ensureSubtitleForVideoAsync(videoPath) {
+  const existingPath = sourceExistingPathFromFilePath(videoPath);
+  if (!existingPath) return "missing";
+  if (hasSubtitleForVideo(existingPath)) return "exists";
+
+  const key = path.resolve(existingPath);
+  if (subtitleEnsureInFlight.has(key)) return "running";
+  subtitleEnsureInFlight.add(key);
+
+  setImmediate(() => {
+    let status = "checked";
+    try {
+      if (extractEmbeddedSubtitle(existingPath, existingPath)) {
+        status = "extracted";
+      } else {
+        downloadSubtitlesForPath(existingPath);
+        status = hasSubtitleForVideo(existingPath) ? "downloaded" : "none";
+      }
+      console.log(`[proxy] subtitle ensure ${status} ${existingPath}`);
+    } catch (err) {
+      console.log(`[proxy] subtitle ensure error ${existingPath} ${err.message}`);
+    } finally {
+      subtitleEnsureInFlight.delete(key);
+    }
+  });
+
+  return "started";
 }
 
 async function reconcileIndexedEpisodeShow(targetPath) {
@@ -1886,6 +1916,14 @@ async function handleRequest(req, res) {
 
   if (requestPath === "/health") {
     return send(res, 200, { "content-type": "application/json" }, JSON.stringify({ ok: true, sessions: sessions.size }));
+  }
+
+  if (requestPath === "/subtitles/ensure") {
+    const filePath = url.searchParams.get("path") || "";
+    if (!filePath) return send(res, 400, { "content-type": "application/json" }, JSON.stringify({ ok: false, error: "missing path" }));
+    const status = ensureSubtitleForVideoAsync(filePath);
+    const ok = status !== "missing";
+    return send(res, ok ? 200 : 404, { "content-type": "application/json" }, JSON.stringify({ ok, status }));
   }
 
   if (requestPath === "/transcode") {

@@ -104,8 +104,8 @@ nas/start-on-demand.sh
 
 Starts:
 
-- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. If `ROKU_HLS_SAVE_MP4=1`, completed MP4s are saved under `/volume1/video/@roku-transcodes`. If `ROKU_HLS_REPLACE_ORIGINAL=1`, the completed MP4 is copied back and indexed only after the Roku playback session has gone idle. Interrupted or failed transcodes leave the original file untouched.
-- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured, then falls back to OpenSubtitles when configured.
+- `ffmpeg-hls-proxy.js`: transcodes only as needed during playback. If `ROKU_HLS_SAVE_MP4=1`, completed MP4s are saved under `/volume1/video/@roku-transcodes`. If `ROKU_HLS_REPLACE_ORIGINAL=1`, the completed MP4 is copied back and indexed only after the Roku playback session has gone idle. Interrupted or failed transcodes leave the original file untouched. Direct-play files can also ask the proxy to create or download a missing subtitle sidecar when playback starts.
+- `subtitle-watcher.js`: scans on first start, then polls for newly indexed files and downloads missing `.srt` files. It tries SubDL first when `SUBDL_API_KEY` is configured. OpenSubtitles fallback is opt-in with `ROKU_SUBTITLE_OPEN_SUBTITLES_FALLBACK=1` or `OPEN_SUBTITLES_FALLBACK=1`.
 
 By default the subtitle watcher scans movie and TV-style library paths such as `Movies` and `TV Shows`. Home videos are skipped by default to avoid false subtitle matches. Set `ROKU_SUBTITLE_INCLUDE_HOME=1` in `.env` if you want home-video folders included too. If OpenSubtitles reports a daily quota limit, the watcher logs `subtitle-quota-pause` and waits until the next poll.
 
@@ -166,12 +166,12 @@ Expected:
 {"ok":true,"sessions":0}
 ```
 
-The Roku app uses this service only when a file needs on-the-fly FFmpeg/HLS transcoding. Normal app data paths are direct Synology calls:
+The Roku app uses this service when a file needs on-the-fly FFmpeg/HLS transcoding, and when direct playback starts for a file that may need a local subtitle sidecar. Normal app data paths are direct Synology calls:
 
 - Posters, backdrops, episode thumbnails, and detail metadata come from Video Station/FileStation URLs.
 - Captions are loaded from Synology/FileStation subtitle files.
 - Favorites, watch list, shared videos, watched state, and ratings sync directly with Video Station.
-- Background subtitle download is handled by `subtitle-watcher.js`; on-demand MP4 saving is handled by the HLS proxy.
+- Background subtitle download is handled by `subtitle-watcher.js`; play-triggered subtitle ensure and on-demand MP4 saving are handled by the HLS proxy.
 
 ## HTTPS Proxy Mode
 

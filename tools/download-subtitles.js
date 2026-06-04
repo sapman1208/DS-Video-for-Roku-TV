@@ -105,6 +105,30 @@ function hasSubtitle(filePath) {
   return subtitleTargets(filePath).some((candidate) => fs.existsSync(candidate));
 }
 
+function subtitleTextLooksBad(filePath) {
+  try {
+    const text = fs.readFileSync(filePath, "utf8").slice(0, 8000).toLowerCase();
+    return [
+      "audio commentary",
+      "commentary track",
+      "director commentary",
+      "director's commentary",
+      "fireside chat",
+      "with the creators of south park",
+      "matt stone and trey parker",
+    ].some((phrase) => text.includes(phrase));
+  } catch {
+    return false;
+  }
+}
+
+function acceptSavedSubtitle(filePath, label) {
+  if (!subtitleTextLooksBad(filePath)) return true;
+  fs.rmSync(filePath, { force: true });
+  console.log(`[subs] rejected commentary ${label || filePath}`);
+  return false;
+}
+
 function requestOpenSubtitlesJson(method, endpoint, body, token = "", redirectCount = 0) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : "";
@@ -354,33 +378,38 @@ async function saveFirstSubdl(results, info, quietNone = false) {
   const ranked = flattened
     .filter((item) => item.score > -1000)
     .sort((a, b) => b.score - a.score);
-  const first = ranked[0];
-  if (!first) {
+  if (ranked.length === 0) {
     if (!quietNone) console.log(`[subs] subdl none ${target}`);
     return false;
   }
   const out = subtitleTargets(target)[0];
-  const label = subdlSubtitleLabel(first.entry, first.unpacked);
-  console.log(`[subs] subdl selected ${label} score=${first.score}`);
-  const relativeUrl = first.unpacked?.url || first.entry.url;
-  if (!relativeUrl) {
-    console.log(`[subs] subdl missing download url ${target}`);
-    return false;
-  }
-  const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
-  if (first.unpacked?.url) {
-    try {
-      await downloadFile(downloadUrl, out);
-    } catch (err) {
-      if (!first.entry.url) throw err;
-      const zipUrl = /^https?:\/\//i.test(first.entry.url) ? first.entry.url : `${SUBDL_DOWNLOAD_BASE_URL}${first.entry.url}`;
-      await downloadZipSubtitle(zipUrl, out, first.unpacked.name || first.unpacked.release_name || "");
+  for (const first of ranked) {
+    fs.rmSync(out, { force: true });
+    const label = subdlSubtitleLabel(first.entry, first.unpacked);
+    console.log(`[subs] subdl selected ${label} score=${first.score}`);
+    const relativeUrl = first.unpacked?.url || first.entry.url;
+    if (!relativeUrl) {
+      console.log(`[subs] subdl missing download url ${target}`);
+      continue;
     }
-  } else {
-    await downloadZipSubtitle(downloadUrl, out);
+    const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
+    if (first.unpacked?.url) {
+      try {
+        await downloadFile(downloadUrl, out);
+      } catch (err) {
+        if (!first.entry.url) throw err;
+        const zipUrl = /^https?:\/\//i.test(first.entry.url) ? first.entry.url : `${SUBDL_DOWNLOAD_BASE_URL}${first.entry.url}`;
+        await downloadZipSubtitle(zipUrl, out, first.unpacked.name || first.unpacked.release_name || "");
+      }
+    } else {
+      await downloadZipSubtitle(downloadUrl, out);
+    }
+    if (!acceptSavedSubtitle(out, label)) continue;
+    console.log(`[subs] saved ${out}`);
+    return true;
   }
-  console.log(`[subs] saved ${out}`);
-  return true;
+  if (!quietNone) console.log(`[subs] subdl none ${target}`);
+  return false;
 }
 
 async function saveFirstOpenSubtitles(results, token) {
@@ -390,18 +419,25 @@ async function saveFirstOpenSubtitles(results, token) {
     .map((entry) => ({ entry, score: subtitleScore(entry) }))
     .filter((item) => item.score > -1000)
     .sort((a, b) => b.score - a.score);
-  const first = ranked[0]?.entry;
-  if (!first) {
+  if (ranked.length === 0) {
     console.log(`[subs] none ${target}`);
     return;
   }
-  console.log(`[subs] selected ${subtitleLabel(first)} score=${ranked[0].score}`);
-  const fileId = first.attributes.files[0].file_id;
-  const download = await requestOpenSubtitlesJson("POST", "/download", { file_id: fileId, sub_format: "srt" }, token);
-  if (!download.link) throw new Error("download link missing");
   const out = subtitleTargets(target)[0];
-  await downloadFile(download.link, out);
-  console.log(`[subs] saved ${out}`);
+  for (const item of ranked) {
+    fs.rmSync(out, { force: true });
+    const first = item.entry;
+    const label = subtitleLabel(first);
+    console.log(`[subs] selected ${label} score=${item.score}`);
+    const fileId = first.attributes.files[0].file_id;
+    const download = await requestOpenSubtitlesJson("POST", "/download", { file_id: fileId, sub_format: "srt" }, token);
+    if (!download.link) throw new Error("download link missing");
+    await downloadFile(download.link, out);
+    if (!acceptSavedSubtitle(out, label)) continue;
+    console.log(`[subs] saved ${out}`);
+    return;
+  }
+  console.log(`[subs] none ${target}`);
 }
 
 function subdlSubtitleLabel(entry, unpacked) {
@@ -422,7 +458,13 @@ function subdlSubtitleScore(entry, unpacked, info) {
   const size = Number(unpacked?.size || entry.size || 0);
   const hi = unpacked?.hi ?? entry.hi;
 
+  for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
+    if (label.includes(bad)) return -10000;
+  }
+
   if (info.type === "episode") {
+    if (unpacked && Number(unpacked.episode || 0) === 0 && /\b00\b/.test(label)) return -10000;
+    if (/(^|[\/\s._-])00([\/\s._-]|$)/.test(label)) return -10000;
     const marker = episodeMarker(label);
     if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
     if (season === info.season) score += 80;
@@ -436,9 +478,6 @@ function subdlSubtitleScore(entry, unpacked, info) {
   if (hi === true) score -= 25;
   if (entry.full_season && !unpacked) score -= 100;
 
-  for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
-    if (label.includes(bad)) score -= 500;
-  }
   for (const good of ["web", "webrip", "web-dl", "hdtv", "bluray", "bdrip", "dvdrip", "proper"]) {
     if (label.includes(good)) score += 8;
   }
@@ -466,6 +505,10 @@ function subtitleScore(entry) {
   let score = 0;
   const info = parseVideoInfo(target);
 
+  for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
+    if (label.includes(bad)) return -10000;
+  }
+
   if (info.type === "episode") {
     const marker = episodeMarker(label);
     if (marker && (marker.season !== info.season || marker.episode !== info.episode)) return -10000;
@@ -489,9 +532,6 @@ function subtitleScore(entry) {
   if (attrs.machine_translated === true) score -= 50;
   if (attrs.hearing_impaired === true) score -= 35;
 
-  for (const bad of ["commentary", "comment", "dvd extras", "behind the scenes", "interview"]) {
-    if (label.includes(bad)) score -= 500;
-  }
   for (const good of ["web", "webrip", "web-dl", "hdtv", "bluray", "bdrip", "dvdrip", "proper"]) {
     if (label.includes(good)) score += 8;
   }

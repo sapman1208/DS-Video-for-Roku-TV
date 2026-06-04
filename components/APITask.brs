@@ -1193,6 +1193,15 @@ sub init()
       return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(subtitlePathForVideo(filePath))) + "&mode=open", sid, token)
   end function
 
+  sub ensureProxySubtitleForVideo(baseUrl as string, proxyBaseUrl as dynamic, filePath as string)
+      if filePath = "" then return
+      proxyUrl = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl)
+      if proxyUrl = "" then return
+      enc = createObject("roUrlTransfer")
+      result = httpGet(proxyUrl + "/subtitles/ensure?path=" + enc.escape(filePath))
+      if result <> invalid then print "SUBTITLE_ENSURE "; left(result, 160)
+  end sub
+
   function fileStationSidecarPosterPath(videoPath as string) as string
       if videoPath = "" then return ""
       lastSlash = 0
@@ -1822,6 +1831,7 @@ sub init()
           streamUrl = fileStationStreamUrl(baseUrl, sid, token, filePath)
           fsPath = fileStationPath(filePath)
           print "FILESTATION_PLAY path="; fsPath
+          ensureProxySubtitleForVideo(baseUrl, proxyBaseUrl, filePath)
           m.top.response = { success: true, streamUrl: streamUrl, streamFormat: streamFormatForPath(filePath), subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FileStation " + left(fsPath, 120) }
           return
       else if filePath <> ""

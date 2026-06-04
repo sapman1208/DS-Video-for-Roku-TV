@@ -275,7 +275,7 @@ function episodeInfoFromPath(videoPath) {
 
   let fileShow = "";
   if (episodeMatch.index > 0) fileShow = clean(baseName.slice(0, episodeMatch.index).replace(/[._-]+/g, " "));
-  const outputShow = fileShow && normalizeForCompare(fileShow).length >= normalizeForCompare(show).length ? fileShow : show;
+  const outputShow = fileShow && normalizeForCompare(fileShow).length > normalizeForCompare(show).length ? fileShow : show;
   let title = baseName;
   const showNorm = normalizeForCompare(outputShow);
   const titleNorm = normalizeForCompare(title);
