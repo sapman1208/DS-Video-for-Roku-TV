@@ -684,6 +684,16 @@ function cleanupFolderMetadata(dir) {
   }
 }
 
+function cleanupMetadataTreeToRoot(startDir, rootDir = MP4_DIR) {
+  let current = path.resolve(startDir || "");
+  const stop = path.resolve(rootDir || "");
+  while (current && current.startsWith(stop)) {
+    cleanupFolderMetadata(current);
+    if (current === stop) break;
+    current = path.dirname(current);
+  }
+}
+
 function indexReplacement(sourcePath, targetPath) {
   const indexer = "/usr/syno/bin/synoindex";
   if (!fs.existsSync(indexer)) return;
@@ -837,8 +847,8 @@ function installReplacementForSession(session) {
     safeRemoveFile(session.cacheFinal);
     safeRemoveFile(cacheVsmeta);
     cleanupMetadataForVideoPath(session.cacheFinal);
-    cleanupFolderMetadata(path.dirname(session.cacheFinal));
-    pruneEmptyDirs(path.dirname(session.cacheFinal), MP4_DIR, false);
+    cleanupMetadataTreeToRoot(path.dirname(session.cacheFinal));
+    pruneEmptyDirs(path.dirname(session.cacheFinal), MP4_DIR, true);
     console.log(`[proxy] replaced ${session.id} ${sourcePath} -> ${targetPath}`);
   } catch (err) {
     safeRemoveFile(targetPath);
