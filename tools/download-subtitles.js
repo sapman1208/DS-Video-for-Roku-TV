@@ -202,7 +202,6 @@ function sanitizeCommentarySubtitle(filePath) {
     return [String(index + 1), ...lines].join("\n");
   }).join("\n\n") + "\n";
   if (hasCommentaryText(output.slice(0, 8000))) return false;
-  fs.writeFileSync(`${filePath}.commentary.bak`, input);
   fs.writeFileSync(filePath, output);
   console.log(`[subs] trimmed commentary blocks ${blocks.length - kept.length}/${blocks.length}`);
   return true;
@@ -233,7 +232,6 @@ function syncSubtitleWithAudio(filePath) {
     console.log(`[subs] autosync skipped ${result.stderr || result.stdout || "ffsubsync failed"}`.trim());
     return false;
   }
-  fs.writeFileSync(`${filePath}.presync.bak`, fs.readFileSync(filePath));
   fs.renameSync(tmp, filePath);
   console.log("[subs] autosynced with audio");
   return true;
@@ -471,7 +469,6 @@ function normalizeSubtitleFile(filePath) {
   }
   if (entries.length === 0) return false;
   const output = entries.map((entry, index) => `${index + 1}\n${entry.start} --> ${entry.end}\n${entry.text}\n`).join("\n");
-  fs.writeFileSync(`${filePath}.prenormalize.bak`, input);
   fs.writeFileSync(filePath, output);
   console.log(`[subs] normalized subtitle format ${entries.length} cues`);
   return true;
