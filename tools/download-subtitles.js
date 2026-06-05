@@ -109,6 +109,15 @@ function subtitleTargets(filePath) {
   ];
 }
 
+function candidateSubtitlePath(filePath) {
+  const parsed = path.parse(filePath);
+  return path.join(parsed.dir, `${parsed.name}.candidate${parsed.ext || ".srt"}`);
+}
+
+function replaceSubtitle(candidate, finalPath) {
+  fs.renameSync(candidate, finalPath);
+}
+
 function canonicalQueryValue(value) {
   return cleanNamePart(value).toLowerCase();
 }
@@ -682,17 +691,19 @@ async function saveFromTvSubtitles(info) {
   const downloadHtml = await requestTvSubtitles(`/download-${show.id}-${info.season}-en.html`, { jar, binary: true });
   const zip = zipBufferFromTvSubtitlesDownload(downloadHtml, jar);
   const out = subtitleTargets(target)[0];
+  const candidate = candidateSubtitlePath(out);
   const tmpZip = `${out}.tvsubtitles.ziptmp`;
-  fs.rmSync(out, { force: true });
+  fs.rmSync(candidate, { force: true });
   fs.writeFileSync(tmpZip, await zip);
   try {
     const entry = bestZipEntryForEpisode(tmpZip, info);
-    extractZipSubtitle(tmpZip, out, entry);
+    extractZipSubtitle(tmpZip, candidate, entry);
   } finally {
     fs.rmSync(tmpZip, { force: true });
   }
-  normalizeSubtitleFile(out);
-  if (!acceptSavedSubtitle(out, `tvsubtitles ${show.title} s${info.season} ${info.title}`)) return false;
+  normalizeSubtitleFile(candidate);
+  if (!acceptSavedSubtitle(candidate, `tvsubtitles ${show.title} s${info.season} ${info.title}`)) return false;
+  replaceSubtitle(candidate, out);
   console.log(`[subs] tvsubtitles saved ${out}`);
   return true;
 }
@@ -754,8 +765,9 @@ async function saveFirstSubdl(results, info, quietNone = false) {
     return false;
   }
   const out = subtitleTargets(target)[0];
+  const candidate = candidateSubtitlePath(out);
   for (const first of ranked) {
-    fs.rmSync(out, { force: true });
+    fs.rmSync(candidate, { force: true });
     const label = subdlSubtitleLabel(first.entry, first.unpacked);
     console.log(`[subs] subdl selected ${label} score=${first.score}`);
     try {
@@ -767,21 +779,22 @@ async function saveFirstSubdl(results, info, quietNone = false) {
       const downloadUrl = /^https?:\/\//i.test(relativeUrl) ? relativeUrl : `${SUBDL_DOWNLOAD_BASE_URL}${relativeUrl}`;
       if (first.unpacked?.url) {
         try {
-          await downloadFile(downloadUrl, out);
+          await downloadFile(downloadUrl, candidate);
         } catch (err) {
           if (!first.entry.url) throw err;
           const zipUrl = /^https?:\/\//i.test(first.entry.url) ? first.entry.url : `${SUBDL_DOWNLOAD_BASE_URL}${first.entry.url}`;
-          await downloadZipSubtitle(zipUrl, out, first.unpacked.name || first.unpacked.release_name || "");
+          await downloadZipSubtitle(zipUrl, candidate, first.unpacked.name || first.unpacked.release_name || "");
         }
       } else {
-        await downloadZipSubtitle(downloadUrl, out);
+        await downloadZipSubtitle(downloadUrl, candidate);
       }
     } catch (err) {
-      fs.rmSync(out, { force: true });
+      fs.rmSync(candidate, { force: true });
       console.log(`[subs] subdl candidate failed ${label}: ${err.message}`);
       continue;
     }
-    if (!acceptSavedSubtitle(out, label)) continue;
+    if (!acceptSavedSubtitle(candidate, label)) continue;
+    replaceSubtitle(candidate, out);
     console.log(`[subs] saved ${out}`);
     return true;
   }
@@ -801,16 +814,24 @@ async function saveFirstOpenSubtitles(results, token) {
     return;
   }
   const out = subtitleTargets(target)[0];
+  const candidate = candidateSubtitlePath(out);
   for (const item of ranked) {
-    fs.rmSync(out, { force: true });
+    fs.rmSync(candidate, { force: true });
     const first = item.entry;
     const label = subtitleLabel(first);
     console.log(`[subs] selected ${label} score=${item.score}`);
-    const fileId = first.attributes.files[0].file_id;
-    const download = await requestOpenSubtitlesJson("POST", "/download", { file_id: fileId, sub_format: "srt" }, token);
-    if (!download.link) throw new Error("download link missing");
-    await downloadFile(download.link, out);
-    if (!acceptSavedSubtitle(out, label)) continue;
+    try {
+      const fileId = first.attributes.files[0].file_id;
+      const download = await requestOpenSubtitlesJson("POST", "/download", { file_id: fileId, sub_format: "srt" }, token);
+      if (!download.link) throw new Error("download link missing");
+      await downloadFile(download.link, candidate);
+    } catch (err) {
+      fs.rmSync(candidate, { force: true });
+      console.log(`[subs] OpenSubtitles candidate failed ${label}: ${err.message}`);
+      continue;
+    }
+    if (!acceptSavedSubtitle(candidate, label)) continue;
+    replaceSubtitle(candidate, out);
     console.log(`[subs] saved ${out}`);
     return;
   }
