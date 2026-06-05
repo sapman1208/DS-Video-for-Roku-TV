@@ -242,7 +242,7 @@ sub init()
   end sub
 
   function shouldAssignEpisodePosterInitially(idx as integer) as boolean
-      return idx < 12
+      return true
   end function
 
   sub onRefreshArtwork(event as object)
