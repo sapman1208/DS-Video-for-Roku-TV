@@ -21,6 +21,7 @@ const TVSUBTITLES_FALLBACK = process.env.ROKU_SUBTITLE_TVSUBTITLES !== "0"
   && !process.argv.includes("--no-tvsubtitles");
 const COMMENTARY_SALVAGE = process.env.ROKU_SUBTITLE_COMMENTARY_SALVAGE !== "0";
 const SUBTITLE_AUTOSYNC = process.env.ROKU_SUBTITLE_AUTOSYNC !== "0";
+const SUBTITLE_ALIGNER = process.env.ROKU_HLS_SUBTITLE_ALIGNER || path.join(__dirname, "align-subtitles.js");
 const FFSUBSYNC_CANDIDATES = [
   process.env.FFSUBSYNC_BIN,
   path.join(__dirname, ".venv/bin/ffsubsync"),
@@ -237,16 +238,30 @@ function syncSubtitleWithAudio(filePath) {
   return true;
 }
 
+function alignSubtitle(filePath) {
+  if (!fs.existsSync(SUBTITLE_ALIGNER) || !fs.existsSync(filePath)) return false;
+  const result = spawnSync(process.execPath, [SUBTITLE_ALIGNER, filePath], {
+    encoding: "utf8",
+    timeout: 30000,
+    maxBuffer: 1024 * 1024,
+  });
+  const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
+  if (output) console.log(`[subs] align ${output}`);
+  return result.status === 0;
+}
+
 function acceptSavedSubtitle(filePath, label) {
   const info = parseVideoInfo(target);
   if (!subtitleTextLooksBad(filePath)) {
     syncSubtitleWithAudio(filePath);
     trimLeadingCommentaryPrelude(filePath, info);
+    alignSubtitle(filePath);
     return true;
   }
   if (sanitizeCommentarySubtitle(filePath)) {
     syncSubtitleWithAudio(filePath);
     trimLeadingCommentaryPrelude(filePath, info);
+    alignSubtitle(filePath);
     return true;
   }
   fs.rmSync(filePath, { force: true });
