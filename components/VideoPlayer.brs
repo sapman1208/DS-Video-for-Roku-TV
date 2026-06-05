@@ -156,32 +156,25 @@ sub init()
           ]
           print "VIDEO_SUBTITLE_METADATA count="; content.SubtitleTracks.count()
       end if
-      if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
-          content.PlayStart = m.resumePosition
-          content.playStart = m.resumePosition
-      end if
-
       video.content = content
       if m.subtitleUrl <> invalid and m.subtitleUrl <> ""
-          video.globalCaptionMode = "On"
           print "VIDEO_SUBTITLE_NATIVE_READY track="; m.subtitleUrl
       end if
       video.setFocus(true)
       m.hasPlayed = false
       print "VIDEO_PLAY fmt="; fmt
       if m.resumePosition <> invalid and m.resumePosition > 0 then print "VIDEO_RESUME position="; m.resumePosition
-      pendingHlsResume = (fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0)
-      if fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0
+      pendingResume = (m.resumePosition <> invalid and m.resumePosition > 0)
+      if pendingResume
           beginResumeHold()
       else
           setVideoMuted(false)
       end if
-      if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
+      if pendingResume and fmt <> "hls"
           video.control = "prebuffer"
       else
           video.control = "play"
       end if
-      if pendingHlsResume then beginResumeHold()
       m.streamUrl = streamUrl
       m.streamFmt = fmt
   end sub
@@ -215,25 +208,6 @@ sub init()
       count = 0
       if tracks <> invalid then count = tracks.count()
       print "VIDEO_SUBTITLE_AVAILABLE count="; count
-      if count <= 0 then return
-      selected = ""
-      for each track in tracks
-          if track <> invalid
-              trackName = track.lookUp("TrackName")
-              if trackName = invalid then trackName = track.lookUp("trackName")
-              if trackName = invalid then trackName = track.lookUp("Name")
-              if trackName <> invalid and trackName <> ""
-                  selected = trackName
-                  exit for
-              end if
-          end if
-      end for
-      if selected = "" and m.subtitleUrl <> invalid then selected = m.subtitleUrl
-      if selected <> ""
-          m.videoNode.globalCaptionMode = "On"
-          m.videoNode.subtitleTrack = selected
-          print "VIDEO_SUBTITLE_SELECT_AVAILABLE track="; selected
-      end if
   end sub
 
   sub onCurrentSubtitleTrack(event as object)

@@ -808,6 +808,26 @@ function ensureSubtitleForVideoAsync(videoPath) {
   return "started";
 }
 
+function ensureSubtitleForVideo(videoPath) {
+  const existingPath = sourceExistingPathFromFilePath(videoPath);
+  if (!existingPath) return "missing";
+  if (hasSubtitleForVideo(existingPath)) return "exists";
+
+  try {
+    if (extractEmbeddedSubtitle(existingPath, existingPath)) {
+      console.log(`[proxy] subtitle ensure extracted ${existingPath}`);
+      return "extracted";
+    }
+    downloadSubtitlesForPath(existingPath);
+    const status = hasSubtitleForVideo(existingPath) ? "downloaded" : "none";
+    console.log(`[proxy] subtitle ensure ${status} ${existingPath}`);
+    return status;
+  } catch (err) {
+    console.log(`[proxy] subtitle ensure error ${existingPath} ${err.message}`);
+    return "error";
+  }
+}
+
 async function reconcileIndexedEpisodeShow(targetPath) {
   const info = episodeInfoFromPath(targetPath);
   if (!info || !info.show || !info.season || !info.episode) return;
@@ -859,11 +879,13 @@ function downloadSubtitlesForPath(targetPath) {
   try {
     const result = spawnSync(NODE_BIN, [SUBTITLE_DOWNLOADER, targetPath], {
       encoding: "utf8",
-      timeout: 120000,
-      env: process.env,
+      timeout: 12 * 60 * 1000,
+      env: { ...process.env, ROKU_SUBTITLE_AUTOSYNC: process.env.ROKU_SUBTITLE_AUTOSYNC || "1" },
     });
     const detail = (result.stdout || result.stderr || "").trim();
     if (detail) console.log(detail);
+    if (result.error) console.log(`[proxy] subtitle downloader error ${targetPath} ${result.error.message}`);
+    if (result.status !== 0 && result.status !== null) console.log(`[proxy] subtitle downloader exit ${targetPath} status=${result.status}`);
   } catch (err) {
     console.log(`[proxy] subtitle error ${targetPath} ${err.message}`);
   }
@@ -1921,7 +1943,8 @@ async function handleRequest(req, res) {
   if (requestPath === "/subtitles/ensure") {
     const filePath = url.searchParams.get("path") || "";
     if (!filePath) return send(res, 400, { "content-type": "application/json" }, JSON.stringify({ ok: false, error: "missing path" }));
-    const status = ensureSubtitleForVideoAsync(filePath);
+    const waitForSubtitle = url.searchParams.get("wait") === "1" || url.searchParams.get("wait") === "true";
+    const status = waitForSubtitle ? ensureSubtitleForVideo(filePath) : ensureSubtitleForVideoAsync(filePath);
     const ok = status !== "missing";
     return send(res, ok ? 200 : 404, { "content-type": "application/json" }, JSON.stringify({ ok, status }));
   }

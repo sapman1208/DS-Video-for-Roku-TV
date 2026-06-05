@@ -36,6 +36,18 @@ const FFMPEG_PATH_DIRS = [
   "/volume1/@appstore/MediaServer/bin",
   "/volume1/@appstore/EmbyServer/bin",
 ];
+const KNOWN_DIALOGUE_TIMING_RULES = [
+  {
+    show: "south park",
+    season: 1,
+    targetMs: 35000,
+    minMs: 25000,
+    maxMs: 55000,
+  },
+];
+const TVSUBTITLES_SKIP_EPISODES = [
+  { show: "south park", season: 1, episode: 8, reason: "english season zip omits Starvin' Marvin and can select the wrong episode" },
+];
 
 const target = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 const FORCE = process.argv.includes("--force");
@@ -165,6 +177,11 @@ const COMMENTARY_PHRASES = [
   "matt stone and trey parker",
   "matt stone",
   "trey parker",
+  "we wanted to do an episode",
+  "sit back relax and enjoy",
+  "all proceeds from this video",
+  "this video go to",
+  "pinkeye research",
 ];
 
 function hasCommentaryText(text) {
@@ -242,11 +259,13 @@ function acceptSavedSubtitle(filePath, label) {
   if (!subtitleTextLooksBad(filePath)) {
     syncSubtitleWithAudio(filePath);
     trimLeadingCommentaryPrelude(filePath, info);
+    alignKnownDialogueTiming(filePath, info);
     return true;
   }
   if (sanitizeCommentarySubtitle(filePath)) {
     syncSubtitleWithAudio(filePath);
     trimLeadingCommentaryPrelude(filePath, info);
+    alignKnownDialogueTiming(filePath, info);
     return true;
   }
   fs.rmSync(filePath, { force: true });
@@ -284,6 +303,62 @@ function trimLeadingCommentaryPrelude(filePath, info) {
   return true;
 }
 
+function alignKnownDialogueTiming(filePath, info) {
+  if (info.type !== "episode") return false;
+  const rule = KNOWN_DIALOGUE_TIMING_RULES.find((candidate) => (
+    compactText(candidate.show) === compactText(info.query)
+    && candidate.season === info.season
+  ));
+  if (!rule) return false;
+
+  let input = "";
+  try {
+    input = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  const blocks = parseSrtBlocks(input);
+  if (blocks.length < 6) return false;
+  const dialogue = firstDialogueBlock(blocks, info);
+  if (!dialogue) return false;
+  const dialogueIndex = blocks.indexOf(dialogue);
+  const firstMs = srtTimeToMs(dialogue.start);
+  if (firstMs >= rule.minMs && firstMs <= rule.maxMs) return false;
+
+  const shiftMs = rule.targetMs - firstMs;
+  const shifted = [];
+  const sourceBlocks = firstMs < rule.minMs && dialogueIndex > 0 ? blocks.slice(dialogueIndex) : blocks;
+  for (const block of sourceBlocks) {
+    const startMs = srtTimeToMs(block.start) + shiftMs;
+    const endMs = srtTimeToMs(block.end) + shiftMs;
+    if (endMs <= 0) continue;
+    shifted.push({
+      start: msToSrtTime(startMs),
+      end: msToSrtTime(endMs),
+      text: block.text,
+    });
+  }
+  if (shifted.length === 0) return false;
+  fs.writeFileSync(filePath, srtFromBlocks(shifted));
+  const stripped = sourceBlocks.length !== blocks.length ? ` stripped=${dialogueIndex}` : "";
+  console.log(`[subs] aligned ${info.query} s${info.season} dialogue shift=${(shiftMs / 1000).toFixed(3)}s first=${(firstMs / 1000).toFixed(3)}s target=${(rule.targetMs / 1000).toFixed(3)}s${stripped}`);
+  return true;
+}
+
+function firstDialogueBlock(blocks, info) {
+  const titleNorm = compactText(info.title);
+  const showNorm = compactText(info.query);
+  for (const block of blocks.slice(0, 40)) {
+    const text = block.text.join(" ");
+    const norm = compactText(text);
+    if (!norm) continue;
+    const titleCard = titleNorm && (norm === titleNorm || (norm.includes(titleNorm) && norm.length <= titleNorm.length + 8));
+    if (titleCard || norm === showNorm || hasCommentaryText(text)) continue;
+    return block;
+  }
+  return null;
+}
+
 function compactText(value) {
   return cleanNamePart(value).toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -312,6 +387,17 @@ function srtTimeToMs(value) {
   const match = String(value || "").match(/^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/);
   if (!match) return 0;
   return (((Number(match[1]) * 60 + Number(match[2])) * 60 + Number(match[3])) * 1000) + Number(match[4]);
+}
+
+function msToSrtTime(value) {
+  const totalMs = Math.max(0, Math.round(Number(value) || 0));
+  const ms = totalMs % 1000;
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const ss = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const mm = totalMinutes % 60;
+  const hh = Math.floor(totalMinutes / 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
 }
 
 function requestOpenSubtitlesJson(method, endpoint, body, token = "", redirectCount = 0) {
@@ -647,6 +733,15 @@ async function saveFromSubdl(info) {
 }
 
 async function saveFromTvSubtitles(info) {
+  const skip = TVSUBTITLES_SKIP_EPISODES.find((candidate) => (
+    compactText(candidate.show) === compactText(info.query)
+    && candidate.season === info.season
+    && candidate.episode === info.episode
+  ));
+  if (skip) {
+    console.log(`[subs] tvsubtitles skipped ${target}: ${skip.reason}`);
+    return false;
+  }
   const jar = {};
   const search = await requestTvSubtitles("/search1.php", {
     jar,
