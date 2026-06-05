@@ -171,10 +171,6 @@ const COMMENTARY_PHRASES = [
   "director commentary",
   "director's commentary",
   "fireside chat",
-  "with the creators of south park",
-  "matt stone and trey parker",
-  "matt stone",
-  "trey parker",
 ];
 
 function hasCommentaryText(text) {
