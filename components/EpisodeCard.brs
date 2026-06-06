@@ -24,7 +24,6 @@ sub onContentSet(event as object)
         poster.uri = content.SDPosterUrl
         poster.visible = true
     else
-        setContentArtworkState("false")
         poster.visible = false
     end if
 end sub

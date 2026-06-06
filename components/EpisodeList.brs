@@ -209,8 +209,8 @@ sub init()
                   print "ARTWORK_PICK surface=episode-grid category=episodes source="; episodePosterSource(ep, m.top.authData); " title="; episodeDisplayTitle(ep); " id="; safeStr(ep, ["id", "posterId", "videoStationId"]); " mapper="; safeStr(ep, ["mapper_id", "mapperId"])
                   ep.addReplace("posterRemoteUrl", poster)
                   ep.addReplace("posterUrl", poster)
-                  node.HDPosterUrl = poster
-                  node.SDPosterUrl = poster
+                  node.HDPosterUrl = episodeArtworkUrlForGrid(poster)
+                  node.SDPosterUrl = node.HDPosterUrl
               end if
           end if
           preventDown = "false"
@@ -243,6 +243,14 @@ sub init()
 
   function shouldAssignEpisodePosterInitially(idx as integer) as boolean
       return true
+  end function
+
+  function episodeArtworkUrlForGrid(url as string) as string
+      if not isHttpUrl(url) then return url
+      sep = "?"
+      if instr(1, url, "?") > 0 then sep = "&"
+      seasonText = stri(m.currentSeason)
+      return url + sep + "roku_season_view=" + seasonText.trim()
   end function
 
   sub onRefreshArtwork(event as object)
@@ -384,6 +392,8 @@ sub init()
       if idx < 0 or idx >= m.seasons.count() then return
       m.currentSeason = m.seasons[idx]
       m.keepSeasonFocus = true
+      resetPosterRetryState()
+      m.episodeFocusedIndex = 0
       populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
@@ -396,6 +406,8 @@ sub init()
       if season = m.currentSeason then return
       m.currentSeason = season
       m.keepSeasonFocus = true
+      resetPosterRetryState()
+      m.episodeFocusedIndex = 0
       populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
