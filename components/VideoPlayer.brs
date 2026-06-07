@@ -19,6 +19,7 @@ sub init()
       m.reportedStart = false
       m.reportedDone = false
       m.userStopped = false
+      m.progressDebugTicks = 0
       m.top.setFocus(true)
   end sub
 
@@ -35,6 +36,11 @@ sub init()
       m.watchStatusInFlight = false
       m.resumeSeekDoneAt = invalid
       m.resumePosition = resumePositionForVideo(videoData)
+      m.streamAttemptIndex = 0
+      m.maxStreamAttempts = 12
+      m.retryingStream = false
+      m.progressDebugTicks = 0
+      printVideoDataDebug("VIDEO_DATA", videoData)
       if (m.resumePosition = invalid or m.resumePosition <= 0) and m.top.resumePosition <> invalid
           m.resumePosition = int(m.top.resumePosition)
       end if
@@ -76,8 +82,10 @@ sub init()
           title: videoData.title,
           resumePosition: m.resumePosition,
           originalAvailable: videoData.originalAvailable,
-          mediaType: videoData.type
+          mediaType: videoData.type,
+          attemptIndex: m.streamAttemptIndex
       }
+      print "STREAM_REQUEST attempt="; m.streamAttemptIndex; " title="; safeDynamicString(videoData.lookUp("title")); " type="; safeDynamicString(videoData.lookUp("type")); " fileId="; safeDynamicString(fileId); " videoId="; safeDynamicString(videoId); " path="; safeDynamicString(filePath)
       task.observeField("response", "onStreamUrlReady")
       task.control = "RUN"
       m.streamTask = task
@@ -109,9 +117,11 @@ sub init()
       m.isHlsStream = (fmt = "hls")
       m.streamDebug = ""
       if response.debugInfo <> invalid then m.streamDebug = response.debugInfo
+      if response.attemptIndex <> invalid then m.streamAttemptIndex = int(response.attemptIndex)
       m.subtitleUrl = ""
       if response.subtitleUrl <> invalid then m.subtitleUrl = response.subtitleUrl
       if m.subtitleUrl <> invalid and m.subtitleUrl <> "" then print "VIDEO_SUBTITLE url="; m.subtitleUrl
+      print "STREAM_READY attempt="; m.streamAttemptIndex; " fmt="; fmt; " live="; isLive; " url="; debugUrlSummary(streamUrl); " debug="; oneLine(left(safeDynamicString(m.streamDebug), 500))
       startPlayback(streamUrl, fmt, isLive)
   end sub
 
@@ -168,6 +178,9 @@ sub init()
       end if
       video.setFocus(true)
       m.hasPlayed = false
+      playStartText = ""
+      if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls" then playStartText = safeDynamicString(m.resumePosition)
+      print "VIDEO_CONTENT fmt="; fmt; " streamFormat="; safeDynamicString(content.streamFormat); " title="; safeDynamicString(content.title); " url="; debugUrlSummary(content.url); " playStart="; playStartText
       print "VIDEO_PLAY fmt="; fmt
       if m.resumePosition <> invalid and m.resumePosition > 0 then print "VIDEO_RESUME position="; m.resumePosition
       pendingHlsResume = (fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0)
@@ -179,11 +192,12 @@ sub init()
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
           video.control = "prebuffer"
       else
-          video.control = "play"
+      video.control = "play"
       end if
       if pendingHlsResume then beginResumeHold()
       m.streamUrl = streamUrl
       m.streamFmt = fmt
+      m.retryingStream = false
   end sub
 
   sub beginResumeHold()
@@ -243,7 +257,7 @@ sub init()
 
   sub onVideoStateChange(event as object)
       state = event.getData()
-      print "VIDEO_STATE "; state
+      print "VIDEO_STATE state="; state; " pos="; safeDynamicString(m.videoNode.position); " dur="; safeDynamicString(m.videoNode.duration); " buffer="; debugAny(m.videoNode.bufferingStatus); " errCode="; safeDynamicString(m.videoNode.errorCode); " errMsg="; safeDynamicString(m.videoNode.errorMsg)
       if state = "playing"
           m.hasPlayed = true
           if m.reportedStart <> true
@@ -259,6 +273,7 @@ sub init()
               m.videoNode.control = "play"
           end if
       else if state = "finished" or state = "stopped"
+          if m.retryingStream = true then return
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "stop"
           seekTimer = m.top.findNode("resumeSeekTimer")
@@ -276,13 +291,31 @@ sub init()
               reportPlaybackDone(reason)
           end if
       else if state = "error"
+          if retryNextStreamCandidate() then return
           m.hasError = true
           endResumeHold()
           dbg = ""
           if m.streamDebug <> invalid and m.streamDebug <> "" then dbg = chr(10) + m.streamDebug
+          print "VIDEO_ERROR_FINAL fmt="; safeDynamicString(m.streamFmt); " attempt="; safeDynamicString(m.streamAttemptIndex); " url="; debugUrlSummary(m.streamUrl); " code="; safeDynamicString(m.videoNode.errorCode); " msg="; safeDynamicString(m.videoNode.errorMsg)
           showError("Playback error (fmt=" + m.streamFmt + ")." + dbg)
       end if
   end sub
+
+  function retryNextStreamCandidate() as boolean
+      if m.retryingStream = true then return true
+      if m.streamAttemptIndex = invalid then m.streamAttemptIndex = 0
+      if m.maxStreamAttempts = invalid then m.maxStreamAttempts = 12
+      if m.streamAttemptIndex >= m.maxStreamAttempts then return false
+
+      m.streamAttemptIndex = m.streamAttemptIndex + 1
+      m.retryingStream = true
+      m.hasError = false
+      endResumeHold()
+      print "VIDEO_RETRY_STREAM nextCandidate="; m.streamAttemptIndex; " prevFmt="; safeDynamicString(m.streamFmt); " prevUrl="; debugUrlSummary(m.streamUrl); " errCode="; safeDynamicString(m.videoNode.errorCode); " errMsg="; safeDynamicString(m.videoNode.errorMsg)
+      m.videoNode.control = "stop"
+      requestStreamUrl()
+      return true
+  end function
 
   sub reportPlaybackDone(reason as string)
       if m.reportedDone then return
@@ -298,6 +331,11 @@ sub init()
       if event = invalid then return
       applyPendingSeek()
       saveResumePosition()
+      m.progressDebugTicks = m.progressDebugTicks + 1
+      if m.progressDebugTicks >= 6
+          m.progressDebugTicks = 0
+          print "VIDEO_PROGRESS pos="; safeDynamicString(effectivePlaybackPosition()); " rawPos="; safeDynamicString(m.videoNode.position); " dur="; safeDynamicString(m.videoNode.duration); " state="; safeDynamicString(m.videoNode.state); " fmt="; safeDynamicString(m.streamFmt); " buffer="; debugAny(m.videoNode.bufferingStatus)
+      end if
       if m.top.findNode("controlOverlay").visible then updatePlaybackOverlay()
   end sub
 
@@ -353,6 +391,37 @@ sub init()
       timer = m.top.findNode("overlayTimer")
       timer.control = "stop"
       timer.control = "start"
+  end sub
+
+  sub seekBy(deltaSeconds as integer)
+      if m.videoNode = invalid then return
+      duration = int(m.videoNode.duration)
+      current = int(m.videoNode.position)
+      target = current + deltaSeconds
+      if target < 0 then target = 0
+      if duration > 0 and target > duration - 5 then target = duration - 5
+      if target < 0 then target = 0
+      m.videoNode.seek = target
+      if m.resumePosition <> invalid and m.resumePosition > 0
+          m.seekApplied = true
+          m.resumeSeekDoneAt = createObject("roTimespan")
+          m.resumeSeekDoneAt.mark()
+      end if
+      print "VIDEO_USER_SEEK from="; current; " to="; target; " delta="; deltaSeconds; " duration="; duration
+      showPlaybackOverlay()
+  end sub
+
+  sub togglePlayPause()
+      if m.videoNode = invalid then return
+      state = safeDynamicString(m.videoNode.state)
+      if state = "playing" or state = "buffering"
+          m.videoNode.control = "pause"
+          print "VIDEO_USER_PAUSE"
+      else
+          m.videoNode.control = "resume"
+          print "VIDEO_USER_RESUME state="; state
+      end if
+      showPlaybackOverlay()
   end sub
 
   sub onOverlayRefreshTimer(event as object)
@@ -435,8 +504,49 @@ sub init()
       if t = "roString" or t = "String" then return value
       if t = "roInteger" or t = "Integer" then return stri(value).trim()
       if t = "roFloat" or t = "Float" then return stri(int(value)).trim()
+      if t = "roBoolean" or t = "Boolean" then
+          if value then return "true"
+          return "false"
+      end if
       return ""
   end function
+
+  function oneLine(value as string) as string
+      text = ""
+      for idx = 1 to len(value)
+          ch = mid(value, idx, 1)
+          if ch = chr(10) or ch = chr(13)
+              text = text + " "
+          else
+              text = text + ch
+          end if
+      end for
+      return text
+  end function
+
+  function debugAny(value as dynamic) as string
+      if value = invalid then return ""
+      text = safeDynamicString(value)
+      if text <> "" then return text
+      return bslib_toString(value)
+  end function
+
+  function debugUrlSummary(url as dynamic) as string
+      text = safeDynamicString(url)
+      if text = "" then return ""
+      q = instr(1, text, "?")
+      if q > 0 then text = left(text, q - 1) + "?..."
+      if len(text) > 260 then text = left(text, 260) + "..."
+      return text
+  end function
+
+  sub printVideoDataDebug(prefix as string, videoData as object)
+      if videoData = invalid
+          print prefix; " invalid"
+          return
+      end if
+      print prefix; " title="; safeDynamicString(videoData.lookUp("title")); " type="; safeDynamicString(videoData.lookUp("type")); " id="; safeDynamicString(videoData.lookUp("id")); " fileId="; safeDynamicString(videoData.lookUp("fileId")); " mapper="; safeDynamicString(videoData.lookUp("mapperId")); " path="; safeDynamicString(videoData.lookUp("filePath")); " resume="; safeDynamicString(videoData.lookUp("resumePosition")); " originalAvailable="; safeDynamicString(videoData.lookUp("originalAvailable"))
+  end sub
 
   sub saveResumePosition()
       if not m.hasPlayed then return
@@ -551,10 +661,27 @@ sub init()
           m.videoNode.control = "stop"
           reportPlaybackDone("back")
           return true
-      else if key = "up" or key = "left" or key = "right" or key = "OK" or key = "play"
+      else if key = "left" or key = "rewind"
+          if key = "rewind"
+              seekBy(-120)
+          else
+              seekBy(-30)
+          end if
+          return true
+      else if key = "right" or key = "fastforward"
+          if key = "fastforward"
+              seekBy(120)
+          else
+              seekBy(30)
+          end if
+          return true
+      else if key = "play"
+          togglePlayPause()
+          return true
+      else if key = "up" or key = "OK" or key = "down"
           showPlaybackOverlay()
           m.videoNode.setFocus(true)
-          return false
+          return true
       end if
       return false
   end function

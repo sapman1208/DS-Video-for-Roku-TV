@@ -1140,6 +1140,8 @@ sub init()
       if req.title <> invalid then title = req.title
       filePath = ""
       if req.filePath <> invalid then filePath = req.filePath
+      originalAvailable = ""
+      if req.originalAvailable <> invalid then originalAvailable = idToStr(req.originalAvailable)
       if videoId = "" or videoId = "0"
           m.top.response = { success: false, error: "missing movie id", summary: "" }
           return
@@ -1155,6 +1157,7 @@ sub init()
 
       summary = ""
       rating = 0
+      releaseDate = ""
       source = "synology2"
       usedId = videoId
       fallbackSummary = ""
@@ -1162,6 +1165,7 @@ sub init()
           metadata = movieMetadataV2(baseUrl, sid, token, candidateId)
           if fallbackSummary = "" and metadata.summary <> "" then fallbackSummary = metadata.summary
           if metadata.rating > rating then rating = metadata.rating
+          if releaseDate = "" and metadata.releaseDate <> invalid and metadata.releaseDate <> "" then releaseDate = metadata.releaseDate
           if metadata.summary <> "" and metadata.rating > 0
               summary = metadata.summary
               source = "synology2"
@@ -1179,20 +1183,60 @@ sub init()
                   usedId = candidateId
               end if
               if metadata.rating > rating then rating = metadata.rating
+              if releaseDate = "" and metadata.releaseDate <> invalid and metadata.releaseDate <> "" then releaseDate = metadata.releaseDate
               if summary <> "" and rating > 0 then exit for
           end for
       end if
-      if summary = "" and filePath <> ""
-          summary = fetchVsmetaSummary(baseUrl, sid, token, filePath, title)
-          if summary <> ""
+      if filePath = ""
+          resolved = resolveMovieFilePathForMetadata(baseUrl, sid, token, videoId, candidates, title, releaseDate, originalAvailable)
+          if resolved.path <> ""
+              filePath = resolved.path
+              print "MOVIE_METADATA_PATH source="; resolved.source; " path="; filePath
+          else
+              print "MOVIE_METADATA_PATH missing title="; title; " id="; videoId
+          end if
+      end if
+      if (summary = "" or rating <= 0 or releaseDate = "") and filePath <> ""
+          vsmeta = fetchVsmetaMetadata(baseUrl, sid, token, filePath, title)
+          if summary = "" and vsmeta.summary <> "" then summary = vsmeta.summary
+          if rating <= 0 and vsmeta.rating > 0 then rating = vsmeta.rating
+          if releaseDate = "" and vsmeta.releaseDate <> "" then releaseDate = vsmeta.releaseDate
+          if vsmeta.summary <> "" or vsmeta.rating > 0 or vsmeta.releaseDate <> ""
               source = "vsmeta"
               usedId = videoId
           end if
       end if
       if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
-      print "MOVIE_METADATA id="; videoId; " used="; usedId; " source="; source; " summaryLen="; len(summary); " rating="; rating
-      m.top.response = { success: summary <> "" or rating > 0, summary: summary, rating: rating, id: videoId, usedId: usedId, source: source }
+      print "MOVIE_METADATA id="; videoId; " used="; usedId; " source="; source; " summaryLen="; len(summary); " rating="; rating; " releaseDate="; releaseDate
+      m.top.response = { success: summary <> "" or rating > 0 or releaseDate <> "", summary: summary, rating: rating, releaseDate: releaseDate, id: videoId, usedId: usedId, source: source }
   end sub
+
+  function resolveMovieFilePathForMetadata(baseUrl as string, sid as string, token as string, videoId as string, candidates as object, title as string, releaseDate as string, originalAvailable as string) as object
+      year = yearFromString(releaseDate)
+      if year = "" then year = yearFromString(originalAvailable)
+      if year <> "" and title <> ""
+          guessedBase = "/video/Movies/" + title + " (" + year + ")"
+          guessedPath = findExistingMoviePath(baseUrl, sid, guessedBase)
+          if guessedPath <> "" then return { path: guessedPath, source: "guess-year" }
+      end if
+      for each candidateId in candidates
+          if candidateId <> "" and candidateId <> "0"
+              fileInfoV2 = getFileInfoV2(baseUrl, sid, token, candidateId, "movie")
+              if fileInfoV2.path <> invalid and fileInfoV2.path <> "" then return { path: fileInfoV2.path, source: "v2:" + candidateId }
+          end if
+      end for
+      for each candidateId in candidates
+          if candidateId <> "" and candidateId <> "0"
+              fileInfo = getFilePathV1(baseUrl, candidateId, "", sid)
+              if fileInfo.path <> invalid and fileInfo.path <> "" then return { path: fileInfo.path, source: "v1:" + candidateId }
+          end if
+      end for
+      if title <> ""
+          guessedPath = findMovieByFolderPrefix(baseUrl, sid, title)
+          if guessedPath <> "" then return { path: guessedPath, source: "guess-prefix" }
+      end if
+      return { path: "", source: "" }
+  end function
 
   function movieMetadataSummaryV2(baseUrl as string, sid as string, token as string, videoId as string) as string
       metadata = movieMetadataV2(baseUrl, sid, token, videoId)
@@ -1213,7 +1257,7 @@ sub init()
           "%5B" + enc.escape(videoId) + "%5D",
           enc.escape(videoId)
       ]
-      best = { summary: "", rating: 0 }
+      best = { summary: "", rating: 0, releaseDate: "" }
       for each idForm in idForms
           for each additional in addlForms
               body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=" + idForm + "&additional=" + additional
@@ -1225,9 +1269,11 @@ sub init()
                       if item <> invalid
                           summary = movieSummaryText(item)
                           rating = detailStateRating(item)
+                          releaseDate = movieReleaseDateText(item)
                           if best.summary = "" and summary <> "" then best.summary = summary
                           if rating > best.rating then best.rating = rating
-                          if summary <> "" or rating > 0 then return { summary: summary, rating: rating }
+                          if best.releaseDate = "" and releaseDate <> "" then best.releaseDate = releaseDate
+                          if summary <> "" or rating > 0 or releaseDate <> "" then return { summary: summary, rating: rating, releaseDate: releaseDate }
                       end if
                   end if
               end if
@@ -1255,17 +1301,19 @@ sub init()
                       if type(movies) = "roArray" and movies.count() > 0
                           summary = movieSummaryText(movies[0])
                           rating = detailStateRating(movies[0])
-                          if summary <> "" or rating > 0 then return { summary: summary, rating: rating }
+                          releaseDate = movieReleaseDateText(movies[0])
+                          if summary <> "" or rating > 0 or releaseDate <> "" then return { summary: summary, rating: rating, releaseDate: releaseDate }
                       else if type(movies) = "roAssociativeArray"
                           summary = movieSummaryText(movies)
                           rating = detailStateRating(movies)
-                          if summary <> "" or rating > 0 then return { summary: summary, rating: rating }
+                          releaseDate = movieReleaseDateText(movies)
+                          if summary <> "" or rating > 0 or releaseDate <> "" then return { summary: summary, rating: rating, releaseDate: releaseDate }
                       end if
                   end if
               end if
           end if
       end for
-      return { summary: "", rating: 0 }
+      return { summary: "", rating: 0, releaseDate: "" }
   end function
 
   function getFileInfoV2(baseUrl as string, sid as string, token as string, videoId as string, mediaType as string) as object
@@ -1323,13 +1371,18 @@ sub init()
       return "mp4"
   end function
 
-  function isRokuDirectPlayablePath(path as string) as boolean
+  function shouldTryFileStationDirectPath(path as string) as boolean
       lp = lcase(path)
       if right(lp, 5) = ".m3u8" then return true
+      if right(lp, 4) = ".mkv" then return true
       if right(lp, 4) = ".mp4" then return true
       if right(lp, 4) = ".m4v" then return true
       if right(lp, 4) = ".mov" then return true
       return false
+  end function
+
+  function isRokuDirectPlayablePath(path as string) as boolean
+      return shouldTryFileStationDirectPath(path)
   end function
 
   function shouldTryVideoStationTranscode(path as string) as boolean
@@ -1662,6 +1715,12 @@ sub init()
       return url
   end function
 
+  function localVideoBaseUrl(baseUrl as string) as string
+      lower = lcase(baseUrl)
+      if instr(1, lower, "sapman.duckdns.org:7520") > 0 then return "https://10.0.1.74:7520"
+      return baseUrl
+  end function
+
   function videoStationStreamType(mediaType as string) as string
       if mediaType = "episode" then return "tvshow_episode"
       if mediaType = "homevideo" then return "home_video"
@@ -1756,6 +1815,60 @@ sub init()
       return false
   end function
 
+  function tryAndroidStyleStreamOpen(baseUrl as string, sid as string, token as string, candidateId as string, version as string, forceOpenVte as string, debugName as string, diag as object) as boolean
+      enc = createObject("roUrlTransfer")
+      acceptFormats = "hls, hls_remux, raw, mp4, ts, dash, webm"
+      params = "id=" + candidateId + "&accept_format=" + enc.escape(acceptFormats)
+      if forceOpenVte <> "" then params = params + "&force_open_vte=" + forceOpenVte
+      params = params + "&audio_format=ac3_copy"
+
+      openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", version, "open", params, sid, token)
+      print "STREAM_OPEN "; debugName
+      r = httpGetLong(openUrl, 40000)
+      if r = invalid
+          diag.push(debugName + ":timeout")
+          print "STREAM_RESP "; debugName; " timeout"
+          return false
+      end if
+
+      diag.push(debugName + ":" + left(r, 100))
+      print "STREAM_RESP "; debugName; " "; left(r, 500)
+      j = parseJSON(r)
+      if j = invalid or j.success <> true then return false
+
+      directUrl = invalid
+      if j.data <> invalid then directUrl = j.data.lookUp("url")
+      responseFmt = "hls"
+      if j.data <> invalid
+          f = j.data.lookUp("format")
+          if f <> invalid and f <> "" then responseFmt = lcase(idToStr(f))
+      end if
+
+      streamFormat = "hls"
+      if responseFmt = "raw" or responseFmt = "mp4" then streamFormat = "mp4"
+      if responseFmt = "dash" or responseFmt = "webm" then return false
+
+      if directUrl <> invalid and directUrl <> ""
+          return respondWithCandidate(directUrl, streamFormat, debugName + " url fmt=" + responseFmt, diag)
+      end if
+
+      streamId = streamIdFromResponse(j)
+      if streamId <> ""
+          streamUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "id=" + streamId + "&format=" + responseFmt, sid, token)
+          return respondWithCandidate(streamUrl, streamFormat, debugName + " stream=" + streamId + " fmt=" + responseFmt, diag)
+      end if
+
+      return false
+  end function
+
+  function tryAndroidExactStreamOpen(baseUrl as string, sid as string, token as string, candidateId as string, version as string, debugName as string, diag as object) as boolean
+      enc = createObject("roUrlTransfer")
+      params = "id=" + candidateId + "&accept_format=" + enc.escape("raw, mp4, ts, hls, hls_remux, dash, webm") + "&audio_format=ac3_copy"
+      openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", version, "open", params, sid, token)
+      streamBase = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "id=", "", token)
+      return tryStreamOpen(openUrl, streamBase, sid, token, "hls", debugName, diag)
+  end function
+
   function tryV2StreamPost(baseUrl as string, sid as string, token as string, fileJson as string, fmt as string, profile as string, audioTrack as string, debugName as string, diag as object) as boolean
       url = apiEndpoint(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", sid, token)
       enc = createObject("roUrlTransfer")
@@ -1790,7 +1903,7 @@ sub init()
                   f = j.data.lookUp("format")
                   if f <> invalid and f <> "" then responseFmt = f
               end if
-              streamUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "id=" + streamId + "&format=" + responseFmt, sid, token)
+              streamUrl = apiUrl(localVideoBaseUrl(baseUrl), "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "stream", "id=" + streamId + "&format=" + responseFmt, sid, token)
               sfmt = "hls"
               if responseFmt = "raw" then sfmt = "mp4"
               return respondWithCandidate(streamUrl, sfmt, debugName + " stream=" + streamId + " fmt=" + responseFmt, diag)
@@ -1938,6 +2051,7 @@ sub init()
   end function
 
   sub getStreamUrl(req as object)
+      beginCandidateSelection(req)
       baseUrl = req.baseUrl
       proxyBaseUrl = req.proxyBaseUrl
       sid = req.sid
@@ -2011,32 +2125,29 @@ sub init()
           end if
       end if
 
-      ' Use direct FileStation playback immediately only for containers Roku can
-      ' parse. AVI/DivX/Xvid files need VideoStation HLS/remux if Synology allows it.
-      if isRokuDirectPlayablePath(filePath)
-          streamUrl = fileStationStreamUrl(baseUrl, sid, token, filePath)
-          fsPath = fileStationPath(filePath)
-          print "FILESTATION_PLAY path="; fsPath
-          m.top.response = { success: true, streamUrl: streamUrl, streamFormat: streamFormatForPath(filePath), subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FileStation " + left(fsPath, 120) }
-          return
+      ' Try the raw FileStation URL first. Direct MKV works on current Roku
+      ' firmware, and this keeps short-title movies like "10" off the proxy.
+      if shouldTryFileStationDirectPath(filePath)
+          if respondWithFileStationStream(baseUrl, sid, token, filePath, diag) then return
       else if filePath <> ""
           diag.push("direct deferred for transcode:" + filePath)
       end if
 
       if filePath <> ""
           if shouldTryVideoStationTranscode(filePath)
-              streamUrl = ffmpegProxyStreamUrl(baseUrl, proxyBaseUrl, sid, token, filePath, resumePosition)
               fsPath = fileStationPath(filePath)
+              streamUrl = ffmpegProxyStreamUrl(baseUrl, proxyBaseUrl, sid, token, filePath, resumePosition)
               print "FFMPEG_PROXY_PLAY path="; fsPath; " resume="; resumePosition
               m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FFmpeg proxy " + left(fsPath, 120) }
               return
+          else
+              m.top.response = { success: false, error: "This file needs transcoding. Direct Roku playback is disabled for this container while we stabilize MP4 playback.", detail: "Path: " + fileStationPath(filePath) + chr(10) + "Type: " + mediaType }
+              return
           end if
-          m.top.response = { success: false, error: "This file needs transcoding. Direct Roku playback is disabled for this container while we stabilize MP4 playback.", detail: "Path: " + fileStationPath(filePath) + chr(10) + "Type: " + mediaType }
-          return
       end if
 
       legacyType = videoStationStreamType(mediaType)
-      if filePath <> "" and not isRokuDirectPlayablePath(filePath)
+      if filePath <> "" and not shouldTryFileStationDirectPath(filePath)
           enc = createObject("roUrlTransfer")
           encodedPath = enc.escape(filePath)
           streamBase = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "format=hls_remux&id=", "", token)
@@ -2092,15 +2203,15 @@ sub init()
           diag.push(summarizeV2FileInfo(baseUrl, sid, token, candidateFileId))
 
           officialFile = "{""id"":" + candidateFileId + ",""path"":""""}"
+          for each fmt in ["hls_remux", "raw"]
+              if tryV2StreamPost(baseUrl, sid, token, officialFile, fmt, "", "", "v2post/" + fmt + " official=" + candidateFileId, diag) then return
+          end for
           for each audioTrack in ["-1", "0", "1", ""]
               for each profile in ["sd_medium", "sd_high", "hd_medium", "hd_high"]
                   labelTrack = audioTrack
                   if labelTrack = "" then labelTrack = "none"
                   if tryV2StreamPost(baseUrl, sid, token, officialFile, "hls", profile, audioTrack, "v2post/hls " + profile + " audio=" + labelTrack + " official=" + candidateFileId, diag) then return
               end for
-          end for
-          for each fmt in ["hls_remux", "raw"]
-              if tryV2StreamPost(baseUrl, sid, token, officialFile, fmt, "", "", "v2post/" + fmt + " official=" + candidateFileId, diag) then return
           end for
 
           objQuoted = v2FileObject(candidateFileId, true)
@@ -2141,7 +2252,7 @@ sub init()
           end for
       end for
 
-      if isRokuDirectPlayablePath(filePath)
+      if shouldTryFileStationDirectPath(filePath)
           if respondWithFileStationStream(baseUrl, sid, token, filePath, diag) then return
       else if filePath <> ""
           diag.push("unsupported direct container:" + filePath)
@@ -3751,13 +3862,20 @@ sub init()
   end sub
 
   function fetchVsmetaSummary(baseUrl as string, sid as string, token as string, filePath as string, episodeTitle as string) as string
-      if filePath = "" then return ""
+      metadata = fetchVsmetaMetadata(baseUrl, sid, token, filePath, episodeTitle)
+      return metadata.summary
+  end function
+
+  function fetchVsmetaMetadata(baseUrl as string, sid as string, token as string, filePath as string, episodeTitle as string) as object
+      if filePath = "" then return { summary: "", rating: 0, releaseDate: "" }
       url = fileStationStreamUrl(baseUrl, sid, token, filePath + ".vsmeta")
       blob = httpGet(url)
-      if blob = invalid or blob = "" then return ""
+      if blob = invalid or blob = "" then return { summary: "", rating: 0, releaseDate: "" }
       summary = vsmetaSummaryFromBlob(blob, episodeTitle)
-      if summary <> "" then print "VSMETA_SUMMARY title="; episodeTitle; " len="; len(summary)
-      return summary
+      releaseDate = vsmetaReleaseDateFromBlob(blob)
+      rating = vsmetaRatingFromBlob(blob)
+      if summary <> "" or releaseDate <> "" or rating > 0 then print "VSMETA_METADATA title="; episodeTitle; " len="; len(summary); " rating="; rating; " releaseDate="; releaseDate
+      return { summary: summary, rating: rating, releaseDate: releaseDate }
   end function
 
   function vsmetaSummaryFromBlob(blob as string, episodeTitle as string) as string
@@ -3809,6 +3927,127 @@ sub init()
       if instr(1, text, "Exif") > 0 then return ""
       if instr(1, text, ".") = 0 and instr(1, text, "!") = 0 and instr(1, text, "?") = 0 then return ""
       return text
+  end function
+
+  function movieReleaseDateText(item as object) as string
+      if item = invalid then return ""
+      for each key in ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "release_date", "premiered", "date"]
+          value = idToStr(item.lookUp(key))
+          dateText = fullDateFromText(value)
+          if dateText <> "" then return dateText
+      end for
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          for each key in ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "release_date", "premiered", "date"]
+              value = idToStr(additional.lookUp(key))
+              dateText = fullDateFromText(value)
+              if dateText <> "" then return dateText
+          end for
+          extra = detailStateObject(additional.lookUp("extra"))
+          if extra <> invalid
+              for each key in ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "release_date", "premiered", "date"]
+                  value = idToStr(extra.lookUp(key))
+                  dateText = fullDateFromText(value)
+                  if dateText <> "" then return dateText
+              end for
+          end if
+      end if
+      extra = detailStateObject(item.lookUp("extra"))
+      if extra <> invalid
+          for each key in ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "release_date", "premiered", "date"]
+              value = idToStr(extra.lookUp(key))
+              dateText = fullDateFromText(value)
+              if dateText <> "" then return dateText
+          end for
+      end if
+      return ""
+  end function
+
+  function vsmetaReleaseDateFromBlob(blob as string) as string
+      return fullDateFromText(blob)
+  end function
+
+  function fullDateFromText(text as string) as string
+      if text = "" then return ""
+      idx = 1
+      while idx <= len(text) - 9
+          candidate = mid(text, idx, 10)
+          if fullDateCandidate(candidate) then return candidate
+          idx = idx + 1
+      end while
+      return ""
+  end function
+
+  function fullDateCandidate(value as string) as boolean
+      if len(value) <> 10 then return false
+      if mid(value, 5, 1) <> "-" or mid(value, 8, 1) <> "-" then return false
+      if not decimalText(left(value, 4)) then return false
+      if not decimalText(mid(value, 6, 2)) then return false
+      if not decimalText(right(value, 2)) then return false
+      year = val(left(value, 4))
+      month = val(mid(value, 6, 2))
+      day = val(right(value, 2))
+      if year < 1900 or year > 2100 then return false
+      if month < 1 or month > 12 then return false
+      if day < 1 or day > 31 then return false
+      return true
+  end function
+
+  function decimalText(text as string) as boolean
+      if text = "" then return false
+      idx = 1
+      while idx <= len(text)
+          ch = mid(text, idx, 1)
+          if ch < "0" or ch > "9" then return false
+          idx = idx + 1
+      end while
+      return true
+  end function
+
+  function vsmetaRatingFromBlob(blob as string) as integer
+      best = 0
+      for each marker in [chr(34) + "rating" + chr(34), "rating"]
+          searchAt = 1
+          while searchAt > 0
+              found = instr(searchAt, blob, marker)
+              if found <= 0 then exit while
+              chunk = mid(blob, found, 140)
+              rating = ratingFromTextChunk(chunk)
+              if rating > best then best = rating
+              searchAt = found + len(marker)
+          end while
+      end for
+      return best
+  end function
+
+  function ratingFromTextChunk(text as string) as integer
+      idx = 1
+      while idx <= len(text)
+          ch = mid(text, idx, 1)
+          if (ch >= "0" and ch <= "9") or ch = "."
+              valueText = ""
+              dotSeen = false
+              while idx <= len(text)
+                  ch2 = mid(text, idx, 1)
+                  if ch2 >= "0" and ch2 <= "9"
+                      valueText = valueText + ch2
+                  else if ch2 = "." and dotSeen = false
+                      valueText = valueText + ch2
+                      dotSeen = true
+                  else
+                      exit while
+                  end if
+                  idx = idx + 1
+              end while
+              if valueText <> ""
+                  raw = val(valueText)
+                  if raw > 0 and raw <= 10 then return int((raw * 10) + 0.5)
+                  if raw > 10 and raw <= 100 then return int(raw)
+              end if
+          end if
+          idx = idx + 1
+      end while
+      return 0
   end function
 
   function firstNumericField(item as object, keys as object) as integer
@@ -4159,18 +4398,19 @@ sub init()
   end function
 
   function findExistingMoviePath(baseUrl as string, sid as string, basePathNoExt as string) as string
-      extensions = [".avi", ".mp4", ".mkv", ".m4v", ".mov", ".webm", ".m2ts"]
+      extensions = [".mp4", ".mkv", ".m4v", ".mov", ".avi", ".webm", ".m2ts"]
       enc = createObject("roUrlTransfer")
-      for each ext in extensions
-          candidate = basePathNoExt + ext
-          parent = left(candidate, len(candidate) - len(baseName(candidate)) - 1)
-          url = baseUrl + "/webapi/entry.cgi?api=SYNO.FileStation.List&version=2&method=list&folder_path=" + enc.escape(parent) + "&filetype=file&limit=5000&_sid=" + sid
-          r = httpGet(url)
-          if r <> invalid
-              j = parseJSON(r)
-              if j <> invalid and j.success = true
-                  files = j.data.lookUp("files")
-                  if files <> invalid
+      firstCandidate = basePathNoExt + ".mp4"
+      parent = left(firstCandidate, len(firstCandidate) - len(baseName(firstCandidate)) - 1)
+      url = baseUrl + "/webapi/entry.cgi?api=SYNO.FileStation.List&version=2&method=list&folder_path=" + enc.escape(parent) + "&filetype=file&limit=5000&_sid=" + sid
+      r = httpGet(url)
+      if r <> invalid
+          j = parseJSON(r)
+          if j <> invalid and j.success = true
+              files = j.data.lookUp("files")
+              if files <> invalid
+                  for each ext in extensions
+                      candidate = basePathNoExt + ext
                       for each f in files
                           fpath = f.lookUp("path")
                           if fpath <> invalid and fpath = candidate
@@ -4178,10 +4418,10 @@ sub init()
                               return candidate
                           end if
                       end for
-                  end if
+                  end for
               end if
           end if
-      end for
+      end if
       return ""
   end function
 
@@ -4243,6 +4483,13 @@ nextPrefixDir:
       if right(lc, 5) = ".m2ts" then lc = left(lc, len(lc) - 5)
       if right(lc, 4) = ".mov" then lc = left(lc, len(lc) - 4)
       if lt = lc then return true
+      if isAllDigits(lt)
+          if len(lc) > len(lt) and left(lc, len(lt)) = lt
+              rest = mid(lc, len(lt) + 1).trim()
+              if left(rest, 1) = "(" then return true
+          end if
+          return false
+      end if
       if len(lc) > len(lt)
           nextCh = mid(lc, len(lt) + 1, 1)
           if left(lc, len(lt)) = lt
@@ -4253,10 +4500,22 @@ nextPrefixDir:
       nt = normalizedTitleKey(lt)
       nc = normalizedTitleKey(lc)
       if nt <> "" and nt = nc then return true
+      if isAllDigits(nt) then return false
       if nt <> "" and len(nc) > len(nt)
           if left(nc, len(nt)) = nt then return true
       end if
       return false
+  end function
+
+  function isAllDigits(value as string) as boolean
+      if value = "" then return false
+      idx = 1
+      while idx <= len(value)
+          code = asc(mid(value, idx, 1))
+          if code < 48 or code > 57 then return false
+          idx = idx + 1
+      end while
+      return true
   end function
 
   function normalizedTitleKey(value as string) as string

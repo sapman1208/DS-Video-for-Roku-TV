@@ -2,7 +2,7 @@ title=Synology DS Video
 subtitle=Stream videos from your Synology NAS
 major_version=1
 minor_version=0
-build_version=289
+build_version=308
 
 mm_icon_focus_hd=pkg:/images/icon-hd.png
 mm_icon_focus_sd=pkg:/images/icon-sd.png

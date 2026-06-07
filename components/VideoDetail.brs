@@ -2,6 +2,7 @@ sub init()
     m.actions = ["Play", "Favorite", "Watch List", "Share"]
     m.actionOverrides = {}
     m.movieMetadataTask = invalid
+    m.movieMetadataCache = {}
     m.detailStateTask = invalid
     m.detailData = invalid
     m.waitForDetailState = false
@@ -104,7 +105,13 @@ sub onVideoDataSet(event as object)
     if summary = "" and data.description <> invalid then summary = data.description
     if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
     currentRating = firstNumericField(data, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
-    needsMovieMetadata = data.type <> invalid and data.type = "movie" and (len(summary) < 220 or currentRating <= 0)
+    movieDateNeedsMetadata = false
+    if data.type <> invalid and data.type = "movie"
+        currentDate = ""
+        if data.originalAvailable <> invalid then currentDate = data.originalAvailable
+        if currentDate = "" or len(currentDate) <= 4 then movieDateNeedsMetadata = true
+    end if
+    needsMovieMetadata = data.type <> invalid and data.type = "movie" and (len(summary) < 220 or currentRating <= 0 or movieDateNeedsMetadata)
     m.movieFallbackSummary = ""
     if needsMovieMetadata and summary <> ""
         m.movieFallbackSummary = summary
@@ -235,6 +242,14 @@ sub startMovieMetadataFetch(data as object)
         m.waitForMovieMetadata = false
         return
     end if
+    cached = invalid
+    if m.movieMetadataCache <> invalid then cached = m.movieMetadataCache.lookUp(movieId)
+    if cached <> invalid
+        print "MOVIE_METADATA_CACHE_HIT id="; movieId
+        applyMovieMetadataResponse(cached)
+        m.waitForMovieMetadata = false
+        return
+    end if
     ids = []
     addDetailStateId(ids, data.videoStationId)
     addDetailStateId(ids, data.id)
@@ -250,7 +265,8 @@ sub startMovieMetadataFetch(data as object)
         id: movieId,
         ids: ids,
         title: data.title,
-        filePath: data.filePath
+        filePath: data.filePath,
+        originalAvailable: data.originalAvailable
     }
     m.movieMetadataTask = task
     print "MOVIE_METADATA_REQUEST id="; movieId; " candidates="; ids.count(); " title="; data.title
@@ -265,24 +281,80 @@ sub onMovieMetadata(event as object)
         return
     end if
     if m.detailData = invalid then m.detailData = m.top.videoData
+    if not movieMetadataResponseMatchesDetail(response)
+        print "MOVIE_METADATA_STALE responseId="; response.lookUp("id"); " currentId="; safeIntText(m.detailData.lookUp("id"))
+        m.waitForMovieMetadata = false
+        revealDetail()
+        return
+    end if
+    applyMovieMetadataResponse(response)
+    cacheMovieMetadataResponse(response)
+    summary = ""
+    if response.summary <> invalid then summary = response.summary
+    if summary = "" and m.movieFallbackSummary <> invalid then summary = m.movieFallbackSummary
+    releaseDate = ""
+    if response.releaseDate <> invalid then releaseDate = response.releaseDate
+    m.pendingMovieSummary = ""
+    m.waitForMovieMetadata = false
+    revealDetail()
+    print "MOVIE_METADATA_APPLY id="; response.lookUp("id"); " source="; response.lookUp("source"); " summaryLen="; len(summary); " releaseDate="; releaseDate
+end sub
+
+sub applyMovieMetadataResponse(response as object)
+    if response = invalid then return
+    if m.detailData = invalid then m.detailData = m.top.videoData
+    if m.detailData = invalid then return
     if response.rating <> invalid and response.rating > 0
         m.detailData.addReplace("rating", response.rating)
         populateRatingStars()
     end if
+    releaseDate = ""
+    if response.releaseDate <> invalid then releaseDate = response.releaseDate
+    if releaseDate <> ""
+        m.detailData.addReplace("originalAvailable", releaseDate)
+        updateMovieMetaLine(releaseDate)
+    end if
     summary = ""
     if response.summary <> invalid then summary = response.summary
-    if summary = ""
-        if m.movieFallbackSummary <> invalid then summary = m.movieFallbackSummary
-    end if
+    if summary = "" and m.movieFallbackSummary <> invalid then summary = m.movieFallbackSummary
     if summary <> ""
         m.detailData.addReplace("summary", summary)
         m.top.findNode("summaryLabel").text = summary
         applySummaryFit(summary, m.detailData)
     end if
-    m.pendingMovieSummary = ""
-    m.waitForMovieMetadata = false
-    revealDetail()
-    print "MOVIE_METADATA_APPLY id="; response.lookUp("id"); " source="; response.lookUp("source"); " summaryLen="; len(summary)
+end sub
+
+sub cacheMovieMetadataResponse(response as object)
+    if response = invalid then return
+    if m.movieMetadataCache = invalid then m.movieMetadataCache = {}
+    idText = safeIntText(response.lookUp("id"))
+    if idText = "" or idText = "0" then return
+    m.movieMetadataCache.addReplace(idText, response)
+end sub
+
+function movieMetadataResponseMatchesDetail(response as object) as boolean
+    if response = invalid then return false
+    if m.detailData = invalid then return false
+    responseId = safeIntText(response.lookUp("id"))
+    if responseId = "" or responseId = "0" then return true
+    ids = []
+    addDetailStateId(ids, m.detailData.id)
+    addDetailStateId(ids, m.detailData.videoStationId)
+    addDetailStateId(ids, m.detailData.mapperId)
+    addDetailStateId(ids, m.detailData.fileId)
+    for each id in ids
+        if id = responseId then return true
+    end for
+    return false
+end function
+
+sub updateMovieMetaLine(releaseDate as string)
+    if releaseDate = "" then return
+    if m.detailData = invalid then return
+    if m.detailData.type = invalid or m.detailData.type <> "movie" then return
+    m.top.findNode("dateLabel").visible = false
+    m.top.findNode("dateLabel").text = ""
+    m.top.findNode("metaLabel").text = releaseDate
 end sub
 
 sub onMovieSummaryTimer(event as object)
