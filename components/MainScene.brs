@@ -20,12 +20,6 @@ sub init()
       return "http://" + host + ":" + port
   end function
 
-  function savedProxyBaseUrl(host as string, port as string, useHttps as boolean) as string
-      if port = "" then port = "8099"
-      if useHttps then return "https://" + host + ":" + port
-      return "http://" + host + ":" + port
-  end function
-
   sub autoLogin()
       reg = createObject("roRegistrySection", "DSVideo")
       host = readProtectedSetting(reg, "nasAddress")
@@ -34,8 +28,6 @@ sub init()
       password = readProtectedSetting(reg, "password")
       useHttps = true
       if reg.exists("useHttps") then useHttps = (reg.read("useHttps") = "true")
-      transcodePort = "8099"
-      if reg.exists("transcodePort") then transcodePort = readProtectedSetting(reg, "transcodePort")
 
       task = createObject("roSGNode", "APITask")
       task.request = {
@@ -47,7 +39,7 @@ sub init()
       task.observeField("response", "onAutoLoginResponse")
       task.control = "RUN"
       m.autoLoginTask = task
-      m.savedLogin = { host: host, transcodePort: transcodePort, useHttps: useHttps }
+      m.savedLogin = { host: host, useHttps: useHttps, username: username, password: password }
   end sub
 
   function readProtectedSetting(reg as object, key as string) as string
@@ -100,7 +92,7 @@ sub init()
   sub onAutoLoginResponse(event as object)
       response = event.getData()
       if response <> invalid and response.success = true
-          m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, proxyBaseUrl: savedProxyBaseUrl(m.savedLogin.host, m.savedLogin.transcodePort, m.savedLogin.useHttps) }
+          m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, username: m.savedLogin.username, password: m.savedLogin.password }
           showHomeScreen(m.authData)
       else
           showLoginScreen()
@@ -295,10 +287,28 @@ sub init()
       if m.navCategories <> invalid then settingsScreen.navCategories = m.navCategories
       settingsScreen.observeField("selectedCategory", "onCategorySelected")
       settingsScreen.observeField("backPressed", "onBackPressed")
+      settingsScreen.observeField("settingsSaved", "onSettingsSaved")
       m.top.appendChild(settingsScreen)
       settingsScreen.setFocus(true)
       m.screenStack.push(settingsScreen)
       m.currentScreen = settingsScreen
+  end sub
+
+  sub onSettingsSaved(event as object)
+      if event = invalid then return
+      if event.getData() <> true then return
+      closeAllScreens()
+      autoLogin()
+  end sub
+
+  sub closeAllScreens()
+      while m.screenStack.count() > 0
+          screenToRemove = m.screenStack.pop()
+          closeVideoIfNeeded(screenToRemove)
+          m.top.removeChild(screenToRemove)
+      end while
+      m.currentScreen = invalid
+      m.loginScreen = invalid
   end sub
 
   sub onVideoSelected(event as object)

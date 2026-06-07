@@ -4,22 +4,30 @@ sub init()
     m.useHttps = true
     m.username = ""
     m.password = ""
-    m.transcodePort = "8099"
     m.activeField = ""
     m.focusIndex = 0
     m.focusArea = "settings"
+    m.fieldRowsActive = false
+    m.pendingKeyboardFocus = 0
+    m.pendingKeyboardClose = false
+    m.pendingKeyboardRefocusPasses = 0
+    m.pendingKeyboardReturnToNav = false
     m.categories = []
-    m.rowYs = [190, 290, 390, 490, 590, 690, 825]
+    m.rowYs = [190, 290, 390, 490, 590, 740]
+    m.top.focusable = true
 
     nav = m.top.findNode("categoryList")
     nav.observeField("itemSelected", "onNavSelected")
+    nav.observeField("itemFocused", "onNavItemFocused")
     nav.observeField("focus", "onNavFocus")
+    m.top.findNode("keyboardFocusTimer").observeField("fire", "onKeyboardFocusTimer")
     m.top.observeField("navCategories", "onNavCategoriesSet")
     m.top.observeField("focusNavCategory", "onFocusNavCategory")
+    m.top.observeField("keyInput", "onKeyInput")
 
     loadSavedCredentials()
     updateAllValues()
-    setHighlight(0)
+    hideFieldHighlight()
     loadNavCategories()
 end sub
 
@@ -30,7 +38,6 @@ sub loadSavedCredentials()
     if reg.exists("useHttps") then m.useHttps = (reg.read("useHttps") = "true")
     if reg.exists("username") then m.username = readProtectedSetting(reg, "username")
     if reg.exists("password") then m.password = readProtectedSetting(reg, "password")
-    if reg.exists("transcodePort") then m.transcodePort = readProtectedSetting(reg, "transcodePort")
 end sub
 
 sub saveCredentials()
@@ -44,7 +51,6 @@ sub saveCredentials()
     end if
     writeProtectedSetting(reg, "username", m.username)
     writeProtectedSetting(reg, "password", m.password)
-    writeProtectedSetting(reg, "transcodePort", m.transcodePort)
     reg.flush()
 end sub
 
@@ -65,11 +71,6 @@ sub updateAllValues()
         m.top.findNode("row4value").text = "(not set)"
     else
         m.top.findNode("row4value").text = "********"
-    end if
-    if m.transcodePort = ""
-        m.top.findNode("row5value").text = "8099"
-    else
-        m.top.findNode("row5value").text = m.transcodePort
     end if
 end sub
 
@@ -156,54 +157,104 @@ end function
 
 sub setHighlight(idx as integer)
     m.focusIndex = idx
-    m.focusArea = "settings"
     m.top.findNode("rowHighlight").visible = true
     m.top.findNode("rowHighlight").translation = [580, m.rowYs[idx]]
-    if idx = 6
-        m.top.findNode("rowHighlight").color = "#A91F2A"
+    updateFocusBox(idx)
+    setFocusBoxVisible(true)
+    if idx = 5
+        m.top.findNode("rowHighlight").color = "#6E737A"
     else
-        m.top.findNode("rowHighlight").color = "#F05A63"
+        m.top.findNode("rowHighlight").color = "#5F6670"
     end if
+end sub
+
+sub updateFocusBox(idx as integer)
+    y = m.rowYs[idx]
+    m.top.findNode("rowFocusTop").translation = [580, y]
+    m.top.findNode("rowFocusBottom").translation = [580, y + 80]
+    m.top.findNode("rowFocusLeft").translation = [580, y]
+    m.top.findNode("rowFocusRight").translation = [1336, y]
+end sub
+
+sub setFocusBoxVisible(isVisible as boolean)
+    m.top.findNode("rowFocusTop").visible = isVisible
+    m.top.findNode("rowFocusBottom").visible = isVisible
+    m.top.findNode("rowFocusLeft").visible = isVisible
+    m.top.findNode("rowFocusRight").visible = isVisible
+end sub
+
+sub hideFieldHighlight()
+    m.top.findNode("rowHighlight").visible = false
+    setFocusBoxVisible(false)
+end sub
+
+sub enterFieldRows()
+    nav = m.top.findNode("categoryList")
+    if nav <> invalid
+        nav.setFocus(false)
+        nav.focusable = false
+    end if
+    setHighlight(0)
+    m.fieldRowsActive = true
+    m.focusArea = "settings"
+    m.top.setFocus(true)
+end sub
+
+sub returnToNav()
+    nav = m.top.findNode("categoryList")
+    if nav <> invalid
+        nav.focusable = true
+        idx = settingsCategoryIndex()
+        if idx >= 0 then nav.jumpToItem = idx
+        nav.setFocus(true)
+    end if
+    m.focusArea = "nav"
+    m.fieldRowsActive = false
+    hideFieldHighlight()
 end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    print "SETTINGS_KEY key="; key; " focusArea="; m.focusArea; " fieldRows="; m.fieldRowsActive; " idx="; m.focusIndex
     if key = "back"
-        if m.focusArea = "settings"
-            nav = m.top.findNode("categoryList")
-            nav.setFocus(true)
-            m.focusArea = "nav"
-            m.top.findNode("rowHighlight").visible = false
+        if m.fieldRowsActive = true
+            returnToNav()
             return true
         end if
-        if m.focusArea = "nav" then return false
+        if m.fieldRowsActive = false then return false
         m.top.backPressed = true
         return true
     else if key = "down"
-        if m.focusArea = "nav"
-            setHighlight(0)
-            m.top.setFocus(true)
+        if m.fieldRowsActive = false
+            enterFieldRows()
             return true
         end if
-        if m.focusIndex < 6 then setHighlight(m.focusIndex + 1)
+        if m.focusIndex < 5 then setHighlight(m.focusIndex + 1)
         return true
     else if key = "up"
-        if m.focusArea = "settings" and m.focusIndex = 0
-            nav = m.top.findNode("categoryList")
-            nav.setFocus(true)
-            m.focusArea = "nav"
-            m.top.findNode("rowHighlight").visible = false
+        if m.fieldRowsActive = true and m.focusIndex = 0
+            returnToNav()
             return true
         end if
         if m.focusIndex > 0 then setHighlight(m.focusIndex - 1)
         return true
+    else if key = "left" or key = "right"
+        return true
     else if key = "OK"
-        if m.focusArea = "nav" then return false
+        if m.fieldRowsActive = false then return true
         activateRow(m.focusIndex)
         return true
     end if
     return true
 end function
+
+sub onKeyInput(event as object)
+    if event = invalid then return
+    key = event.getData()
+    if key = invalid or key = "" then return
+    print "SETTINGS_KEY_INPUT key="; key
+    onKeyEvent(key, true)
+end sub
 
 sub loadNavCategories()
     if m.top.navCategories <> invalid and m.top.navCategories.count() > 0
@@ -232,10 +283,13 @@ end sub
 sub focusSettingsNav()
     nav = m.top.findNode("categoryList")
     idx = settingsCategoryIndex()
+    nav.focusable = true
     if idx >= 0 then nav.jumpToItem = idx
     nav.setFocus(true)
+    m.focusIndex = 0
     m.focusArea = "nav"
-    m.top.findNode("rowHighlight").visible = false
+    m.fieldRowsActive = false
+    hideFieldHighlight()
 end sub
 
 function settingsCategoryIndex() as integer
@@ -249,15 +303,29 @@ function settingsCategoryIndex() as integer
 end function
 
 sub onNavFocus(event as object)
-    if event.getData() = true
+    if event.getData() = true and m.fieldRowsActive = false
         m.focusArea = "nav"
-        m.top.findNode("rowHighlight").visible = false
+        hideFieldHighlight()
+    end if
+end sub
+
+sub onNavItemFocused(event as object)
+    if m.fieldRowsActive = true
+        idx = settingsCategoryIndex()
+        if idx >= 0 then m.top.findNode("categoryList").jumpToItem = idx
     end if
 end sub
 
 sub onNavSelected(event as object)
     idx = event.getData()
-    if idx >= 0 and idx < m.categories.count() then m.top.selectedCategory = categoryPayload(idx)
+    if idx >= 0 and idx < m.categories.count()
+        payload = categoryPayload(idx)
+        if payload.category = "settings"
+            focusSettingsNav()
+            return
+        end if
+        m.top.selectedCategory = payload
+    end if
 end sub
 
 function categoryPayload(idx as integer) as object
@@ -298,11 +366,9 @@ sub activateRow(idx as integer)
         m.activeField = "password"
         showKeyboard("Password", "")
     else if idx = 5
-        m.activeField = "transcodePort"
-        showKeyboard("Transcode Port", m.transcodePort)
-    else if idx = 6
         saveCredentials()
-        m.top.settingsSaved = true
+        showStatus("", false)
+        returnToNav()
     end if
 end sub
 
@@ -317,8 +383,15 @@ sub showKeyboard(title as string, currentText as string)
 end sub
 
 sub onKeyboardDone(event as object)
+    if m.currentDialog = invalid
+        m.activeField = ""
+        queueKeyboardFocusRestore(0)
+        return
+    end if
     btnIdx = event.getData()
     entered = m.currentDialog.text
+    completedField = m.activeField
+    print "SETTINGS_KEYBOARD_DONE button="; btnIdx; " field="; completedField
     if btnIdx = 0
         if m.activeField = "address"
             m.nasAddress = entered
@@ -328,13 +401,81 @@ sub onKeyboardDone(event as object)
             if entered <> "" then m.username = entered
         else if m.activeField = "password"
             m.password = entered
-        else if m.activeField = "transcodePort"
-            if entered <> "" then m.transcodePort = entered
         end if
         updateAllValues()
     end if
-    m.top.getScene().dialog = invalid
+    m.activeField = ""
+    m.pendingKeyboardClose = true
+    m.pendingKeyboardReturnToNav = false
+    queueKeyboardFocusRestore(m.focusIndex)
+end sub
+
+sub queueKeyboardFocusRestore(rowIndex as integer)
+    if rowIndex < 0 then rowIndex = 0
+    if rowIndex > 5 then rowIndex = 5
+    m.pendingKeyboardFocus = rowIndex
+    m.pendingKeyboardRefocusPasses = 2
+    timer = m.top.findNode("keyboardFocusTimer")
+    if timer <> invalid
+        timer.control = "stop"
+        timer.control = "start"
+    else
+        restoreKeyboardFocus(rowIndex)
+    end if
+end sub
+
+sub onKeyboardFocusTimer(event as object)
+    print "SETTINGS_KEYBOARD_REFOCUS row="; m.pendingKeyboardFocus
+    if m.pendingKeyboardClose = true
+        print "SETTINGS_KEYBOARD_CLOSE_DELAYED"
+        if m.currentDialog <> invalid
+            m.currentDialog.close = true
+            m.currentDialog.unobserveField("buttonSelected")
+        end if
+        m.top.getScene().dialog = invalid
+        m.currentDialog = invalid
+        m.pendingKeyboardClose = false
+    end if
+    if m.pendingKeyboardReturnToNav = true
+        restoreSettingsNavFocus()
+        m.pendingKeyboardReturnToNav = false
+        m.pendingKeyboardRefocusPasses = 0
+    else
+        restoreKeyboardFocus(m.pendingKeyboardFocus)
+    end if
+    if m.pendingKeyboardRefocusPasses > 0
+        m.pendingKeyboardRefocusPasses = m.pendingKeyboardRefocusPasses - 1
+        timer = m.top.findNode("keyboardFocusTimer")
+        if timer <> invalid
+            timer.control = "stop"
+            timer.control = "start"
+        end if
+    end if
+end sub
+
+sub restoreSettingsNavFocus()
+    nav = m.top.findNode("categoryList")
+    hasNavFocus = false
+    if nav <> invalid
+        idx = settingsCategoryIndex()
+        if idx >= 0 then nav.jumpToItem = idx
+        nav.setFocus(true)
+        hasNavFocus = nav.hasFocus()
+    end if
+    m.focusArea = "nav"
+    m.fieldRowsActive = false
+    hideFieldHighlight()
+    print "SETTINGS_RETURN_NAV hasNavFocus="; hasNavFocus
+end sub
+
+sub restoreKeyboardFocus(rowIndex as integer)
+    if rowIndex < 0 then rowIndex = 0
+    if rowIndex > 5 then rowIndex = 5
+    m.focusArea = "settings"
+    m.top.findNode("rowHighlight").visible = true
+    setHighlight(rowIndex)
     m.top.setFocus(true)
+    print "SETTINGS_FOCUS_RESTORED hasFocus="; m.top.hasFocus()
 end sub
 
 sub showStatus(msg as string, isError as boolean)

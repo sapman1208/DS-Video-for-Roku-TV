@@ -150,6 +150,18 @@ function titleTokenScore(label, title) {
   return tokens.filter((token) => lower.includes(token)).length * 100 - Math.abs(tokens.length - titleTokenMatches(lower, title));
 }
 
+function showTitleScore(label, query) {
+  const queryTokens = meaningfulTitleTokens(query);
+  if (queryTokens.length === 0) return -10000;
+  const labelNorm = canonicalQueryValue(label);
+  const matched = queryTokens.filter((token) => labelNorm.includes(token));
+  const numericTokens = queryTokens.filter((token) => /^\d+$/.test(token));
+  if (numericTokens.some((token) => !labelNorm.includes(token))) return -10000;
+  if (queryTokens.length > 1 && matched.length < Math.ceil(queryTokens.length * 0.75)) return -10000;
+  if (queryTokens.length === 1 && matched.length !== 1) return -10000;
+  return matched.length * 100 - Math.abs(queryTokens.length - matched.length);
+}
+
 function subdlLanguage(value) {
   const code = String(value || "en").trim();
   if (!code) return "EN";
@@ -171,6 +183,10 @@ const COMMENTARY_PHRASES = [
   "director commentary",
   "director's commentary",
   "fireside chat",
+  "with the creators of south park",
+  "matt stone and trey parker",
+  "matt stone",
+  "trey parker",
 ];
 
 function hasCommentaryText(text) {
@@ -776,7 +792,8 @@ function bestTvSubtitlesShow(html, query) {
   let match;
   while ((match = re.exec(html))) {
     const title = cleanNamePart(match[2].replace(/\([^)]*\)/g, ""));
-    shows.push({ id: match[1], title, score: titleTokenScore(title, query) });
+    const score = showTitleScore(title, query);
+    if (score > -1000) shows.push({ id: match[1], title, score });
   }
   return shows.sort((a, b) => b.score - a.score)[0] || null;
 }

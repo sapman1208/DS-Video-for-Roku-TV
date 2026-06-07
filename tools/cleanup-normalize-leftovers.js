@@ -11,7 +11,10 @@ const logPath = logArg ? logArg.slice("--log=".length) : "/tmp/roku-normalize-ap
 
 const LIBRARY_ROOTS = [
   "/volume1/video/Movies",
+  "/volume1/video/New Stuff",
+  "/volume1/video/New stuff",
   "/volume1/video/TV Shows",
+  "/volume1/video/Ian's Shows",
 ];
 
 const VIDEO_EXT_RE = /\.(avi|mkv|mp4|m4v|mov|wmv|mpg|mpeg)$/i;

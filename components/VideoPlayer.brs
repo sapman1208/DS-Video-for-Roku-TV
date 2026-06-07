@@ -14,6 +14,7 @@ sub init()
       m.top.findNode("overlayRefreshTimer").observeField("fire", "onOverlayRefreshTimer")
       m.top.findNode("overlayTimer").observeField("fire", "onOverlayTimer")
       m.top.findNode("resumeSeekTimer").observeField("fire", "onResumeSeekTimer")
+      m.top.findNode("directStartupTimer").observeField("fire", "onDirectStartupTimer")
       m.hasError = false
       m.hasPlayed = false
       m.reportedStart = false
@@ -37,7 +38,7 @@ sub init()
       m.resumeSeekDoneAt = invalid
       m.resumePosition = resumePositionForVideo(videoData)
       m.streamAttemptIndex = 0
-      m.maxStreamAttempts = 12
+      m.maxStreamAttempts = 1
       m.retryingStream = false
       m.progressDebugTicks = 0
       printVideoDataDebug("VIDEO_DATA", videoData)
@@ -75,6 +76,8 @@ sub init()
           proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
+          username: authData.username,
+          password: authData.password,
           fileId: fileId,
           mapperId: videoData.mapperId,
           filePath: videoData.filePath,
@@ -120,6 +123,9 @@ sub init()
       if response.attemptIndex <> invalid then m.streamAttemptIndex = int(response.attemptIndex)
       m.subtitleUrl = ""
       if response.subtitleUrl <> invalid then m.subtitleUrl = response.subtitleUrl
+      m.streamHttpHeaders = invalid
+      if response.httpHeaders <> invalid then m.streamHttpHeaders = response.httpHeaders
+      m.directVteAttempt = response.directVte = true
       if m.subtitleUrl <> invalid and m.subtitleUrl <> "" then print "VIDEO_SUBTITLE url="; m.subtitleUrl
       print "STREAM_READY attempt="; m.streamAttemptIndex; " fmt="; fmt; " live="; isLive; " url="; debugUrlSummary(streamUrl); " debug="; oneLine(left(safeDynamicString(m.streamDebug), 500))
       startPlayback(streamUrl, fmt, isLive)
@@ -149,8 +155,13 @@ sub init()
       content.addFields({
           HttpCertificatesFile: "common:/certs/ca-bundle.crt",
           HttpVerifyPeer: false,
-          HttpVerifyHost: false
+          HttpVerifyHost: false,
+          ForwardQueryStringParams: true
       })
+      if m.streamHttpHeaders <> invalid
+          content.addFields({ HttpHeaders: m.streamHttpHeaders })
+          print "VIDEO_HTTP_HEADERS count="; m.streamHttpHeaders.count()
+      end if
 
       videoData = m.top.videoData
       if videoData <> invalid and videoData.title <> invalid
@@ -198,6 +209,11 @@ sub init()
       m.streamUrl = streamUrl
       m.streamFmt = fmt
       m.retryingStream = false
+      if m.directVteAttempt = true
+          directTimer = m.top.findNode("directStartupTimer")
+          if directTimer <> invalid then directTimer.control = "start"
+          print "VIDEO_DIRECT_STARTUP_TIMER start"
+      end if
   end sub
 
   sub beginResumeHold()
@@ -259,6 +275,7 @@ sub init()
       state = event.getData()
       print "VIDEO_STATE state="; state; " pos="; safeDynamicString(m.videoNode.position); " dur="; safeDynamicString(m.videoNode.duration); " buffer="; debugAny(m.videoNode.bufferingStatus); " errCode="; safeDynamicString(m.videoNode.errorCode); " errMsg="; safeDynamicString(m.videoNode.errorMsg)
       if state = "playing"
+          stopDirectStartupTimer()
           m.hasPlayed = true
           if m.reportedStart <> true
               m.reportedStart = true
@@ -273,6 +290,7 @@ sub init()
               m.videoNode.control = "play"
           end if
       else if state = "finished" or state = "stopped"
+          stopDirectStartupTimer()
           if m.retryingStream = true then return
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "stop"
@@ -291,6 +309,7 @@ sub init()
               reportPlaybackDone(reason)
           end if
       else if state = "error"
+          stopDirectStartupTimer()
           if retryNextStreamCandidate() then return
           m.hasError = true
           endResumeHold()
@@ -299,6 +318,18 @@ sub init()
           print "VIDEO_ERROR_FINAL fmt="; safeDynamicString(m.streamFmt); " attempt="; safeDynamicString(m.streamAttemptIndex); " url="; debugUrlSummary(m.streamUrl); " code="; safeDynamicString(m.videoNode.errorCode); " msg="; safeDynamicString(m.videoNode.errorMsg)
           showError("Playback error (fmt=" + m.streamFmt + ")." + dbg)
       end if
+  end sub
+
+  sub stopDirectStartupTimer()
+      timer = m.top.findNode("directStartupTimer")
+      if timer <> invalid then timer.control = "stop"
+  end sub
+
+  sub onDirectStartupTimer(event as object)
+      if event = invalid then return
+      if m.directVteAttempt <> true then return
+      if m.hasPlayed = true then return
+      print "VIDEO_DIRECT_TIMEOUT no_proxy_retry"
   end sub
 
   function retryNextStreamCandidate() as boolean
@@ -612,6 +643,8 @@ sub init()
           synoToken: authData.synoToken,
           videoId: videoData.id,
           videoType: videoData.type,
+          fileId: videoData.fileId,
+          mapperId: videoData.mapperId,
           filePath: videoData.filePath,
           position: position
       }

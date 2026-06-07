@@ -87,7 +87,7 @@ function imageTags(data, dataTag, md5Tag, index = 0) {
 }
 
 function clean(value) {
-  return String(value || "").replace(/[\\/*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  return String(value || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function loadOverrides() {
@@ -118,6 +118,7 @@ function normalizeForCompare(value) {
 function libraryNameForPart(part) {
   const norm = normalizeForCompare(part);
   if (norm === "tv shows") return "TV Shows";
+  if (norm === "ians shows") return "Ian's Shows";
   return "";
 }
 
@@ -175,7 +176,7 @@ function episodeInfo(videoPath) {
   const rows = runSql(`
     select e.mapper_id, e.season, e.episode, e.tag_line, coalesce(s.summary, ''), t.title, t.mapper_id, coalesce(ts.summary, ''), coalesce(t.originally_available::text, ''), coalesce(e.originally_available::text, '')
     from video_file vf
-    left join tvshow_episode e on e.mapper_id = vf.mapper_id
+    left join tvshow_episode e on e.id = vf.mapper_id or e.mapper_id = vf.mapper_id
     left join tvshow t on t.id = e.tvshow_id
     left join summary s on s.mapper_id = e.mapper_id
     left join summary ts on ts.mapper_id = t.mapper_id
@@ -208,9 +209,7 @@ function showInfoByTitle(showTitle) {
     left join summary ts on ts.mapper_id = t.mapper_id
     where lower(t.title) = lower('${escaped}')
        or lower(replace(replace(t.title, ':', ''), '!', '')) = lower(replace(replace('${escaped}', ':', ''), '!', ''))
-    order by
-      (select count(*) from tvshow_episode e where e.tvshow_id = t.id) desc,
-      case when lower(t.title) = lower('${escaped}') then 0 else 1 end
+    order by case when lower(t.title) = lower('${escaped}') then 0 else 1 end
     limit 1`);
   if (!rows) return null;
   const parts = rows.split("\t");
@@ -238,9 +237,7 @@ function episodeInfoByShowSeasonEpisode(showTitle, season, episode) {
         lower(t.title) = lower('${escaped}')
         or lower(replace(replace(t.title, ':', ''), '!', '')) = lower(replace(replace('${escaped}', ':', ''), '!', ''))
       )
-    order by
-      (select count(*) from tvshow_episode sibling where sibling.tvshow_id = t.id) desc,
-      case when lower(t.title) = lower('${escaped}') then 0 else 1 end
+    order by case when lower(t.title) = lower('${escaped}') then 0 else 1 end
     limit 1`);
   if (!rows) return null;
   const parts = rows.split("\t");
@@ -275,7 +272,7 @@ function episodeInfoFromPath(videoPath) {
 
   let fileShow = "";
   if (episodeMatch.index > 0) fileShow = clean(baseName.slice(0, episodeMatch.index).replace(/[._-]+/g, " "));
-  const outputShow = fileShow && normalizeForCompare(fileShow).length > normalizeForCompare(show).length ? fileShow : show;
+  const outputShow = fileShow && normalizeForCompare(fileShow).length >= normalizeForCompare(show).length ? fileShow : show;
   let title = baseName;
   const showNorm = normalizeForCompare(outputShow);
   const titleNorm = normalizeForCompare(title);
