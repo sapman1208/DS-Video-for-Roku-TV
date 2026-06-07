@@ -3,6 +3,9 @@ sub init()
     m.actionOverrides = {}
     m.movieMetadataTask = invalid
     m.detailStateTask = invalid
+    m.detailData = invalid
+    m.waitForDetailState = false
+    m.waitForMovieMetadata = false
     m.pendingMovieSummary = ""
     grid = m.top.findNode("actionGrid")
     grid.observeField("itemSelected", "onActionSelected")
@@ -51,13 +54,16 @@ end function
 sub onVideoDataSet(event as object)
     data = event.getData()
     if data = invalid then return
+    m.detailData = data
     m.detailRevealed = false
     m.waitForBackdrop = false
+    m.waitForDetailState = shouldWaitForDetailState(data)
+    m.waitForMovieMetadata = false
     m.top.sourceListRemoved = false
     m.ratingOverride = invalid
     m.ratingFocusIndex = -1
     m.top.opacity = 0
-    print "DETAIL_SET type="; data.lookUp("type"); " title="; data.lookUp("title")
+    print "DETAIL_SET type="; data.lookUp("type"); " title="; data.lookUp("title"); " rating="; data.lookUp("rating")
     title = ""
     if data.title <> invalid then title = data.title
     if title = "" then title = "Video"
@@ -69,13 +75,17 @@ sub onVideoDataSet(event as object)
         else if data.type = "movie"
             meta = ""
         else if data.type = "homevideo"
-            meta = "Home Video"
+            if data.sourceCategory <> invalid and data.sourceCategory = "tvrecordings"
+                meta = "TV Recording"
+            else
+                meta = "Home Video"
+            end if
         else
             meta = data.type
         end if
     end if
     if data.originalAvailable <> invalid and data.originalAvailable <> ""
-        if data.type <> invalid and data.type = "episode"
+        if data.type <> invalid and (data.type = "episode" or data.type = "homevideo")
             m.top.findNode("dateLabel").text = data.originalAvailable
             m.top.findNode("dateLabel").visible = true
         else
@@ -93,13 +103,13 @@ sub onVideoDataSet(event as object)
     if data.summary <> invalid then summary = data.summary
     if summary = "" and data.description <> invalid then summary = data.description
     if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
-    needsMovieMetadata = data.type <> invalid and data.type = "movie" and len(summary) < 220
+    currentRating = firstNumericField(data, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
+    needsMovieMetadata = data.type <> invalid and data.type = "movie" and (len(summary) < 220 or currentRating <= 0)
     m.movieFallbackSummary = ""
     if needsMovieMetadata and summary <> ""
         m.movieFallbackSummary = summary
-        summary = ""
     end if
-    if summary = "" and not needsMovieMetadata then summary = "No description available."
+    if summary = "" and not needsMovieMetadata and not (data.type <> invalid and data.type = "homevideo") then summary = "No description available."
     m.pendingMovieSummary = ""
     poster = ""
 	    if data.posterUrl <> invalid then poster = data.posterUrl
@@ -125,7 +135,9 @@ sub onVideoDataSet(event as object)
     end if
     m.top.findNode("summaryLabel").text = summary
     applySummaryFit(summary, data)
-    if needsMovieMetadata then startMovieMetadataFetch(data)
+    if needsMovieMetadata
+        startMovieMetadataFetch(data)
+    end if
     populateRatingStars()
     if hasWatchedState(data)
         populateWatchedState()
@@ -139,6 +151,16 @@ sub onVideoDataSet(event as object)
     startDetailStateFetch(data)
     startDetailRevealTimer()
 end sub
+
+function shouldWaitForDetailState(data as object) as boolean
+    if data = invalid then return false
+    if data.authData = invalid then return false
+    if data.type = invalid then return false
+    if data.type = "movie" then return true
+    if data.type = "episode" then return true
+    if data.type = "tvshow" then return true
+    return false
+end function
 
 function detailArtworkUrl(url as dynamic) as string
     if url = invalid then return ""
@@ -154,10 +176,21 @@ sub startDetailRevealTimer()
     timer = m.top.findNode("detailRevealTimer")
     if timer = invalid then return
     timer.control = "stop"
+    if m.waitForDetailState = true
+        timer.duration = detailSettleDuration()
+    else
+        timer.duration = 0.32
+    end if
     timer.control = "start"
 end sub
 
+function detailSettleDuration() as float
+    return 0.75
+end function
+
 sub onDetailRevealTimer(event as object)
+    if m.waitForDetailState = true then m.waitForDetailState = false
+    if m.waitForBackdrop = true then m.waitForBackdrop = false
     revealDetail()
 end sub
 
@@ -165,7 +198,10 @@ sub onBackdropLoadStatus(event as object)
     if event = invalid then return
     if m.waitForBackdrop <> true then return
     status = event.getData()
-    if status = "ready" then revealDetail()
+    if status = "ready"
+        m.waitForBackdrop = false
+        revealDetail()
+    end if
     if status = "failed" or status = "invalid"
         fallback = ""
         if m.detailPosterFallbackUrl <> invalid then fallback = m.detailPosterFallbackUrl
@@ -180,6 +216,8 @@ end sub
 
 sub revealDetail()
     if m.detailRevealed = true then return
+    if m.waitForDetailState = true then return
+    if m.waitForBackdrop = true then return
     m.detailRevealed = true
     timer = m.top.findNode("detailRevealTimer")
     if timer <> invalid then timer.control = "stop"
@@ -187,10 +225,21 @@ sub revealDetail()
 end sub
 
 sub startMovieMetadataFetch(data as object)
-    if data = invalid or data.authData = invalid then return
+    if data = invalid or data.authData = invalid
+        m.waitForMovieMetadata = false
+        return
+    end if
     movieId = ""
     if data.id <> invalid then movieId = safeIntText(data.id)
-    if movieId = "" or movieId = "0" then return
+    if movieId = "" or movieId = "0"
+        m.waitForMovieMetadata = false
+        return
+    end if
+    ids = []
+    addDetailStateId(ids, data.videoStationId)
+    addDetailStateId(ids, data.id)
+    addDetailStateId(ids, data.mapperId)
+    addDetailStateId(ids, data.fileId)
     task = createObject("roSGNode", "APITask")
     task.observeField("response", "onMovieMetadata")
     task.request = {
@@ -199,39 +248,57 @@ sub startMovieMetadataFetch(data as object)
         sid: data.authData.sid,
         synoToken: data.authData.synoToken,
         id: movieId,
-        title: data.title
+        ids: ids,
+        title: data.title,
+        filePath: data.filePath
     }
     m.movieMetadataTask = task
-    print "MOVIE_METADATA_REQUEST id="; movieId; " title="; data.title
+    print "MOVIE_METADATA_REQUEST id="; movieId; " candidates="; ids.count(); " title="; data.title
     task.control = "RUN"
 end sub
 
 sub onMovieMetadata(event as object)
     response = event.getData()
-    if response = invalid then return
+    if response = invalid
+        m.waitForMovieMetadata = false
+        revealDetail()
+        return
+    end if
+    if m.detailData = invalid then m.detailData = m.top.videoData
+    if response.rating <> invalid and response.rating > 0
+        m.detailData.addReplace("rating", response.rating)
+        populateRatingStars()
+    end if
     summary = ""
     if response.summary <> invalid then summary = response.summary
     if summary = ""
         if m.movieFallbackSummary <> invalid then summary = m.movieFallbackSummary
     end if
-    if summary = "" then return
-    m.pendingMovieSummary = summary
-    timer = m.top.findNode("movieSummaryTimer")
-    if timer <> invalid then timer.control = "start"
+    if summary <> ""
+        m.detailData.addReplace("summary", summary)
+        m.top.findNode("summaryLabel").text = summary
+        applySummaryFit(summary, m.detailData)
+    end if
+    m.pendingMovieSummary = ""
+    m.waitForMovieMetadata = false
+    revealDetail()
     print "MOVIE_METADATA_APPLY id="; response.lookUp("id"); " source="; response.lookUp("source"); " summaryLen="; len(summary)
 end sub
 
 sub onMovieSummaryTimer(event as object)
     if m.pendingMovieSummary = invalid or m.pendingMovieSummary = "" then return
     m.top.findNode("summaryLabel").text = m.pendingMovieSummary
-    applySummaryFit(m.pendingMovieSummary, m.top.videoData)
+    applySummaryFit(m.pendingMovieSummary, m.detailData)
     m.pendingMovieSummary = ""
 end sub
 
 sub startDetailStateFetch(data as object)
     if data = invalid or data.authData = invalid then return
     videoId = videoIdForSync(data)
-    if videoId = "" or videoId = "0" then return
+    if videoId = "" or videoId = "0"
+        m.waitForDetailState = false
+        return
+    end if
     ids = []
     addDetailStateId(ids, data.videoStationId)
     addDetailStateId(ids, data.id)
@@ -264,23 +331,56 @@ end sub
 
 sub onDetailState(event as object)
     response = event.getData()
-    if response = invalid then return
+    if response = invalid
+        m.waitForDetailState = false
+        revealDetail()
+        return
+    end if
     print "DETAIL_STATE success="; response.lookUp("success"); " rating="; response.lookUp("rating"); " watchedRatio="; response.lookUp("watchedRatio"); " hasWatched="; response.lookUp("hasWatched"); " error="; response.lookUp("error")
-    if response.success <> true then return
-    if m.top.videoData = invalid then return
-    if response.rating <> invalid and response.rating >= 0
-        m.top.videoData.addReplace("rating", response.rating)
+    if response.success <> true
+        m.waitForDetailState = false
+        revealDetail()
+        return
+    end if
+    if m.detailData = invalid then m.detailData = m.top.videoData
+    if m.detailData = invalid then return
+    if response.rating <> invalid and response.rating > 0
+        m.detailData.addReplace("rating", response.rating)
         populateRatingStars()
     end if
+    summary = ""
+    if response.summary <> invalid then summary = response.summary
+    if summary <> ""
+        currentSummary = m.top.findNode("summaryLabel").text
+        shouldApply = currentSummary = ""
+        if currentSummary = "No description available." then shouldApply = true
+        if len(summary) > len(currentSummary) then shouldApply = true
+        if shouldApply
+            m.detailData.addReplace("summary", summary)
+            m.top.findNode("summaryLabel").text = summary
+            applySummaryFit(summary, m.detailData)
+        end if
+    end if
+    if response.showBackdropUrl <> invalid and response.showBackdropUrl <> ""
+        m.detailData.addReplace("backdropUrl", response.showBackdropUrl)
+        m.waitForBackdrop = true
+        m.top.findNode("backdrop").uri = detailArtworkUrl(response.showBackdropUrl)
+        m.top.findNode("backdrop").visible = true
+        print "DETAIL_BACKDROP_REFRESH source="; artworkSourceFromUrl(response.showBackdropUrl)
+    end if
     if response.hasWatched = true and response.watchedRatio <> invalid
-        m.top.videoData.addReplace("watchedRatio", response.watchedRatio)
+        m.detailData.addReplace("watchedRatio", response.watchedRatio)
+        if response.watchedRatio = 0 then m.detailData.addReplace("fileWatched", false)
         populateWatchedState()
     end if
     if m.actionOverrides <> invalid
-        if response.favorite <> invalid then m.actionOverrides.addReplace("favorites", response.favorite = true)
-        if response.watchlist <> invalid then m.actionOverrides.addReplace("watchlist", response.watchlist = true)
+        if response.favorite <> invalid and not hasPendingCollectionOverride("favorites") then m.actionOverrides.addReplace("favorites", response.favorite = true)
+        if response.watchlist <> invalid and not hasPendingCollectionOverride("watchlist") then m.actionOverrides.addReplace("watchlist", response.watchlist = true)
         populateActions()
+        restoreActionFocus(0)
     end if
+    m.waitForDetailState = false
+    revealDetail()
 end sub
 
 function episodeMetaText(data as object) as string
@@ -320,7 +420,13 @@ sub configurePosterFrame(data as object)
     poster = m.top.findNode("poster")
     fallback = m.top.findNode("posterFallback")
 
-    if data <> invalid and data.type <> invalid and data.type = "episode"
+    useWideFrame = false
+    if data <> invalid and data.type <> invalid
+        if data.type = "episode" then useWideFrame = true
+        if data.type = "homevideo" then useWideFrame = true
+    end if
+
+    if useWideFrame
         poster.width = 630
         poster.height = 354
         poster.translation = [70, 230]
@@ -383,7 +489,7 @@ sub applySummaryFit(summary as string, data as dynamic)
     if label = invalid or actions = invalid then return
 
     textLen = len(summary)
-    if data.type <> invalid and data.type = "episode"
+    if data.type <> invalid and (data.type = "episode" or data.type = "homevideo")
         label.translation = [760, 410]
         label.width = 1040
         label.font = "font:SmallSystemFont"
@@ -516,7 +622,9 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
     if data.filePath <> invalid then filePath = data.filePath
     mapperId = invalid
     if data.mapperId <> invalid then mapperId = data.mapperId
-    print "COLLECTION_SYNC_REQUEST key="; actionKey(idx); " enabled="; enabled; " type="; data.lookUp("type"); " title="; data.lookUp("title"); " videoId="; videoId; " mapper="; mapperId
+    videoType = data.type
+    if data.collectionVideoType <> invalid and data.collectionVideoType <> "" then videoType = data.collectionVideoType
+    print "COLLECTION_SYNC_REQUEST key="; actionKey(idx); " enabled="; enabled; " type="; videoType; " title="; data.lookUp("title"); " videoId="; videoId; " mapper="; mapperId
     m.pendingCollectionIdx = idx
     m.pendingCollectionEnabled = enabled
     m.pendingCollectionSourceListRemoval = isSourceListAction(actionKey(idx)) and enabled = false
@@ -529,7 +637,7 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
         synoToken: data.authData.synoToken,
         localKey: actionKey(idx),
         collectionId: collectionIdForAction(idx),
-        videoType: data.type,
+        videoType: videoType,
         videoId: videoId,
         mapperId: mapperId,
         filePath: filePath,
@@ -549,7 +657,7 @@ sub onCollectionSyncResponse(event as object)
         if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0
             restoreActionFocus(m.pendingCollectionIdx)
         end if
-    else if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0 and m.pendingCollectionSourceListRemoval <> true
+    else if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0 and m.pendingCollectionEnabled <> false
         key = actionKey(m.pendingCollectionIdx)
         if key <> "" and m.pendingCollectionEnabled <> invalid and m.actionOverrides <> invalid
             m.actionOverrides.addReplace(key, not m.pendingCollectionEnabled)
@@ -558,6 +666,14 @@ sub onCollectionSyncResponse(event as object)
         end if
     end if
 end sub
+
+function hasPendingCollectionOverride(key as string) as boolean
+    if key = "" then return false
+    if m.pendingCollectionIdx = invalid then return false
+    if m.pendingCollectionIdx <= 0 then return false
+    pendingKey = actionKey(m.pendingCollectionIdx)
+    return pendingKey = key
+end function
 
 function isSourceListAction(key as string) as boolean
     data = m.top.videoData
@@ -573,7 +689,11 @@ function collectionIdForAction(idx as integer) as string
 end function
 
 sub restoreActionFocus(idx as integer)
+    if idx < 0 then idx = 0
+    if idx > 3 then idx = 3
     grid = m.top.findNode("actionGrid")
+    if grid = invalid then return
+    if grid.content = invalid then return
     grid.jumpToItem = idx
     grid.setFocus(true)
 end sub
@@ -611,11 +731,20 @@ function firstNumericField(data as object, keys as object) as integer
         value = data.lookUp(key)
         if value <> invalid
             t = type(value)
-            if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return normalizeRatingValue(value)
-            if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return normalizeRatingValue(value)
+            if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
+                normalized = normalizeRatingValue(value)
+                if normalized > 0 then return normalized
+            end if
+            if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+                normalized = normalizeRatingValue(value)
+                if normalized > 0 then return normalized
+            end if
             if t = "roString" or t = "String"
                 trimmed = value.trim()
-                if trimmed <> "" then return normalizeRatingValue(val(trimmed))
+                if trimmed <> ""
+                    normalized = normalizeRatingValue(val(trimmed))
+                    if normalized > 0 then return normalized
+                end if
             end if
         end if
     end for
@@ -625,21 +754,30 @@ function firstNumericField(data as object, keys as object) as integer
             value = additional.lookUp(key)
             if value <> invalid
                 t = type(value)
-                if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" then return normalizeRatingValue(value)
-                if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return normalizeRatingValue(value)
+                if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger"
+                    normalized = normalizeRatingValue(value)
+                    if normalized > 0 then return normalized
+                end if
+                if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+                    normalized = normalizeRatingValue(value)
+                    if normalized > 0 then return normalized
+                end if
                 if t = "roString" or t = "String"
                     trimmed = value.trim()
-                    if trimmed <> "" then return normalizeRatingValue(val(trimmed))
+                    if trimmed <> ""
+                        normalized = normalizeRatingValue(val(trimmed))
+                        if normalized > 0 then return normalized
+                    end if
                 end if
             end if
         end for
         extra = parsedObject(additional.lookUp("extra"))
         value = firstNumericFromObject(extra, keys)
-        if value >= 0 then return normalizeRatingValue(value)
+        if value > 0 then return normalizeRatingValue(value)
     end if
     extra = parsedObject(data.lookUp("extra"))
     value = firstNumericFromObject(extra, keys)
-    if value >= 0 then return normalizeRatingValue(value)
+    if value > 0 then return normalizeRatingValue(value)
     value = nestedDbRating(data)
     if value > 0 then return normalizeRatingValue(value)
     return 0
@@ -690,35 +828,82 @@ end function
 function nestedDbRating(data as object) as integer
     candidates = []
     if data <> invalid
+        ratingCandidate = data.lookUp("rating")
+        if ratingCandidate <> invalid then candidates.push(ratingCandidate)
         extra = parsedObject(data.lookUp("extra"))
         if extra <> invalid then candidates.push(extra)
         additional = data.lookUp("additional")
         if additional <> invalid
+            ratingCandidate = additional.lookUp("rating")
+            if ratingCandidate <> invalid then candidates.push(ratingCandidate)
             extra = parsedObject(additional.lookUp("extra"))
             if extra <> invalid then candidates.push(extra)
         end if
     end if
     best = 0
     for each extraObj in candidates
-        for each dbKey in ["synoVideoDb", "synovideodb", "theMovieDb", "themoviedb", "theTVDb", "thetvdb"]
-            db = extraObj.lookUp(dbKey)
-            if db <> invalid and type(db) = "roAssociativeArray"
-                ratingObj = db.lookUp("rating")
-                if ratingObj <> invalid and type(ratingObj) = "roAssociativeArray"
-                    for each ratingKey in ["synovideodb", "synoVideoDb", "themoviedb", "theMovieDb", "thetvdb", "theTVDb", "rating"]
-                        value = ratingObj.lookUp(ratingKey)
-                        if value <> invalid
-                            num = numericValue(value)
-                            if num > 0 and num <= 10 then num = num * 10
-                            if num > best then best = num
-                        end if
-                    end for
+        anyRating = anyNestedRating(extraObj, 0)
+        if anyRating > best then best = anyRating
+        if type(extraObj) = "roAssociativeArray"
+            for each dbKey in ["synoVideoDb", "synovideodb", "theMovieDb", "themoviedb", "theTVDb", "thetvdb"]
+                db = extraObj.lookUp(dbKey)
+                if db <> invalid and type(db) = "roAssociativeArray"
+                    ratingObj = db.lookUp("rating")
+                    if ratingObj <> invalid and type(ratingObj) = "roAssociativeArray"
+                        for each ratingKey in ["synovideodb", "synoVideoDb", "themoviedb", "theMovieDb", "thetvdb", "theTVDb", "rating"]
+                            value = ratingObj.lookUp(ratingKey)
+                            if value <> invalid
+                                num = numericValue(value)
+                                if num > 0 and num <= 10 then num = num * 10
+                                if num > best then best = num
+                            end if
+                        end for
+                    end if
                 end if
-            end if
-        end for
+            end for
+        end if
     end for
     if best > 100 then best = 100
     return best
+end function
+
+function anyNestedRating(value as dynamic, depth as integer) as integer
+    if value = invalid or depth > 4 then return 0
+    t = type(value)
+    if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" or t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+        return normalizeRatingValue(value)
+    end if
+    if t = "roString" or t = "String"
+        trimmed = value.trim()
+        if trimmed = "" then return 0
+        parsed = parseJSON(trimmed)
+        if parsed <> invalid then return anyNestedRating(parsed, depth + 1)
+        return normalizeRatingValue(val(trimmed))
+    end if
+    if t = "roArray"
+        best = 0
+        for each child in value
+            score = anyNestedRating(child, depth + 1)
+            if score > best then best = score
+        end for
+        return best
+    end if
+    if t = "roAssociativeArray"
+        best = 0
+        for each key in value
+            lower = lcase(key)
+            child = value.lookUp(key)
+            score = 0
+            if lower = "rating" or lower = "rate" or instr(1, lower, "rating") > 0 or lower = "imdb" or lower = "tmdb" or lower = "themoviedb" or lower = "thetvdb" or lower = "synovideodb"
+                score = anyNestedRating(child, depth + 1)
+            else if type(child) = "roAssociativeArray"
+                score = anyNestedRating(child, depth + 1)
+            end if
+            if score > best then best = score
+        end for
+        return best
+    end if
+    return 0
 end function
 
 function hasNumericField(data as object, keys as object) as boolean
@@ -756,7 +941,7 @@ end function
 
 function ratingValue() as integer
     if m.ratingOverride <> invalid then return m.ratingOverride
-    return firstNumericField(m.top.videoData, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
+    return firstNumericField(m.detailData, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
 end function
 
 function ratingStars() as integer
@@ -781,7 +966,7 @@ end function
 sub populateRatingStars()
     content = createObject("roSGNode", "ContentNode")
     halfSteps = ratingHalfSteps()
-    print "RATING_RENDER rating="; ratingValue(); " halfSteps="; halfSteps
+    print "RATING_RENDER type="; m.detailData.lookUp("type"); " title="; m.detailData.lookUp("title"); " rating="; ratingValue(); " halfSteps="; halfSteps
     i = 1
     while i <= 5
         node = content.createChild("ContentNode")
@@ -812,7 +997,7 @@ sub populateWatchedState()
     if label = invalid then return
     watchedState = explicitWatchedState()
     print "WATCHED_RENDER state="; watchedState; " ratio="; watchedRatioValue()
-    if watchedState = 0 or (watchedState < 0 and watchedRatioValue() = 0)
+    if watchedState = 0
         label.text = "Unwatched"
         label.color = "#D7DBDE"
         label.visible = true
@@ -829,7 +1014,7 @@ sub hideWatchedState()
 end sub
 
 function watchedRatioValue() as integer
-    return watchedPercentField(m.top.videoData, ["watched_ratio", "watchedRatio"])
+    return watchedPercentField(m.detailData, ["watched_ratio", "watchedRatio"])
 end function
 
 function hasWatchedState(data as object) as boolean
@@ -839,7 +1024,7 @@ function hasWatchedState(data as object) as boolean
 end function
 
 function explicitWatchedState() as integer
-    return explicitWatchedStateFromData(m.top.videoData)
+    return explicitWatchedStateFromData(m.detailData)
 end function
 
 function explicitWatchedStateFromData(data as object) as integer
@@ -935,8 +1120,8 @@ end function
 
 sub setLocalRating(rating as integer)
     m.ratingOverride = rating
-    if m.top.videoData = invalid then return
-    m.top.videoData.addReplace("rating", rating)
+    if m.detailData = invalid then return
+    m.detailData.addReplace("rating", rating)
 end sub
 
 sub onActionFocus(event as object)

@@ -19,6 +19,7 @@
 
 sub init()
       m.top.functionName = "runTask"
+      m.flattenBrowseFileFields = false
   end sub
 
   sub runTask()
@@ -42,6 +43,7 @@ sub init()
       if action = "movieMetadata" then movieMetadata(req)
       if action = "latestResume" then latestResume(req)
       if action = "getStreamUrl" then getStreamUrl(req)
+      if action = "refreshHomeVideoFilenameCache" then refreshHomeVideoFilenameCache(req)
   end sub
 
   ' ── Authentication ────────────────────────────────────────────────────────────
@@ -90,7 +92,7 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
 
       libraryParam = libraryParamFromReq(req)
-      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation2.Movie", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movie", "movies"])
       if key <> ""
@@ -101,7 +103,7 @@ sub init()
           return
       end if
 
-      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.Movie", "VideoStation/movie.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D" + libraryParam, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["movies", "movie"])
       if key <> ""
@@ -168,29 +170,40 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
 
       libraryParam = libraryParamFromReq(req)
-      url = apiUrl(baseUrl, "SYNO.VideoStation2.HomeVideo", "entry.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
+      offset = 0
+      limit = 500
+      if req.offset <> invalid then offset = int(req.offset)
+      if req.limit <> invalid then limit = int(req.limit)
+      params = "offset=" + stri(offset).trim() + "&limit=" + stri(limit).trim() + "&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22extra%22,%22originally_available%22,%22record_time%22,%22record_time_utc%22,%22date%22,%22create_time%22%5D" + libraryParam
+      url = apiUrl(baseUrl, "SYNO.VideoStation2.HomeVideo", "entry.cgi", "1", "list", params, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["video", "videos"])
       if key <> ""
           m.skipCachedArtworkResolve = true
+          m.flattenBrowseFileFields = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.flattenBrowseFileFields = false
           m.skipCachedArtworkResolve = false
           print "GRID_SOURCE category=homevideos source=synology2 count="; m.top.response.items.count()
           return
       end if
 
-      url = apiUrl(baseUrl, "SYNO.VideoStation.HomeVideo", "VideoStation/homevideo.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22%5D" + libraryParam, sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.HomeVideo", "VideoStation/homevideo.cgi", "1", "list", params, sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["video", "videos"])
       if key <> ""
           m.skipCachedArtworkResolve = true
+          m.flattenBrowseFileFields = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.flattenBrowseFileFields = false
           m.skipCachedArtworkResolve = false
           print "GRID_SOURCE category=homevideos source=synology1 count="; m.top.response.items.count()
           return
       end if
 
+      m.flattenBrowseFileFields = true
       parseAndRespond(result, "video", baseUrl, sid)
+      m.flattenBrowseFileFields = false
   end sub
 
   sub listTVRecordings(req as object)
@@ -199,11 +212,13 @@ sub init()
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
-      url = apiUrl(baseUrl, "SYNO.VideoStation.TVRecording", "VideoStation/tv_record.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22poster_mtime%22%5D" + libraryParamFromReq(req), sid, token)
+      url = apiUrl(baseUrl, "SYNO.VideoStation.TVRecording", "VideoStation/tv_record.cgi", "1", "list", "offset=0&limit=500&sort_by=title&sort_direction=asc&additional=%5B%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22date%22,%22create_time%22,%22start_time%22%5D" + libraryParamFromReq(req), sid, token)
       result = httpGet(url)
       key = firstValidKey(result, ["records", "record", "tv_record", "videos", "video"])
       if key <> ""
+          m.flattenBrowseFileFields = true
           parseAndRespond(result, key, baseUrl, sid)
+          m.flattenBrowseFileFields = false
           m.skipCachedArtworkResolve = false
           print "GRID_SOURCE category=tvrecordings source=synology1 count="; m.top.response.items.count()
           return
@@ -240,7 +255,7 @@ sub init()
       if collectionId = "" or collectionId = "0" then collectionId = collectionIdForKey(idToStr(req.localKey))
       if collectionId = "" then collectionId = "-1"
 
-      additional = "%5B%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22file%22,%22poster_mtime%22,%22backdrop_mtime%22,%22summary%22,%22extra%22,%22collection%22,%22originally_available%22%5D"
+      additional = "%5B%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22file%22,%22poster_mtime%22,%22backdrop_mtime%22,%22summary%22,%22extra%22,%22collection%22,%22rating%22,%22originally_available%22%5D"
       params = "id=" + collectionId + "&offset=0&limit=500&sort_by=title&sort_direction=asc&additional=" + additional
       url = apiUrl(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "2", "video_list", params, sid, token)
       result = httpGet(url)
@@ -491,10 +506,21 @@ sub init()
       item = invalid
       usedId = ""
       for each candidateId in candidates
-          item = fetchCollectionInfoItem(baseUrl, sid, token, candidateId, mediaType)
-          if item <> invalid
-              usedId = candidateId
-              exit for
+          candidateItem = fetchCollectionInfoItem(baseUrl, sid, token, candidateId, mediaType)
+          if candidateItem <> invalid
+              if item = invalid
+                  item = candidateItem
+                  usedId = candidateId
+              end if
+              if detailStateRating(candidateItem) > 0
+                  item = candidateItem
+                  usedId = candidateId
+                  exit for
+              end if
+              if detailStateHas(candidateItem, ["watched_ratio", "watchedRatio"]) and not detailStateHas(item, ["watched_ratio", "watchedRatio"])
+                  item = candidateItem
+                  usedId = candidateId
+              end if
           end if
       end for
       if item = invalid
@@ -503,13 +529,53 @@ sub init()
       end if
 
       rating = detailStateRating(item)
+      summary = ""
+      if mediaType = "movie"
+          summary = movieSummaryText(item)
+      else
+          summary = episodeSummaryText(item)
+      end if
+      showBackdropUrl = ""
+      if mediaType = "episode"
+          showBackdropUrl = detailStateShowBackdropUrl(baseUrl, sid, token, item)
+      end if
       watched = detailStateWatchedPercent(item)
       hasWatched = detailStateHas(item, ["watched_ratio", "watchedRatio"])
       favorite = detailStateCollectionHas(item, ["5"], ["syno_favorite", "favorite", "favorites"])
       watchlist = detailStateCollectionHas(item, ["4"], ["syno_watchlist", "watchlist", "watch list"])
-      print "DETAIL_STATE_API type="; mediaType; " id="; usedId; " rating="; rating; " watchedRatio="; watched; " hasWatched="; hasWatched; " favorite="; favorite; " watchlist="; watchlist
-      m.top.response = { success: true, id: usedId, rating: rating, watchedRatio: watched, hasWatched: hasWatched, favorite: favorite, watchlist: watchlist }
+      print "DETAIL_STATE_API type="; mediaType; " id="; usedId; " rating="; rating; " summaryLen="; len(summary); " showBackdrop="; len(showBackdropUrl); " watchedRatio="; watched; " hasWatched="; hasWatched; " favorite="; favorite; " watchlist="; watchlist
+      m.top.response = { success: true, id: usedId, rating: rating, summary: summary, showBackdropUrl: showBackdropUrl, watchedRatio: watched, hasWatched: hasWatched, favorite: favorite, watchlist: watchlist }
   end sub
+
+  function detailStateShowBackdropUrl(baseUrl as string, sid as string, token as string, item as object) as string
+      if baseUrl = "" or sid = "" or item = invalid then return ""
+      tvshow = invalid
+      additional = item.lookUp("additional")
+      if additional <> invalid then tvshow = additional.lookUp("tvshow")
+      if tvshow = invalid then tvshow = item.lookUp("tvshow")
+      if tvshow <> invalid and type(tvshow) = "roAssociativeArray"
+          tvshowId = idToStr(tvshow.lookUp("id"))
+          if tvshowId <> "" and tvshowId <> "0"
+              url = baseUrl + "/webapi/entry.cgi?api=SYNO.VideoStation2.Backdrop&version=1&method=get"
+              url = url + "&id=" + tvshowId + "&type=tvshow&_sid=" + sid
+              if token <> "" then url = url + "&SynoToken=" + token
+              return url
+          end if
+          mapper = idToStr(tvshow.lookUp("mapper_id"))
+          if mapper = "" or mapper = "0" then mapper = idToStr(tvshow.lookUp("mapperId"))
+          if mapper <> "" and mapper <> "0"
+              url = baseUrl + "/webapi/VideoStation/backdrop.cgi?api=SYNO.VideoStation.Backdrop&version=1&method=get&mapper_id=" + mapper
+              url = url + "&_sid=" + sid
+              if token <> "" then url = url + "&SynoToken=" + token
+              return url
+          end if
+      end if
+      title = collectionDeepText(item, ["showTitle", "tvshow_title", "series_title", "parent_title"])
+      if title = "" or title = "0" then title = collectionDeepText(item, ["title", "name"])
+      show = tvShowByTitle(baseUrl, sid, token, title)
+      if show <> invalid then return showBackdropUrlFromShow(baseUrl, sid, token, show)
+      return ""
+  end function
 
   function detailStateCollectionHas(item as object, ids as object, names as object) as boolean
       collection = detailStateValue(item, ["collection", "collections"])
@@ -585,24 +651,31 @@ sub init()
 
   function detailStateRating(item as object) as integer
       rating = detailStateInt(item, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"])
-      if rating > 0 then return rating
+      if rating > 0 then return normalizeDetailStateRating(rating)
       return detailStateExtraRating(item)
   end function
 
   function detailStateExtraRating(item as object) as integer
       candidates = []
       if item <> invalid
+          ratingValue = item.lookUp("rating")
+          if ratingValue <> invalid then candidates.push(ratingValue)
           extra = item.lookUp("extra")
           if extra <> invalid then candidates.push(extra)
           additional = item.lookUp("additional")
           if additional <> invalid
+              ratingValue = additional.lookUp("rating")
+              if ratingValue <> invalid then candidates.push(ratingValue)
               extra = additional.lookUp("extra")
               if extra <> invalid then candidates.push(extra)
           end if
       end if
       for each candidate in candidates
-          extraObj = detailStateObject(candidate)
-          rating = detailStateNestedDbRating(extraObj)
+          rating = detailStateAnyRating(candidate, 0)
+          if rating <= 0
+              extraObj = detailStateObject(candidate)
+              rating = detailStateNestedDbRating(extraObj)
+          end if
           if rating > 0 then return rating
       end for
       return 0
@@ -610,6 +683,8 @@ sub init()
 
   function detailStateNestedDbRating(extraObj as dynamic) as integer
       if extraObj = invalid or type(extraObj) <> "roAssociativeArray" then return 0
+      anyRating = detailStateAnyRating(extraObj, 0)
+      if anyRating > 0 then return anyRating
       best = 0
       for each dbKey in ["synoVideoDb", "synovideodb", "theMovieDb", "themoviedb", "theTVDb", "thetvdb"]
           db = extraObj.lookUp(dbKey)
@@ -629,6 +704,53 @@ sub init()
       end for
       if best > 100 then best = 100
       return best
+  end function
+
+  function detailStateAnyRating(value as dynamic, depth as integer) as integer
+      if value = invalid or depth > 4 then return 0
+      t = type(value)
+      if t = "roInteger" or t = "Integer" or t = "roInt" or t = "roLongInteger" or t = "LongInteger" or t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+          return normalizeDetailStateRating(value)
+      end if
+      if t = "roString" or t = "String"
+          trimmed = value.trim()
+          if trimmed = "" then return 0
+          parsed = parseJSON(trimmed)
+          if parsed <> invalid then return detailStateAnyRating(parsed, depth + 1)
+          return normalizeDetailStateRating(val(trimmed))
+      end if
+      if t = "roArray"
+          best = 0
+          for each child in value
+              score = detailStateAnyRating(child, depth + 1)
+              if score > best then best = score
+          end for
+          return best
+      end if
+      if t = "roAssociativeArray"
+          best = 0
+          for each key in value
+              lower = lcase(key)
+              child = value.lookUp(key)
+              score = 0
+              if lower = "rating" or lower = "rate" or instr(1, lower, "rating") > 0 or lower = "imdb" or lower = "tmdb" or lower = "themoviedb" or lower = "thetvdb" or lower = "synovideodb"
+                  score = detailStateAnyRating(child, depth + 1)
+              else if type(child) = "roAssociativeArray"
+                  score = detailStateAnyRating(child, depth + 1)
+              end if
+              if score > best then best = score
+          end for
+          return best
+      end if
+      return 0
+  end function
+
+  function normalizeDetailStateRating(value as dynamic) as integer
+      num = detailStateValueToInt(value)
+      if num <= 0 then return 0
+      if num <= 10 then num = num * 10
+      if num > 100 then num = 100
+      return num
   end function
 
   function detailStateWatchedPercent(item as object) as integer
@@ -1016,40 +1138,111 @@ sub init()
       videoId = idToStr(req.id)
       title = ""
       if req.title <> invalid then title = req.title
+      filePath = ""
+      if req.filePath <> invalid then filePath = req.filePath
       if videoId = "" or videoId = "0"
           m.top.response = { success: false, error: "missing movie id", summary: "" }
           return
       end if
 
-      summary = movieMetadataSummaryV2(baseUrl, sid, token, videoId)
+      candidates = []
+      if req.ids <> invalid
+          for each candidate in req.ids
+              pushUniqueString(candidates, candidate)
+          end for
+      end if
+      pushUniqueString(candidates, videoId)
+
+      summary = ""
+      rating = 0
       source = "synology2"
-      if summary = ""
-          summary = movieMetadataSummaryV1(baseUrl, sid, videoId)
-          source = "synology1"
+      usedId = videoId
+      fallbackSummary = ""
+      for each candidateId in candidates
+          metadata = movieMetadataV2(baseUrl, sid, token, candidateId)
+          if fallbackSummary = "" and metadata.summary <> "" then fallbackSummary = metadata.summary
+          if metadata.rating > rating then rating = metadata.rating
+          if metadata.summary <> "" and metadata.rating > 0
+              summary = metadata.summary
+              source = "synology2"
+              usedId = candidateId
+              exit for
+          end if
+      end for
+      if summary = "" then summary = fallbackSummary
+      if summary = "" or rating <= 0
+          for each candidateId in candidates
+              metadata = movieMetadataV1(baseUrl, sid, candidateId)
+              if summary = "" and metadata.summary <> ""
+                  summary = metadata.summary
+                  source = "synology1"
+                  usedId = candidateId
+              end if
+              if metadata.rating > rating then rating = metadata.rating
+              if summary <> "" and rating > 0 then exit for
+          end for
+      end if
+      if summary = "" and filePath <> ""
+          summary = fetchVsmetaSummary(baseUrl, sid, token, filePath, title)
+          if summary <> ""
+              source = "vsmeta"
+              usedId = videoId
+          end if
       end if
       if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then summary = ""
-      print "MOVIE_METADATA id="; videoId; " source="; source; " summaryLen="; len(summary)
-      m.top.response = { success: summary <> "", summary: summary, id: videoId, source: source }
+      print "MOVIE_METADATA id="; videoId; " used="; usedId; " source="; source; " summaryLen="; len(summary); " rating="; rating
+      m.top.response = { success: summary <> "" or rating > 0, summary: summary, rating: rating, id: videoId, usedId: usedId, source: source }
   end sub
 
   function movieMetadataSummaryV2(baseUrl as string, sid as string, token as string, videoId as string) as string
+      metadata = movieMetadataV2(baseUrl, sid, token, videoId)
+      return metadata.summary
+  end function
+
+  function movieMetadataV2(baseUrl as string, sid as string, token as string, videoId as string) as object
       apiName = "SYNO.VideoStation2.Movie"
       url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
       enc = createObject("roUrlTransfer")
-      additional = "[%22summary%22,%22extra%22,%22file%22,%22watched_ratio%22,%22poster_mtime%22,%22backdrop_mtime%22]"
-      body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=%5B" + enc.escape(videoId) + "%5D&additional=" + additional
-      r = httpPostForm(url, body)
-      if r = invalid or r = "" then return ""
-      j = parseJSON(r)
-      if j <> invalid and j.success = true and j.data <> invalid
-          item = firstV2InfoItem(j.data, "movie")
-          if item <> invalid then return movieSummaryText(item)
-      end if
-      return ""
+      addlForms = [
+          "%5B%22summary%22,%22extra%22,%22file%22,%22watched_ratio%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22%5D",
+          "%5B%22summary%22,%22extra%22,%22rating%22%5D",
+          "%5B%22summary%22,%22rating%22%5D"
+      ]
+      idForms = [
+          "%5B%22" + enc.escape(videoId) + "%22%5D",
+          "%5B" + enc.escape(videoId) + "%5D",
+          enc.escape(videoId)
+      ]
+      best = { summary: "", rating: 0 }
+      for each idForm in idForms
+          for each additional in addlForms
+              body = "api=" + enc.escape(apiName) + "&version=1&method=getinfo&id=" + idForm + "&additional=" + additional
+              r = httpPostForm(url, body)
+              if r <> invalid and r <> ""
+                  j = parseJSON(r)
+                  if j <> invalid and j.success = true and j.data <> invalid
+                      item = firstV2InfoItem(j.data, "movie")
+                      if item <> invalid
+                          summary = movieSummaryText(item)
+                          rating = detailStateRating(item)
+                          if best.summary = "" and summary <> "" then best.summary = summary
+                          if rating > best.rating then best.rating = rating
+                          if summary <> "" or rating > 0 then return { summary: summary, rating: rating }
+                      end if
+                  end if
+              end if
+          end for
+      end for
+      return best
   end function
 
   function movieMetadataSummaryV1(baseUrl as string, sid as string, videoId as string) as string
-      addlFormats = ["additional=%5B%22summary%22,%22extra%22,%22file%22%5D", "additional=summary", "additional=%22summary%22"]
+      metadata = movieMetadataV1(baseUrl, sid, videoId)
+      return metadata.summary
+  end function
+
+  function movieMetadataV1(baseUrl as string, sid as string, videoId as string) as object
+      addlFormats = ["additional=%5B%22summary%22,%22extra%22,%22file%22,%22watched_ratio%22,%22rating%22%5D", "additional=%5B%22summary%22,%22extra%22,%22rating%22%5D", "additional=summary", "additional=%22summary%22"]
       for each addl in addlFormats
           url = baseUrl + "/webapi/VideoStation/movie.cgi?api=SYNO.VideoStation.Movie&version=1&method=getinfo&id=" + videoId + "&" + addl + "&_sid=" + sid
           r = httpGet(url)
@@ -1061,16 +1254,18 @@ sub init()
                   if movies <> invalid
                       if type(movies) = "roArray" and movies.count() > 0
                           summary = movieSummaryText(movies[0])
-                          if summary <> "" then return summary
+                          rating = detailStateRating(movies[0])
+                          if summary <> "" or rating > 0 then return { summary: summary, rating: rating }
                       else if type(movies) = "roAssociativeArray"
                           summary = movieSummaryText(movies)
-                          if summary <> "" then return summary
+                          rating = detailStateRating(movies)
+                          if summary <> "" or rating > 0 then return { summary: summary, rating: rating }
                       end if
                   end if
               end if
           end if
       end for
-      return ""
+      return { summary: "", rating: 0 }
   end function
 
   function getFileInfoV2(baseUrl as string, sid as string, token as string, videoId as string, mediaType as string) as object
@@ -1192,15 +1387,6 @@ sub init()
       enc = createObject("roUrlTransfer")
       return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(subtitlePathForVideo(filePath))) + "&mode=open", sid, token)
   end function
-
-  sub ensureProxySubtitleForVideo(baseUrl as string, proxyBaseUrl as dynamic, filePath as string)
-      if filePath = "" then return
-      proxyUrl = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl)
-      if proxyUrl = "" then return
-      enc = createObject("roUrlTransfer")
-      result = httpGet(proxyUrl + "/subtitles/ensure?path=" + enc.escape(filePath))
-      if result <> invalid then print "SUBTITLE_ENSURE "; left(result, 160)
-  end sub
 
   function fileStationSidecarPosterPath(videoPath as string) as string
       if videoPath = "" then return ""
@@ -1831,7 +2017,6 @@ sub init()
           streamUrl = fileStationStreamUrl(baseUrl, sid, token, filePath)
           fsPath = fileStationPath(filePath)
           print "FILESTATION_PLAY path="; fsPath
-          ensureProxySubtitleForVideo(baseUrl, proxyBaseUrl, filePath)
           m.top.response = { success: true, streamUrl: streamUrl, streamFormat: streamFormatForPath(filePath), subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FileStation " + left(fsPath, 120) }
           return
       else if filePath <> ""
@@ -2036,6 +2221,7 @@ sub init()
       if m.skipCachedArtworkResolve <> invalid and m.skipCachedArtworkResolve = true then skipCachedArtwork = true
       if not skipCachedArtwork then normalizeMapperIdsForItems(items)
       normalizeBrowseSummaries(items)
+      if m.flattenBrowseFileFields <> invalid and m.flattenBrowseFileFields = true then normalizeHomeVideoFields(items, baseUrl, sid)
       addDirectPosterIds(items)
       items = sortBrowseItems(items)
       if not skipCachedArtwork then resolveCachedArtworkForItems(items, 1500)
@@ -2048,6 +2234,487 @@ sub init()
       m.top.response = { success: true, items: items, total: total, baseUrl: baseUrl, sid: sid }
   end sub
 
+  sub normalizeHomeVideoFields(items as object, baseUrl as string, sid as string)
+      if items = invalid then return
+      token = ""
+      if m.top.request <> invalid and m.top.request.synoToken <> invalid then token = m.top.request.synoToken
+      fileMap = { byId: {}, byMapper: {}, byTitle: {}, rows: [], changed: false }
+      dateMap = homeVideoDateMap(baseUrl, sid, token)
+      missing = []
+      for each item in items
+          additional = item.lookUp("additional")
+          if additional <> invalid
+              flattenBrowseTextField(item, additional, "record_time")
+              flattenBrowseTextField(item, additional, "record_time_utc")
+              flattenBrowseTextField(item, additional, "originally_available")
+              flattenBrowseTextField(item, additional, "date")
+              flattenBrowseTextField(item, additional, "create_time")
+              extraValue = additional.lookUp("extra")
+              flattenHomeVideoExtraDateFields(item, extraValue)
+              fileValue = additional.lookUp("file")
+              flattenBrowseFileField(item, fileValue)
+              filesValue = additional.lookUp("files")
+              flattenBrowseFileField(item, filesValue)
+          end if
+          fileValue = item.lookUp("file")
+          flattenBrowseFileField(item, fileValue)
+          filesValue = item.lookUp("files")
+          flattenBrowseFileField(item, filesValue)
+          applyHomeVideoFilenameMap(item, fileMap)
+          applyHomeVideoDateMap(item, dateMap)
+          path = idToStr(item.lookUp("path"))
+          if path = "" or path = "0" then path = idToStr(item.lookUp("filePath"))
+          if path <> "" and path <> "0"
+              mergeHomeVideoFilenameMapEntry(fileMap, item, path)
+          else
+              missing.push(item)
+          end if
+      end for
+      resolved = 0
+      ' Keep Home Video browsing fast: never rebuild or upload the cache while the grid is loading.
+      ' Missing entries simply fall back to dates already present in the list item.
+      if resolved > 0 then print "HOMEVIDEO_FILENAME_CACHE resolvedNew="; resolved
+  end sub
+
+  function homeVideoDateMap(baseUrl as string, sid as string, token as string) as object
+      maps = { byId: {}, byMapper: {}, byTitle: {} }
+      if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = "" then return maps
+      raw = httpGet(fileStationStreamUrl(baseUrl, sid, token, "/video/Home/roku-home-video-dates.json"))
+      if raw = invalid or raw = "" then return maps
+      rows = parseJSON(raw)
+      if rows = invalid or type(rows) <> "roArray" then return maps
+      for each row in rows
+          if row <> invalid and type(row) = "roAssociativeArray"
+              entry = {
+                  date: idToStr(row.lookUp("date")),
+                  title: idToStr(row.lookUp("title"))
+              }
+              if entry.date <> "" and entry.date <> "0"
+                  id = idToStr(row.lookUp("id"))
+                  if id <> "" and id <> "0" then maps.byId.addReplace(id, entry)
+                  mapper = idToStr(row.lookUp("mapper_id"))
+                  if mapper = "" or mapper = "0" then mapper = idToStr(row.lookUp("mapperId"))
+                  if mapper <> "" and mapper <> "0" then maps.byMapper.addReplace(mapper, entry)
+                  title = idToStr(row.lookUp("title"))
+                  if title <> "" and title <> "0" then maps.byTitle.addReplace(normalizedTitleKey(title), entry)
+                  rawTitle = idToStr(row.lookUp("rawTitle"))
+                  if rawTitle <> "" and rawTitle <> "0" then maps.byTitle.addReplace(normalizedTitleKey(rawTitle), entry)
+              end if
+          end if
+      end for
+      print "HOMEVIDEO_DATE_MAP count="; rows.count()
+      return maps
+  end function
+
+  sub applyHomeVideoDateMap(item as object, dateMap as object)
+      if item = invalid or dateMap = invalid then return
+      entry = invalid
+      id = idToStr(item.lookUp("id"))
+      if id <> "" and id <> "0" then entry = dateMap.byId.lookUp(id)
+      if entry = invalid
+          mapper = idToStr(item.lookUp("mapper_id"))
+          if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+          if mapper <> "" and mapper <> "0" then entry = dateMap.byMapper.lookUp(mapper)
+      end if
+      if entry = invalid
+          title = idToStr(item.lookUp("title"))
+          if title = "" or title = "0" then title = idToStr(item.lookUp("name"))
+          if title <> "" and title <> "0" then entry = dateMap.byTitle.lookUp(normalizedTitleKey(title))
+      end if
+      if entry = invalid then return
+      dateText = idToStr(entry.lookUp("date"))
+      if dateText <> "" and dateText <> "0"
+          item.addReplace("rokuDate", dateText)
+          item.addReplace("originalAvailable", dateText)
+          item.addReplace("original_available", dateText)
+      end if
+      displayTitle = idToStr(entry.lookUp("title"))
+      if displayTitle <> "" and displayTitle <> "0" then item.addReplace("rokuDisplayTitle", displayTitle)
+  end sub
+
+  sub flattenHomeVideoExtraDateFields(item as object, value as dynamic)
+      if item = invalid or value = invalid then return
+      extraObj = invalid
+      valueType = type(value)
+      if valueType = "roAssociativeArray"
+          extraObj = value
+      else if valueType = "roString" or valueType = "String"
+          extraObj = parseJSON(value)
+      end if
+      if extraObj = invalid or type(extraObj) <> "roAssociativeArray" then return
+      flattenBrowseTextField(item, extraObj, "record_time")
+      flattenBrowseTextField(item, extraObj, "record_time_utc")
+      flattenBrowseTextField(item, extraObj, "originally_available")
+      flattenBrowseTextField(item, extraObj, "date")
+      flattenBrowseTextField(item, extraObj, "create_time")
+  end sub
+
+  function homeVideoFilenameMap(baseUrl as string, sid as string, token as string) as object
+      maps = { byId: {}, byMapper: {}, byTitle: {}, rows: [], changed: false }
+      raw = homeVideoFilenameRegistryCache()
+      if raw = "" then return maps
+      rows = parseJSON(raw)
+      if rows = invalid or type(rows) <> "roArray" then return maps
+
+      for each row in rows
+          if row <> invalid and type(row) = "roAssociativeArray"
+              path = idToStr(row.lookUp("path"))
+              if path <> "" and path <> "0"
+                  entry = { path: path, row: row }
+                  id = idToStr(row.lookUp("id"))
+                  if id <> "" and id <> "0" then maps.byId.addReplace(id, entry)
+                  mapper = idToStr(row.lookUp("mapper_id"))
+                  if mapper = "" or mapper = "0" then mapper = idToStr(row.lookUp("mapperId"))
+                  if mapper <> "" and mapper <> "0" then maps.byMapper.addReplace(mapper, entry)
+                  title = idToStr(row.lookUp("title"))
+                  if title <> "" and title <> "0"
+                      key = normalizedTitleKey(title)
+                      if key <> "" and maps.byTitle.lookUp(key) = invalid then maps.byTitle.addReplace(key, entry)
+                  end if
+                  maps.rows.push(row)
+              end if
+          end if
+      end for
+      print "HOMEVIDEO_FILENAME_MAP count="; rows.count()
+      return maps
+  end function
+
+  function homeVideoFilenameRegistryCache() as string
+      reg = createObject("roRegistrySection", "DSVideoHomeVideo")
+      if reg.exists("filenameMapChunks")
+          count = val(reg.read("filenameMapChunks"))
+          raw = ""
+          i = 0
+          while i < count
+              key = "filenameMap" + stri(i).trim()
+              if reg.exists(key) then raw = raw + reg.read(key)
+              i = i + 1
+          end while
+          if raw <> "" then return raw
+      end if
+      if reg.exists("filenameMap") then return reg.read("filenameMap")
+      return ""
+  end function
+
+  sub writeHomeVideoFilenameRegistryCache(raw as string)
+      reg = createObject("roRegistrySection", "DSVideoHomeVideo")
+      chunkSize = 900
+      total = len(raw)
+      count = int((total + chunkSize - 1) / chunkSize)
+      i = 0
+      while i < count
+          start = i * chunkSize + 1
+          chunk = mid(raw, start, chunkSize)
+          reg.write("filenameMap" + stri(i).trim(), chunk)
+          i = i + 1
+      end while
+      reg.write("filenameMapChunks", stri(count).trim())
+      reg.flush()
+  end sub
+
+  sub refreshHomeVideoFilenameCache(req as object)
+      baseUrl = req.baseUrl
+      sid = req.sid
+      token = ""
+      if req.synoToken <> invalid then token = req.synoToken
+      if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = ""
+          m.top.response = { success: false, error: "Missing Synology session" }
+          return
+      end if
+      raw = httpGet(fileStationStreamUrl(baseUrl, sid, token, "/video/Home/roku-home-video-files.json"))
+      if raw = invalid or raw = ""
+          m.top.response = { success: false, error: "No filename cache found" }
+          return
+      end if
+      rows = parseJSON(raw)
+      if rows = invalid or type(rows) <> "roArray"
+          m.top.response = { success: false, error: "Invalid filename cache" }
+          return
+      end if
+      fileMap = homeVideoFilenameMapFromRows(rows)
+      patches = homeVideoFilenamePatchesForItems(req.items, fileMap)
+      m.top.response = { success: true, changed: patches.count() > 0, count: rows.count(), patches: patches }
+  end sub
+
+  function homeVideoFilenameMapFromRows(rows as object) as object
+      maps = { byId: {}, byMapper: {}, byTitle: {} }
+      for each row in rows
+          if row <> invalid and type(row) = "roAssociativeArray"
+              path = idToStr(row.lookUp("path"))
+              if path <> "" and path <> "0"
+                  entry = { path: path }
+                  id = idToStr(row.lookUp("id"))
+                  if id <> "" and id <> "0" then maps.byId.addReplace(id, entry)
+                  mapper = idToStr(row.lookUp("mapper_id"))
+                  if mapper = "" or mapper = "0" then mapper = idToStr(row.lookUp("mapperId"))
+                  if mapper <> "" and mapper <> "0" then maps.byMapper.addReplace(mapper, entry)
+                  title = idToStr(row.lookUp("title"))
+                  if title <> "" and title <> "0"
+                      key = normalizedTitleKey(title)
+                      if key <> "" and maps.byTitle.lookUp(key) = invalid then maps.byTitle.addReplace(key, entry)
+                  end if
+              end if
+          end if
+      end for
+      return maps
+  end function
+
+  function homeVideoFilenamePatchesForItems(items as dynamic, fileMap as object) as object
+      patches = []
+      if items = invalid or type(items) <> "roArray" then return patches
+      for each item in items
+          if item <> invalid and type(item) = "roAssociativeArray"
+              entry = invalid
+              id = idToStr(item.lookUp("id"))
+              if id <> "" and id <> "0" then entry = fileMap.byId.lookUp(id)
+              if entry = invalid
+                  mapper = idToStr(item.lookUp("mapper_id"))
+                  if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+                  if mapper <> "" and mapper <> "0" then entry = fileMap.byMapper.lookUp(mapper)
+              end if
+              if entry = invalid
+                  title = idToStr(item.lookUp("title"))
+                  if title <> "" and title <> "0" then entry = fileMap.byTitle.lookUp(normalizedTitleKey(title))
+              end if
+              if entry <> invalid
+                  path = idToStr(entry.lookUp("path"))
+                  if path <> "" and path <> "0"
+                      patches.push({ index: item.lookUp("index"), path: path })
+                  end if
+              end if
+          end if
+      end for
+      return patches
+  end function
+
+  sub applyHomeVideoFilenameMap(item as object, fileMap as object)
+      if item = invalid or fileMap = invalid then return
+      existingPath = idToStr(item.lookUp("path"))
+      if existingPath = "" or existingPath = "0" then existingPath = idToStr(item.lookUp("filePath"))
+      if existingPath <> "" and existingPath <> "0" then return
+
+      entry = invalid
+      id = idToStr(item.lookUp("id"))
+      if id <> "" and id <> "0" then entry = fileMap.byId.lookUp(id)
+      if entry = invalid
+          mapper = idToStr(item.lookUp("mapper_id"))
+          if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+          if mapper <> "" and mapper <> "0" then entry = fileMap.byMapper.lookUp(mapper)
+      end if
+      if entry = invalid
+          title = idToStr(item.lookUp("title"))
+          if title = "" or title = "0" then title = idToStr(item.lookUp("name"))
+          if title <> "" and title <> "0" then entry = fileMap.byTitle.lookUp(normalizedTitleKey(title))
+      end if
+      if entry = invalid then return
+
+      path = idToStr(entry.lookUp("path"))
+      if path = "" or path = "0" then return
+      item.addReplace("path", path)
+      item.addReplace("filePath", path)
+      item.addReplace("file_name", baseName(path))
+  end sub
+
+  function resolveMissingHomeVideoFilenames(items as object, fileMap as object, baseUrl as string, sid as string, token as string) as integer
+      if items = invalid or fileMap = invalid then return 0
+      resolved = 0
+      attempts = 0
+      maxAttempts = 4
+      for each item in items
+          if attempts >= maxAttempts then exit for
+          title = idToStr(item.lookUp("title"))
+          if title = "" or title = "0" then title = idToStr(item.lookUp("name"))
+          if title <> "" and title <> "0"
+              attempts = attempts + 1
+              path = findHomeVideoPathByTitle(baseUrl, sid, token, title)
+              if path <> "" and path <> "0"
+                  item.addReplace("path", path)
+                  item.addReplace("filePath", path)
+                  item.addReplace("file_name", baseName(path))
+                  mergeHomeVideoFilenameMapEntry(fileMap, item, path)
+                  resolved = resolved + 1
+              end if
+          end if
+      end for
+      if items.count() > maxAttempts
+          print "HOMEVIDEO_FILENAME_CACHE missingDeferred="; items.count() - maxAttempts
+      end if
+      return resolved
+  end function
+
+  sub mergeHomeVideoFilenameMapEntry(fileMap as object, item as object, path as string)
+      if fileMap = invalid or item = invalid or path = "" or path = "0" then return
+      id = idToStr(item.lookUp("id"))
+      mapper = idToStr(item.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+      title = idToStr(item.lookUp("title"))
+      if title = "" or title = "0" then title = idToStr(item.lookUp("name"))
+
+      entry = invalid
+      if id <> "" and id <> "0" then entry = fileMap.byId.lookUp(id)
+      if entry = invalid and mapper <> "" and mapper <> "0" then entry = fileMap.byMapper.lookUp(mapper)
+      if entry = invalid and title <> "" and title <> "0" then entry = fileMap.byTitle.lookUp(normalizedTitleKey(title))
+
+      if entry <> invalid
+          oldPath = idToStr(entry.lookUp("path"))
+          if oldPath = path then return
+          row = entry.lookUp("row")
+          if row <> invalid
+              row.addReplace("path", path)
+              entry.addReplace("path", path)
+              fileMap.changed = true
+          end if
+          return
+      end if
+
+      row = { path: path }
+      if id <> "" and id <> "0" then row.addReplace("id", id)
+      if mapper <> "" and mapper <> "0" then row.addReplace("mapper_id", mapper)
+      if title <> "" and title <> "0" then row.addReplace("title", title)
+      entry = { path: path, row: row }
+      if id <> "" and id <> "0" then fileMap.byId.addReplace(id, entry)
+      if mapper <> "" and mapper <> "0" then fileMap.byMapper.addReplace(mapper, entry)
+      if title <> "" and title <> "0"
+          key = normalizedTitleKey(title)
+          if key <> "" and fileMap.byTitle.lookUp(key) = invalid then fileMap.byTitle.addReplace(key, entry)
+      end if
+      fileMap.rows.push(row)
+      fileMap.changed = true
+  end sub
+
+  sub saveHomeVideoFilenameMap(fileMap as object, baseUrl as string, sid as string, token as string)
+      if fileMap = invalid or baseUrl = "" or sid = "" then return
+      json = homeVideoFilenameMapJson(fileMap)
+      if json = "" then return
+      ok = uploadTextFileToFileStation(baseUrl, sid, token, "/video/Home", "roku-home-video-files.json", json)
+      if ok
+          fileMap.changed = false
+          print "HOMEVIDEO_FILENAME_CACHE saved count="; fileMap.rows.count()
+      else
+          print "HOMEVIDEO_FILENAME_CACHE saveFailed"
+      end if
+  end sub
+
+  function homeVideoFilenameMapJson(fileMap as object) as string
+      if fileMap = invalid or fileMap.rows = invalid then return ""
+      json = "["
+      first = true
+      for each row in fileMap.rows
+          path = idToStr(row.lookUp("path"))
+          if path <> "" and path <> "0"
+              if not first then json = json + ","
+              first = false
+              json = json + "{"
+              fieldFirst = true
+              for each key in ["id", "mapper_id", "title", "path"]
+                  value = idToStr(row.lookUp(key))
+                  if value <> "" and value <> "0"
+                      if not fieldFirst then json = json + ","
+                      fieldFirst = false
+                      json = json + chr(34) + key + chr(34) + ":" + chr(34) + jsonEscape(value) + chr(34)
+                  end if
+              end for
+              json = json + "}"
+          end if
+      end for
+      return json + "]"
+  end function
+
+  function uploadTextFileToFileStation(baseUrl as string, sid as string, token as string, folderPath as string, fileName as string, contents as string) as boolean
+      enc = createObject("roUrlTransfer")
+      url = apiEndpoint(baseUrl, "SYNO.FileStation.Upload", "entry.cgi", sid, token)
+      boundary = "----RokuDsVideoBoundary"
+      body = "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "api" + chr(34) + chr(13) + chr(10) + chr(13) + chr(10) + "SYNO.FileStation.Upload" + chr(13) + chr(10)
+      body = body + "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "version" + chr(34) + chr(13) + chr(10) + chr(13) + chr(10) + "2" + chr(13) + chr(10)
+      body = body + "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "method" + chr(34) + chr(13) + chr(10) + chr(13) + chr(10) + "upload" + chr(13) + chr(10)
+      body = body + "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "path" + chr(34) + chr(13) + chr(10) + chr(13) + chr(10) + fileStationPath(folderPath) + chr(13) + chr(10)
+      body = body + "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "create_parents" + chr(34) + chr(13) + chr(10) + chr(13) + chr(10) + "true" + chr(13) + chr(10)
+      body = body + "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "overwrite" + chr(34) + chr(13) + chr(10) + chr(13) + chr(10) + "true" + chr(13) + chr(10)
+      body = body + "--" + boundary + chr(13) + chr(10)
+      body = body + "Content-Disposition: form-data; name=" + chr(34) + "file" + chr(34) + "; filename=" + chr(34) + fileName + chr(34) + chr(13) + chr(10)
+      body = body + "Content-Type: application/json" + chr(13) + chr(10) + chr(13) + chr(10)
+      body = body + contents + chr(13) + chr(10)
+      body = body + "--" + boundary + "--" + chr(13) + chr(10)
+      result = httpPostMultipart(url, body, boundary)
+      if result = invalid or result = "" then return false
+      parsed = parseJSON(result)
+      if parsed <> invalid and parsed.success = true then return true
+      return false
+  end function
+
+  function jsonEscape(value as string) as string
+      out = ""
+      i = 1
+      while i <= len(value)
+          ch = mid(value, i, 1)
+          if ch = chr(34)
+              out = out + "\" + chr(34)
+          else if ch = "\"
+              out = out + "\\"
+          else if ch = chr(13) or ch = chr(10)
+              out = out + " "
+          else
+              out = out + ch
+          end if
+          i = i + 1
+      end while
+      return out
+  end function
+
+  function findHomeVideoPathByTitle(baseUrl as string, sid as string, token as string, title as string) as string
+      if title = "" then return ""
+      direct = findMovieBySearch(baseUrl, sid, title, "/video/Home")
+      if direct <> "" then return direct
+      return findMovieInTree(baseUrl, sid, title, "/video/Home", 2)
+  end function
+
+  sub flattenBrowseTextField(item as object, source as object, key as string)
+      value = source.lookUp(key)
+      if value = invalid then return
+      current = item.lookUp(key)
+      if current = invalid
+          item.addReplace(key, value)
+          return
+      end if
+      currentType = type(current)
+      if currentType = "roAssociativeArray" or currentType = "AssociativeArray" or currentType = "roArray" or currentType = "Array"
+          item.addReplace(key, value)
+          return
+      end if
+      currentText = idToStr(current)
+      if currentText = "" or currentText = "0" then item.addReplace(key, value)
+  end sub
+
+  sub flattenBrowseFileField(item as object, value as dynamic)
+      fileObj = invalid
+      if value = invalid then return
+      valueType = type(value)
+      if valueType = "roArray"
+          if value.count() > 0 then fileObj = value[0]
+      else if valueType = "roAssociativeArray"
+          fileObj = value
+      end if
+      if fileObj = invalid then return
+      if item.lookUp("file_id") = invalid
+          fid = fileObj.lookUp("id")
+          if fid = invalid then fid = fileObj.lookUp("file_id")
+          if fid <> invalid then item.addReplace("file_id", fid)
+      end if
+      path = fileObj.lookUp("path")
+      if path = invalid then path = fileObj.lookUp("sharepath")
+      if path = invalid then path = fileObj.lookUp("file_path")
+      if path <> invalid
+          if item.lookUp("path") = invalid then item.addReplace("path", path)
+          if item.lookUp("filePath") = invalid then item.addReplace("filePath", path)
+      end if
+  end sub
+
   sub normalizeBrowseSummaries(items as object)
       if items = invalid then return
       for each item in items
@@ -2056,6 +2723,8 @@ sub init()
               item.addReplace("summary", summary)
               item.addReplace("description", summary)
           end if
+          rating = detailStateRating(item)
+          if rating > 0 then item.addReplace("rating", rating)
       end for
   end sub
 
@@ -2216,9 +2885,11 @@ sub init()
       items = json.data.lookUp(dataKey)
       if items = invalid then items = []
       mediaType = collectionItemTypeForKey(dataKey)
+      dateMap = homeVideoDateMap(baseUrl, sid, token)
       normalized = []
       for each item in items
           normalizeCollectionVideo(item, mediaType)
+          if normalizedAppVideoType(idToStr(item.lookUp("type"))) = "homevideo" then applyHomeVideoDateMap(item, dateMap)
           enrichCollectionVideoMetadata(item, baseUrl, sid, token)
           normalized.push(item)
       end for
@@ -2335,6 +3006,16 @@ sub init()
       end if
       mapper = idToStr(item.lookUp("mapper_id"))
       if mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
+      showMapper = collectionDeepText(item, ["showMapperId", "show_mapper_id", "tvshow_mapper_id"])
+      if showMapper <> "" and showMapper <> "0"
+          item.addReplace("showMapperId", showMapper)
+          item.addReplace("show_mapper_id", showMapper)
+      end if
+      showBackdropMtime = collectionDeepText(item, ["showBackdropMtime", "show_backdrop_mtime", "tvshow_backdrop_mtime"])
+      if showBackdropMtime <> "" and showBackdropMtime <> "0"
+          item.addReplace("showBackdropMtime", showBackdropMtime)
+          item.addReplace("show_backdrop_mtime", showBackdropMtime)
+      end if
       id = idToStr(item.lookUp("id"))
       if id = "" or id = "0" then id = idToStr(item.lookUp("videoStationId"))
       if id <> "" and id <> "0"
@@ -2355,6 +3036,23 @@ sub init()
       if additional <> invalid
           summary = idToStr(additional.lookUp("summary"))
           if summary <> "0" and summary <> "" then item.addReplace("summary", summary)
+          rating = detailStateRating(additional)
+          if rating > 0 then item.addReplace("rating", rating)
+          tvshow = additional.lookUp("tvshow")
+          if tvshow <> invalid and type(tvshow) = "roAssociativeArray"
+              showMapper = idToStr(tvshow.lookUp("mapper_id"))
+              if showMapper = "" or showMapper = "0" then showMapper = idToStr(tvshow.lookUp("mapperId"))
+              if showMapper = "" or showMapper = "0" then showMapper = idToStr(tvshow.lookUp("id"))
+              if showMapper <> "" and showMapper <> "0"
+                  item.addReplace("showMapperId", showMapper)
+                  item.addReplace("show_mapper_id", showMapper)
+              end if
+              showBackdropMtime = idToStr(tvshow.lookUp("backdrop_mtime"))
+              if showBackdropMtime <> "" and showBackdropMtime <> "0"
+                  item.addReplace("showBackdropMtime", showBackdropMtime)
+                  item.addReplace("show_backdrop_mtime", showBackdropMtime)
+              end if
+          end if
           posterMtime = idToStr(additional.lookUp("poster_mtime"))
           if posterMtime <> "" and posterMtime <> "0" then item.addReplace("poster_mtime", posterMtime)
           backdropMtime = idToStr(additional.lookUp("backdrop_mtime"))
@@ -2429,22 +3127,222 @@ sub init()
       if item = invalid then return
       mediaType = normalizedAppVideoType(idToStr(item.lookUp("type")))
       if mediaType = "" or mediaType = "0" then return
+      if mediaType = "episode" then enrichPlaylistShowBackdrop(item, baseUrl, sid, token)
       if not collectionNeedsMetadata(item, mediaType) then return
 
-      videoId = idToStr(item.lookUp("id"))
-      if videoId = "" or videoId = "0" then videoId = idToStr(item.lookUp("videoStationId"))
-      if videoId = "" or videoId = "0" then return
+      candidateIds = []
+      pushUniqueString(candidateIds, idToStr(item.lookUp("id")))
+      pushUniqueString(candidateIds, idToStr(item.lookUp("videoStationId")))
+      pushUniqueString(candidateIds, idToStr(item.lookUp("mapper_id")))
+      pushUniqueString(candidateIds, idToStr(item.lookUp("mapperId")))
+      fileInfo = itemFileInfo(item)
+      pushUniqueString(candidateIds, idToStr(fileInfo.id))
 
-      meta = fetchCollectionInfoItem(baseUrl, sid, token, videoId, mediaType)
+      meta = invalid
+      videoId = ""
+      for each candidateId in candidateIds
+          if candidateId <> "" and candidateId <> "0"
+              candidateMeta = fetchCollectionInfoItem(baseUrl, sid, token, candidateId, mediaType)
+              if candidateMeta <> invalid
+                  if meta = invalid
+                      meta = candidateMeta
+                      videoId = candidateId
+                  end if
+                  if detailStateRating(candidateMeta) > 0
+                      meta = candidateMeta
+                      videoId = candidateId
+                      exit for
+                  end if
+              end if
+          end if
+      end for
       if meta = invalid then return
       copyCollectionMetadata(meta, item, mediaType)
-      print "COLLECTION_METADATA type="; mediaType; " id="; videoId; " title="; idToStr(item.lookUp("title")); " show="; idToStr(item.lookUp("showTitle")); " season="; idToStr(item.lookUp("seasonNumber")); " episode="; idToStr(item.lookUp("episodeNumber")); " date="; idToStr(item.lookUp("original_available"))
+      print "COLLECTION_METADATA type="; mediaType; " id="; videoId; " title="; idToStr(item.lookUp("title")); " rating="; detailStateRating(item); " show="; idToStr(item.lookUp("showTitle")); " season="; idToStr(item.lookUp("seasonNumber")); " episode="; idToStr(item.lookUp("episodeNumber")); " date="; idToStr(item.lookUp("original_available"))
+  end sub
+
+  sub enrichPlaylistShowBackdrop(item as object, baseUrl as string, sid as string, token as string)
+      if item = invalid then return
+      if collectionDeepText(item, ["showBackdropUrl", "show_backdrop_url", "tvshowBackdropUrl"]) <> "" then return
+      if firstNonZeroText(item, ["tvshow_id", "tvshowId", "showId", "show_id"]) <> "" then return
+      title = collectionDeepText(item, ["showTitle", "tvshow_title", "series_title", "parent_title"])
+      if title = "" then title = showTitleFromCollectionPath(item)
+      if title = "" or title = "0" then title = collectionDeepText(item, ["title", "name"])
+      if title = "" then return
+      show = tvShowByTitle(baseUrl, sid, token, title)
+      if show = invalid then return
+      showId = idToStr(show.lookUp("id"))
+      if showId <> "" and showId <> "0"
+          item.addReplace("tvshow_id", showId)
+          item.addReplace("tvshowId", showId)
+      end if
+      mapper = idToStr(show.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(show.lookUp("mapperId"))
+      if mapper <> "" and mapper <> "0"
+          item.addReplace("showMapperId", mapper)
+          item.addReplace("show_mapper_id", mapper)
+      end if
+      mtime = idToStr(show.lookUp("backdrop_mtime"))
+      if mtime <> "" and mtime <> "0"
+          item.addReplace("showBackdropMtime", mtime)
+          item.addReplace("show_backdrop_mtime", mtime)
+      end if
+      backdrop = showBackdropUrlFromShow(baseUrl, sid, token, show)
+      if backdrop <> ""
+          item.addReplace("showBackdropUrl", backdrop)
+          item.addReplace("show_backdrop_url", backdrop)
+      end if
+      print "PLAYLIST_SHOW_MATCH title="; title; " showId="; showId; " mapper="; mapper; " backdropLen="; len(backdrop)
+  end sub
+
+  function showBackdropUrlFromShow(baseUrl as string, sid as string, token as string, show as object) as string
+      if show = invalid or baseUrl = "" or sid = "" then return ""
+      saved = collectionDeepText(show, ["backdropUrl", "backdrop_url"])
+      if saved <> "" and saved <> "0" then return saved
+      mapper = idToStr(show.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(show.lookUp("mapperId"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(show.lookUp("id"))
+      if mapper = "" or mapper = "0" then return ""
+      url = baseUrl + "/webapi/entry.cgi?mapper_id=" + mapper
+      mtime = idToStr(show.lookUp("backdrop_mtime"))
+      if mtime <> "" and mtime <> "0" then url = url + "&mtime=" + escapeUrlValue(mtime)
+      url = url + "&api=SYNO.VideoStation2.Backdrop&method=get&version=1"
+      url = url + "&_sid=" + sid
+      if token <> "" then url = url + "&SynoToken=" + token
+      return url
+  end function
+
+  function escapeUrlValue(value as string) as string
+      out = ""
+      idx = 1
+      while idx <= len(value)
+          ch = mid(value, idx, 1)
+          if ch = " "
+              out = out + "%20"
+          else if ch = ":"
+              out = out + "%3A"
+          else if ch = "+"
+              out = out + "%2B"
+          else if ch = "#"
+              out = out + "%23"
+          else if ch = "%"
+              out = out + "%25"
+          else
+              out = out + ch
+          end if
+          idx = idx + 1
+      end while
+      return out
+  end function
+
+  function firstNonZeroText(item as object, keys as object) as string
+      if item = invalid then return ""
+      for each key in keys
+          text = idToStr(item.lookUp(key))
+          if text <> "" and text <> "0" then return text
+      end for
+      return ""
+  end function
+
+  function collectionPathText(item as object) as string
+      if item = invalid then return ""
+      text = collectionDeepText(item, ["filePath", "path", "sharepath", "file_path"])
+      if text <> "" and text <> "0" then return text
+      info = itemFileInfo(item)
+      if info.path <> invalid and info.path <> "" then return info.path
+      return collectionDeepText(item, ["file_name", "filename", "title", "name"])
+  end function
+
+  function showTitleFromCollectionPath(item as object) as string
+      text = collectionPathText(item)
+      if text = "" then return ""
+      slash = 0
+      i = 1
+      while i <= len(text)
+          if mid(text, i, 1) = "/" then slash = i
+          i = i + 1
+      end while
+      fileName = text
+      if slash > 0 then fileName = mid(text, slash + 1)
+      marker = instr(1, fileName, " - S")
+      if marker <= 1 then marker = instr(1, fileName, " - s")
+      if marker > 1 then return left(fileName, marker - 1).trim()
+      return ""
+  end function
+
+  function tvShowByTitle(baseUrl as string, sid as string, token as string, title as string) as dynamic
+      if title = "" then return invalid
+      if m.tvShowLookupItems = invalid
+          m.tvShowLookupItems = loadTVShowLookupItems(baseUrl, sid, token)
+      end if
+      target = normalizedTitleKey(title)
+      for each show in m.tvShowLookupItems
+          showTitle = collectionDeepText(show, ["title", "name"])
+          if normalizedTitleKey(showTitle) = target then return show
+      end for
+      return invalid
+  end function
+
+  function loadTVShowLookupItems(baseUrl as string, sid as string, token as string) as object
+      items = []
+      appendTVShowLookupItems(items, baseUrl, sid, token, "")
+      libs = fetchDirectLibraries(baseUrl, sid, token)
+      for each lib in libs
+          if categoryForLibraryType(idToStr(lib.lookUp("type"))) = "tvshows"
+              id = idToStr(lib.lookUp("id"))
+              if id = "" or id = "0" then id = idToStr(lib.lookUp("library_id"))
+              if id <> "" and id <> "0" then appendTVShowLookupItems(items, baseUrl, sid, token, id)
+          end if
+      end for
+      return items
+  end function
+
+  sub appendTVShowLookupItems(items as object, baseUrl as string, sid as string, token as string, libraryId as string)
+      additional = "%5B%22poster_mtime%22,%22backdrop_mtime%22%5D"
+      params = "offset=0&limit=1000&sort_by=title&sort_direction=asc&additional=" + additional
+      if libraryId <> "" and libraryId <> "0" then params = params + "&library_id=" + libraryId
+      result = httpGet(apiUrl(baseUrl, "SYNO.VideoStation2.TVShow", "entry.cgi", "1", "list", params, sid, token))
+      key = firstValidKey(result, ["tvshow", "tvshows"])
+      if key = ""
+          result = httpGet(apiUrl(baseUrl, "SYNO.VideoStation.TVShow", "VideoStation/tvshow.cgi", "1", "list", params, sid, token))
+          key = firstValidKey(result, ["tvshows", "tvshow"])
+      end if
+      if key = "" then return
+      json = parseJSON(result)
+      if json = invalid or json.success <> true or json.data = invalid then return
+      found = json.data.lookUp(key)
+      if found = invalid then return
+      if type(found) = "roArray"
+          for each show in found
+              appendUniqueTvShowLookupItem(items, show)
+          end for
+      else if type(found) = "roAssociativeArray"
+          appendUniqueTvShowLookupItem(items, found)
+      end if
+  end sub
+
+  sub appendUniqueTvShowLookupItem(items as object, show as dynamic)
+      if show = invalid or type(show) <> "roAssociativeArray" then return
+      id = idToStr(show.lookUp("id"))
+      if id = "" or id = "0" then id = idToStr(show.lookUp("tvshow_id"))
+      mapper = idToStr(show.lookUp("mapper_id"))
+      if mapper = "" or mapper = "0" then mapper = idToStr(show.lookUp("mapperId"))
+      for each existing in items
+          existingId = idToStr(existing.lookUp("id"))
+          if existingId = "" or existingId = "0" then existingId = idToStr(existing.lookUp("tvshow_id"))
+          existingMapper = idToStr(existing.lookUp("mapper_id"))
+          if existingMapper = "" or existingMapper = "0" then existingMapper = idToStr(existing.lookUp("mapperId"))
+          if id <> "" and id <> "0" and existingId = id then return
+          if mapper <> "" and mapper <> "0" and existingMapper = mapper then return
+      end for
+      items.push(show)
   end sub
 
   function collectionNeedsMetadata(item as object, mediaType as string) as boolean
+      missingRating = detailStateRating(item) <= 0
       if mediaType = "movie"
           dateText = collectionDeepText(item, ["original_available", "originally_available", "year", "date"])
-          return dateText = ""
+          return dateText = "" or missingRating
       end if
       if mediaType = "episode"
           showTitle = collectionDeepText(item, ["showTitle", "tvshow_title", "series_title", "parent_title"])
@@ -2455,14 +3353,19 @@ sub init()
               itemTitle = collectionDeepText(item, ["title", "name"])
               if itemTitle <> "" and lcase(itemTitle.trim()) <> lcase(showTitle.trim()) then episodeTitle = itemTitle
           end if
-          return showTitle = "" or season = "" or season = "0" or episode = "" or episode = "0" or episodeTitle = ""
+          return showTitle = "" or season = "" or season = "0" or episode = "" or episode = "0" or episodeTitle = "" or missingRating
       end if
       return false
   end function
 
   function fetchCollectionInfoItem(baseUrl as string, sid as string, token as string, videoId as string, mediaType as string) as dynamic
       enc = createObject("roUrlTransfer")
-      additional = "[%22summary%22,%22extra%22,%22file%22,%22collection%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22]"
+      additionalForms = [
+          "%5B%22extra%22,%22summary%22,%22file%22,%22actor%22,%22writer%22,%22director%22,%22genre%22,%22collection%22,%22watched_ratio%22,%22conversion_produced%22,%22backdrop_mtime%22,%22poster_mtime%22%5D",
+          "%5B%22summary%22,%22file%22,%22collection%22,%22watched_ratio%22,%22backdrop_mtime%22,%22poster_mtime%22%5D",
+          "%5B%22watched_ratio%22,%22file%22,%22backdrop_mtime%22,%22poster_mtime%22%5D",
+          "%5B%22watched_ratio%22%5D"
+      ]
       idForms = [
           "%5B%22" + enc.escape(videoId) + "%22%5D",
           "%5B" + enc.escape(videoId) + "%5D",
@@ -2471,22 +3374,31 @@ sub init()
       requests = []
       apiName = v2InfoApiForMediaType(mediaType)
       requests.push({ api: apiName, path: "entry.cgi", version: "1", method: "getinfo", ids: idForms })
+      if mediaType = "movie"
+          requests.push({ api: "SYNO.VideoStation.Movie", path: "VideoStation/movie.cgi", version: "1", method: "getinfo", ids: idForms })
+      end if
       if mediaType = "episode"
           requests.push({ api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", method: "getinfo", ids: idForms })
           requests.push({ api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "2", method: "list", ids: [enc.escape(videoId)] })
           requests.push({ api: "SYNO.VideoStation.TVShowEpisode", path: "VideoStation/tvshow_episode.cgi", version: "1", method: "list", ids: [enc.escape(videoId)] })
       end if
+      fallbackItem = invalid
       for each req in requests
           url = apiEndpoint(baseUrl, req.api, req.path, sid, token)
           for each idForm in req.ids
-              body = "api=" + enc.escape(req.api) + "&version=" + req.version + "&method=" + req.method + "&id=" + idForm + "&additional=" + additional
-              if req.method = "list" then body = "api=" + enc.escape(req.api) + "&version=" + req.version + "&method=list&offset=0&limit=1&id=" + idForm + "&additional=" + additional
-              r = httpPostForm(url, body)
-              item = collectionInfoItemFromResponse(r, mediaType)
-              if item <> invalid then return item
+              for each additional in additionalForms
+                  body = "api=" + enc.escape(req.api) + "&version=" + req.version + "&method=" + req.method + "&id=" + idForm + "&additional=" + additional
+                  if req.method = "list" then body = "api=" + enc.escape(req.api) + "&version=" + req.version + "&method=list&offset=0&limit=1&id=" + idForm + "&additional=" + additional
+                  r = httpPostForm(url, body)
+                  item = collectionInfoItemFromResponse(r, mediaType)
+                  if item <> invalid
+                      if fallbackItem = invalid then fallbackItem = item
+                      if detailStateRating(item) > 0 then return item
+                  end if
+              end for
           end for
       end for
-      return invalid
+      return fallbackItem
   end function
 
   function collectionInfoItemFromResponse(r as dynamic, mediaType as string) as dynamic
@@ -2512,6 +3424,9 @@ sub init()
       copyEpisodeMetadataField(meta, item, "user_rating")
       copyEpisodeMetadataField(meta, item, "additional")
       copyEpisodeMetadataField(meta, item, "mapper_id")
+      copyEpisodeMetadataField(meta, item, "mapperId")
+      copyEpisodeMetadataField(meta, item, "tvshow_mapper_id")
+      copyEpisodeMetadataField(meta, item, "tvshow_backdrop_mtime")
 
       if mediaType = "episode"
           copyEpisodeMetadataField(meta, item, "season")
@@ -2526,15 +3441,49 @@ sub init()
           showTitle = collectionDeepText(meta, ["showTitle", "tvshow_title", "series_title", "parent_title"])
           if showTitle = ""
               tvshow = meta.lookUp("tvshow")
-              if tvshow <> invalid then showTitle = collectionDeepText(tvshow, ["title", "name"])
+              if tvshow <> invalid
+                  showTitle = collectionDeepText(tvshow, ["title", "name"])
+                  showMapper = collectionDeepText(tvshow, ["mapper_id", "mapperId", "id"])
+                  if showMapper <> "" and showMapper <> "0"
+                      item.addReplace("showMapperId", showMapper)
+                      item.addReplace("show_mapper_id", showMapper)
+                  end if
+                  showBackdropMtime = collectionDeepText(tvshow, ["backdrop_mtime", "backdropMtime"])
+                  if showBackdropMtime <> "" and showBackdropMtime <> "0"
+                      item.addReplace("showBackdropMtime", showBackdropMtime)
+                      item.addReplace("show_backdrop_mtime", showBackdropMtime)
+                  end if
+              end if
           end if
           if showTitle = ""
               additional = meta.lookUp("additional")
               if additional <> invalid
                   showTitle = collectionDeepText(additional, ["showTitle", "tvshow_title", "series_title", "parent_title"])
                   tvshow = additional.lookUp("tvshow")
-                  if showTitle = "" and tvshow <> invalid then showTitle = collectionDeepText(tvshow, ["title", "name"])
+                  if tvshow <> invalid
+                      if showTitle = "" then showTitle = collectionDeepText(tvshow, ["title", "name"])
+                      showMapper = collectionDeepText(tvshow, ["mapper_id", "mapperId", "id"])
+                      if showMapper <> "" and showMapper <> "0"
+                          item.addReplace("showMapperId", showMapper)
+                          item.addReplace("show_mapper_id", showMapper)
+                      end if
+                      showBackdropMtime = collectionDeepText(tvshow, ["backdrop_mtime", "backdropMtime"])
+                      if showBackdropMtime <> "" and showBackdropMtime <> "0"
+                          item.addReplace("showBackdropMtime", showBackdropMtime)
+                          item.addReplace("show_backdrop_mtime", showBackdropMtime)
+                      end if
+                  end if
               end if
+          end if
+          showMapper = collectionDeepText(meta, ["showMapperId", "show_mapper_id", "tvshow_mapper_id"])
+          if showMapper <> "" and showMapper <> "0"
+              item.addReplace("showMapperId", showMapper)
+              item.addReplace("show_mapper_id", showMapper)
+          end if
+          showBackdropMtime = collectionDeepText(meta, ["showBackdropMtime", "show_backdrop_mtime", "tvshow_backdrop_mtime"])
+          if showBackdropMtime <> "" and showBackdropMtime <> "0"
+              item.addReplace("showBackdropMtime", showBackdropMtime)
+              item.addReplace("show_backdrop_mtime", showBackdropMtime)
           end if
           if showTitle <> "" then item.addReplace("showTitle", showTitle)
           seasonText = collectionDeepText(meta, ["seasonNumber", "season_number", "season", "season_num", "season_index"])
@@ -2745,22 +3694,25 @@ sub init()
 
   function movieSummaryText(item as object) as string
       if item = invalid then return ""
+      summary = summaryTextFromValue(item.lookUp("summary"))
+      if summary <> "" then return summary
       additional = item.lookUp("additional")
       if additional <> invalid
           summary = summaryTextFromValue(additional.lookUp("summary"))
           if summary <> "" then return summary
           extra = additional.lookUp("extra")
-          if extra <> invalid and type(extra) = "roAssociativeArray"
-              summary = summaryTextFromValue(extra.lookUp("summary"))
-              if summary <> "" then return summary
-              summary = summaryTextFromValue(extra.lookUp("description"))
+          extraObj = detailStateObject(extra)
+          if extraObj <> invalid
+              summary = summaryTextFromValue(extraObj.lookUp("summary"))
               if summary <> "" then return summary
           end if
       end if
-      summary = summaryTextFromValue(item.lookUp("summary"))
-      if summary <> "" then return summary
-      summary = summaryTextFromValue(item.lookUp("description"))
-      if summary <> "" then return summary
+      extra = item.lookUp("extra")
+      extraObj = detailStateObject(extra)
+      if extraObj <> invalid
+          summary = summaryTextFromValue(extraObj.lookUp("summary"))
+          if summary <> "" then return summary
+      end if
       return ""
   end function
 
@@ -3131,6 +4083,36 @@ sub init()
       http.enableHostVerification(false)
       http.enablePeerVerification(false)
       http.addHeader("Content-Type", "application/x-www-form-urlencoded")
+      http.setMessagePort(port)
+      http.asyncPostFromString(body)
+
+      clock = createObject("roTimespan")
+      clock.mark()
+
+      while true
+          msg = wait(500, port)
+          if msg <> invalid
+              if type(msg) = "roUrlEvent"
+                  result = msg.getString()
+                  if result = "" then return invalid
+                  return result
+              end if
+          end if
+          if clock.totalMilliseconds() > 20000
+              http.asyncCancel()
+              return invalid
+          end if
+      end while
+  end function
+
+  function httpPostMultipart(url as string, body as string, boundary as string) as dynamic
+      port = createObject("roMessagePort")
+      http = createObject("roUrlTransfer")
+      http.setUrl(url)
+      http.setCertificatesFile("common:/certs/ca-bundle.crt")
+      http.enableHostVerification(false)
+      http.enablePeerVerification(false)
+      http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary)
       http.setMessagePort(port)
       http.asyncPostFromString(body)
 

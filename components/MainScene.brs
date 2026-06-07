@@ -183,6 +183,12 @@ sub init()
           if screenToRemove = m.loginScreen then m.loginScreen = invalid
           m.screenStack.pop()
           m.currentScreen = m.screenStack[m.screenStack.count() - 1]
+          while m.listsChanged = true and m.currentScreen <> invalid and m.currentScreen.subtype() = "VideoDetail" and m.screenStack.count() > 1
+              staleDetail = m.currentScreen
+              m.top.removeChild(staleDetail)
+              m.screenStack.pop()
+              m.currentScreen = m.screenStack[m.screenStack.count() - 1]
+          end while
           if screenToRemove.subtype() = "SettingsScreen"
               m.currentScreen.setFocus(true)
               nav = m.currentScreen.findNode("categoryList")
@@ -310,8 +316,6 @@ sub init()
           episodeList.setFocus(true)
           m.screenStack.push(episodeList)
           m.currentScreen = episodeList
-      else if data.type = "homevideo"
-          playVideo(data)
       else
           showVideoDetail(data)
       end if
@@ -325,6 +329,7 @@ sub init()
       detail.observeField("playVideo", "onDetailPlay")
       detail.observeField("backPressed", "onBackPressed")
       detail.observeField("listChanged", "onDetailListChanged")
+      detail.observeField("sourceListRemoved", "onDetailSourceListRemoved")
       detail.videoData = videoData
       m.top.appendChild(detail)
       detail.setFocus(true)
@@ -815,5 +820,11 @@ sub init()
 
   sub onDetailListChanged(event as object)
       if event = invalid then return
+      m.listsChanged = true
+  end sub
+
+  sub onDetailSourceListRemoved(event as object)
+      if event = invalid then return
+      if event.getData() <> true then return
       m.listsChanged = true
   end sub

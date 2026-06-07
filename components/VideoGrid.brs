@@ -12,6 +12,7 @@ sub init()
       m.posterRetryQueue = []
       m.posterRetryCursor = 0
       m.initialPosterRetryPass = 0
+      m.homeVideoFilenameCacheRequested = false
       nav = m.top.findNode("categoryList")
       nav.observeField("itemSelected", "onNavSelected")
       nav.observeField("itemFocused", "onNavFocused")
@@ -84,6 +85,12 @@ sub init()
           if value.count() > 0 then info = fileInfoFromFileObject(value[0], info)
       else if valueType = "roAssociativeArray"
           info = fileInfoFromFileObject(value, info)
+      else if valueType = "roString" or valueType = "String"
+          trimmed = value.trim()
+          if trimmed <> ""
+              parsed = parseJSON(trimmed)
+              if parsed <> invalid then info = fileInfoFromValue(parsed, info)
+          end if
       end if
       return info
   end function
@@ -203,6 +210,11 @@ sub init()
           proxyBaseUrl: authData.proxyBaseUrl,
           libraryId: m.top.libraryId
       }
+      if category = "homevideos"
+          task.request.addReplace("offset", 0)
+          task.request.addReplace("limit", 6)
+          m.homeVideoRemainingRequested = false
+      end if
       task.observeField("response", "onItemsLoaded")
       task.control = "RUN"
       m.loadTask = task
@@ -273,10 +285,138 @@ sub init()
       resetPosterRetryState()
       m.category = m.top.category
       populateGrid(items)
+      maybeLoadRemainingHomeVideos(response)
       if m.category <> "playlists"
           startInitialPosterRetryTimer()
       end if
   end sub
+
+  sub maybeLoadRemainingHomeVideos(response as object)
+      if m.category <> "homevideos" then return
+      if m.homeVideoRemainingRequested = true then return
+      if response = invalid or response.total = invalid then return
+      total = int(response.total)
+      if total <= m.items.count() then return
+      if m.top.authData = invalid then return
+      authData = m.top.authData
+      task = createObject("roSGNode", "APITask")
+      task.request = {
+          action: "listHomeVideos",
+          baseUrl: authData.baseUrl,
+          sid: authData.sid,
+          synoToken: authData.synoToken,
+          proxyBaseUrl: authData.proxyBaseUrl,
+          libraryId: m.top.libraryId,
+          offset: m.items.count(),
+          limit: total - m.items.count()
+      }
+      task.observeField("response", "onRemainingHomeVideosLoaded")
+      task.control = "RUN"
+      m.homeVideoRemainingTask = task
+      m.homeVideoRemainingRequested = true
+  end sub
+
+  sub onRemainingHomeVideosLoaded(event as object)
+      response = event.getData()
+      if response = invalid or response.success <> true then return
+      if response.items = invalid or response.items.count() = 0 then return
+      for each item in response.items
+          m.items.push(item)
+      end for
+      populateGrid(m.items)
+      startInitialPosterRetryTimer()
+  end sub
+
+  sub maybeRefreshHomeVideoFilenameCache()
+      if m.category <> "homevideos" then return
+      if m.homeVideoFilenameCacheRequested = true then return
+      if m.top.authData = invalid then return
+      authData = m.top.authData
+      task = createObject("roSGNode", "APITask")
+      task.request = {
+          action: "refreshHomeVideoFilenameCache",
+          baseUrl: authData.baseUrl,
+          sid: authData.sid,
+          synoToken: authData.synoToken,
+          items: homeVideoFilenamePatchCandidates()
+      }
+      task.observeField("response", "onHomeVideoFilenameCacheRefreshed")
+      task.control = "RUN"
+      m.homeVideoFilenameCacheTask = task
+      m.homeVideoFilenameCacheRequested = true
+  end sub
+
+  sub onHomeVideoFilenameCacheRefreshed(event as object)
+      response = event.getData()
+      if response = invalid then return
+      if response.success = true
+          print "HOMEVIDEO_FILENAME_CACHE refreshed count="; response.count
+          applyHomeVideoFilenamePatches(response.patches)
+      end if
+  end sub
+
+  function homeVideoFilenamePatchCandidates() as object
+      candidates = []
+      if m.items = invalid then return candidates
+      idx = 0
+      for each item in m.items
+          candidates.push({
+              index: idx,
+              id: safeStr(item, ["id"]),
+              mapper_id: safeStr(item, ["mapper_id", "mapperId"]),
+              title: safeStr(item, ["title", "name"])
+          })
+          idx = idx + 1
+      end for
+      return candidates
+  end function
+
+  sub applyHomeVideoFilenamePatches(patches as dynamic)
+      if m.category <> "homevideos" then return
+      if m.items = invalid then return
+      changed = 0
+      if patches = invalid or type(patches) <> "roArray" then return
+      for each patch in patches
+          idx = -1
+          if patch.index <> invalid then idx = int(patch.index)
+          if idx < 0 or idx >= m.items.count() then goto nextPatch
+          item = m.items[idx]
+          path = safeStr(patch, ["path"])
+          if path = "" then goto nextPatch
+          beforeDate = dateForDetail(item, "homevideos")
+          item.addReplace("path", path)
+          item.addReplace("filePath", path)
+          item.addReplace("file_name", gridBaseName(path))
+          afterDate = dateForDetail(item, "homevideos")
+          if afterDate <> beforeDate
+              updateGridItemDescription(idx, afterDate)
+              changed = changed + 1
+          end if
+          nextPatch:
+      end for
+      if changed > 0 then print "HOMEVIDEO_FILENAME_CACHE datePatches="; changed
+  end sub
+
+  sub updateGridItemDescription(idx as integer, description as string)
+      grid = m.top.findNode("videoGrid")
+      if grid = invalid then return
+      content = grid.content
+      if content = invalid then return
+      if idx < 0 or idx >= content.getChildCount() then return
+      node = content.getChild(idx)
+      if node <> invalid then node.description = description
+  end sub
+
+  function gridBaseName(path as string) as string
+      lastSlash = 0
+      idx = 1
+      while idx <= len(path)
+          if mid(path, idx, 1) = "/" then lastSlash = idx
+          idx = idx + 1
+      end while
+      if lastSlash > 0 then return mid(path, lastSlash + 1)
+      return path
+  end function
 
   sub applyGridLayout(category as string)
       grid = m.top.findNode("videoGrid")
@@ -291,7 +431,7 @@ sub init()
       titleLabel.visible = showTitle
       if category = "homevideos" or category = "tvrecordings"
           grid.translation = [98, 120]
-          grid.itemSize = [520, 392]
+          grid.itemSize = [520, 430]
           grid.itemSpacing = [82, 30]
           grid.numColumns = 3
           grid.numRows = 2
@@ -328,6 +468,8 @@ sub init()
           node = content.createChild("ContentNode")
           if left(category, 6) = "local_"
               node.title = playlistItemTitle(item)
+          else if category = "homevideos" or category = "tvrecordings"
+              node.title = displayTitleForItem(item, category)
           else
               node.title = safeStr(item, ["title", "name", "file_name"])
           end if
@@ -373,6 +515,8 @@ sub init()
               node.description = safeStr(item, ["original_available", "year", "create_time"])
           else if category = "tvshows"
               node.description = ""
+          else if category = "homevideos" or category = "tvrecordings"
+              node.description = dateForDetail(item, category)
           else
               node.description = safeStr(item, ["create_time", "date"])
           end if
@@ -419,7 +563,9 @@ sub init()
               movieContent.appendChild(node)
           else
               m.playlistEpisodeItems.push(item)
-              node = playlistContentNode(item, "playlistWide", m.playlistEpisodeItems.count() - 1)
+              layoutMode = "playlistWide"
+              if playlistItemIsHomeVideo(item) then layoutMode = "playlistHomeVideo"
+              node = playlistContentNode(item, layoutMode, m.playlistEpisodeItems.count() - 1)
               episodeContent.appendChild(node)
           end if
       end for
@@ -459,7 +605,7 @@ sub init()
       if node.title = "" then node.title = "Untitled"
       node.description = playlistItemMeta(item)
       node.addFields({ layoutMode: layoutMode, playlistIndex: idx })
-      if layoutMode = "playlistWide"
+      if layoutMode = "playlistWide" or layoutMode = "playlistHomeVideo"
           dateText = playlistItemDate(item)
           if dateText <> "" then node.addFields({ playlistDate: dateText })
       end if
@@ -551,8 +697,9 @@ sub init()
 
   function playlistItemMeta(item as object) as string
       mediaType = lcase(safeStr(item, ["type"]))
+      if playlistItemIsHomeVideo(item) then return ""
       if playlistItemIsMovie(item)
-          dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "air_date", "year", "create_time", "date"])
+          dateText = safeStr(item, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "air_date", "year", "create_time", "date"])
           if dateText <> "" and dateText <> "0" then return dateText
           return ""
       end if
@@ -587,15 +734,16 @@ sub init()
   end function
 
   function playlistItemDate(item as object) as string
-      dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
+      if playlistItemIsHomeVideo(item) then return dateForDetail(item, "homevideos")
+      dateText = safeStr(item, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
       if dateText <> "" and dateText <> "0" then return dateText
       additional = item.lookUp("additional")
       if additional <> invalid
-          dateText = safeStr(additional, ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
+          dateText = safeStr(additional, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
           if dateText <> "" and dateText <> "0" then return dateText
           extra = additional.lookUp("extra")
           if extra <> invalid
-              dateText = safeStr(extra, ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
+              dateText = safeStr(extra, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
               if dateText <> "" and dateText <> "0" then return dateText
           end if
       end if
@@ -610,7 +758,17 @@ sub init()
       return false
   end function
 
+  function playlistItemIsHomeVideo(item as object) as boolean
+      mediaType = lcase(safeStr(item, ["type"]))
+      if mediaType = "homevideo" or mediaType = "home_video" or mediaType = "tv_record" then return true
+      path = lcase(playlistPathText(item))
+      if instr(1, path, "/home/") > 0 then return true
+      if instr(1, path, "/home videos/") > 0 then return true
+      return false
+  end function
+
   function playlistItemTitle(item as object) as string
+      if playlistItemIsHomeVideo(item) then return displayTitleForItem(item, "homevideos")
       if playlistItemIsMovie(item) then return safeStr(item, ["title", "name", "file_name"])
       showTitle = safeStr(item, ["showTitle", "show_title", "tvshow_title", "series_title", "parent_title"])
       if showTitle = "" then showTitle = showTitleFromPlaylistPath(item)
@@ -1035,7 +1193,7 @@ sub init()
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
 	              backdropUrl: backdropUrl(item, authData),
 	              backdropRemoteUrl: safeStr(item, ["backdropRemoteUrl"]),
-		              originalAvailable: firstNonZeroStr(item, ["originalAvailable", "original_available", "originally_available", "date", "air_date", "year", "create_time"]),
+		              originalAvailable: firstNonZeroStr(item, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "date", "air_date", "year", "create_time"]),
 		              authData: authData
 		          }
               print "DETAIL_HANDOFF type=tvshow category="; categoryLabel(category); " title="; safeStr(item, ["title", "name"]); " posterSource="; posterSource(item, authData, category); " backdropSource="; backdropSource(item, authData)
@@ -1058,35 +1216,79 @@ sub init()
       itemType = "video"
       if category = "movies" then itemType = "movie"
       if category = "homevideos" then itemType = "homevideo"
-      if category = "tvrecordings" then itemType = "homevideo"
+      collectionVideoType = itemType
+      if category = "tvrecordings"
+          itemType = "homevideo"
+          collectionVideoType = "tv_record"
+      end if
       itemType = playbackTypeForItem(item, category, itemType)
+      if category <> "tvrecordings" then collectionVideoType = itemType
+      detailDisplayCategory = category
+      if itemType = "homevideo" and playlistItemIsHomeVideo(item) then detailDisplayCategory = "homevideos"
+      sourceListKey = localListKeyForCategory(category)
+      sourceItemKey = savedItemKey(item)
+      seasonForDetail = safeStr(item, ["seasonNumber", "season_number", "seasonText", "season", "season_num", "season_index"])
+      episodeForDetail = safeStr(item, ["episodeNumber", "episode_number", "episodeText", "episode", "episode_num", "ep_num", "ep_index"])
+      parsedSeasonEpisode = invalid
+      if seasonForDetail = "" or seasonForDetail = "0" or episodeForDetail = "" or episodeForDetail = "0"
+          parsedSeasonEpisode = seasonEpisodeFromPlaylistPath(item)
+          if seasonForDetail = "" or seasonForDetail = "0" then seasonForDetail = parsedSeasonEpisode.season
+          if episodeForDetail = "" or episodeForDetail = "0" then episodeForDetail = parsedSeasonEpisode.episode
+      end if
+      if sourceListKey <> "" and itemType <> "movie" and itemType <> "homevideo"
+          if (seasonForDetail <> "" and seasonForDetail <> "0") or (episodeForDetail <> "" and episodeForDetail <> "0") or playlistEpisodeTitle(item) <> ""
+              itemType = "episode"
+          end if
+      end if
       if itemType = "movie"
           print "MOVIE_SELECT title="; safeStr(item, ["title", "name", "file_name"]); " id="; safeStr({ value: rawId }, ["value"]); " fileId="; safeStr({ value: rawFileId }, ["value"]); " pathLen="; len(fileInfo.path)
       end if
-      sourceListKey = localListKeyForCategory(category)
-      sourceItemKey = savedItemKey(item)
+      episodeMetaForDetail = safeStr(item, ["episodeMeta"])
+      if episodeMetaForDetail = "" and itemType = "episode"
+          if seasonForDetail <> "" and seasonForDetail <> "0" and episodeForDetail <> "" and episodeForDetail <> "0"
+              episodeMetaForDetail = "Season " + seasonForDetail + " - Episode " + episodeForDetail
+          else if episodeForDetail <> "" and episodeForDetail <> "0"
+              episodeMetaForDetail = "Episode " + episodeForDetail
+          end if
+      end if
+      detailBackdrop = backdropUrl(item, authData)
+      if itemType = "episode" and sourceListKey <> ""
+          showBackdrop = playlistEpisodeShowBackdropUrl(item, authData)
+          if showBackdrop <> ""
+              detailBackdrop = showBackdrop
+          else
+              detailBackdrop = ""
+          end if
+      end if
+      mapperIdForDetail = safeStr(item, ["mapper_id", "mapperId"])
+      videoStationIdForDetail = firstNonZeroStr(item, ["videoStationId", "video_station_id", "posterId"])
+      showMapperIdForDetail = safeStr(item, ["showMapperId", "show_mapper_id", "tvshow_mapper_id"])
 
           m.top.selectedVideo = {
               type: itemType,
 	              id: rawId,
+	              videoStationId: videoStationIdForDetail,
 	              fileId: rawFileId,
-	              mapperId: item.lookUp("mapper_id"),
+	              mapperId: mapperIdForDetail,
+	              showMapperId: showMapperIdForDetail,
 	              libraryId: m.top.libraryId,
+	              sourceCategory: category,
+	              collectionVideoType: collectionVideoType,
 		              filePath: fileInfo.path,
-		              originalAvailable: firstNonZeroStr(item, ["originalAvailable", "original_available", "originally_available", "date", "air_date", "year", "create_time"]),
-	              title: safeStr(item, ["title", "name", "file_name"]),
-	              summary: summaryForDetail(item),
+		              originalAvailable: dateForDetail(item, detailDisplayCategory),
+	              title: displayTitleForItem(item, detailDisplayCategory),
+	              summary: summaryForDetail(item, itemType),
 	              watchedRatio: numberForDetail(item, ["watched_ratio", "watchedRatio"]),
 	              fileWatched: fileInfo.watched,
 	              lastWatched: numberForDetail(item, ["last_watched", "lastWatched"]),
-	              rating: numberForDetail(item, ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"]),
+	              rating: ratingForDetail(item),
 	              posterUrl: posterUrl(item, authData, category),
 	              posterRemoteUrl: safeStr(item, ["posterRemoteUrl"]),
-	              backdropUrl: backdropUrl(item, authData),
-	              backdropRemoteUrl: safeStr(item, ["backdropRemoteUrl"]),
-	              seasonNumber: safeStr(item, ["seasonNumber", "season_number", "seasonText", "season", "season_num", "season_index"]),
-	              episodeNumber: safeStr(item, ["episodeNumber", "episode_number", "episodeText", "episode", "episode_num", "ep_num", "ep_index"]),
-	              episodeMeta: safeStr(item, ["episodeMeta"]),
+	              backdropUrl: detailBackdrop,
+	              backdropRemoteUrl: detailBackdrop,
+	              seasonNumber: seasonForDetail,
+	              episodeNumber: episodeForDetail,
+	              episodeMeta: episodeMetaForDetail,
 	              sourceListKey: sourceListKey,
 		              sourceItemKey: sourceItemKey,
 		              authData: authData
@@ -1094,19 +1296,653 @@ sub init()
               print "DETAIL_HANDOFF type="; itemType; " category="; categoryLabel(category); " title="; safeStr(item, ["title", "name", "file_name"]); " posterSource="; posterSource(item, authData, category); " backdropSource="; backdropSource(item, authData)
       end sub
 
-  function summaryForDetail(item as object) as string
+  function displayTitleForItem(item as object, category as string) as string
+      title = safeStr(item, ["title", "name", "file_name"])
+      if title = "" then return ""
+      if category <> "homevideos" and category <> "tvrecordings" then return title
+      mappedTitle = safeStr(item, ["rokuDisplayTitle"])
+      if mappedTitle <> "" then return mappedTitle
+      return stripSingleDateParen(title)
+  end function
+
+  function stripSingleDateParen(title as string) as string
+      openIdx = 0
+      closeIdx = 0
+      i = 1
+      while i <= len(title)
+          ch = mid(title, i, 1)
+          if ch = "(" then openIdx = i
+          if ch = ")" and openIdx > 0
+              closeIdx = i
+              inner = mid(title, openIdx + 1, closeIdx - openIdx - 1).trim()
+              if inner <> "" and (dateFromText(inner) <> "" or dateRangeDisplayFromText(inner) <> "")
+                  before = left(title, openIdx - 1).trim()
+                  after = mid(title, closeIdx + 1).trim()
+                  if before <> "" and after <> "" then return before + " " + after
+                  if before <> "" then return before
+                  return after
+              end if
+              openIdx = 0
+          end if
+          i = i + 1
+      end while
+      return title
+  end function
+
+  function dateRangeText(text as string) as boolean
+      lower = lcase(text)
+      if instr(1, lower, " to ") > 0 then return true
+      if instr(1, lower, " thru ") > 0 then return true
+      if instr(1, lower, " through ") > 0 then return true
+      if instr(1, lower, " - ") > 0 then return true
+      firstYear = 0
+      yearCount = 0
+      i = 1
+      while i <= len(text) - 3
+          y = mid(text, i, 4)
+          if gridIntegerLike(y)
+              yearValue = val(y)
+              if yearValue >= 1900 and yearValue <= 2100
+                  if firstYear = 0 or yearValue <> firstYear
+                      yearCount = yearCount + 1
+                      if firstYear = 0 then firstYear = yearValue
+                  end if
+              end if
+          end if
+          i = i + 1
+      end while
+      return yearCount > 1
+  end function
+
+  function dateRangeDisplayFromText(text as string) as string
+      if text = "" then return ""
+      lower = lcase(text)
+      sepPos = instr(1, lower, " through ")
+      sepLen = 9
+      if sepPos = 0
+          sepPos = instr(1, lower, " thru ")
+          sepLen = 6
+      end if
+      if sepPos = 0
+          sepPos = instr(1, lower, " to ")
+          sepLen = 4
+      end if
+      if sepPos = 0
+          sepPos = instr(1, lower, " - ")
+          sepLen = 3
+      end if
+      if sepPos = 0 then return ""
+      leftPart = left(text, sepPos - 1)
+      rightPart = mid(text, sepPos + sepLen)
+      leftDate = dateFromText(leftPart)
+      rightDate = dateFromText(rightPart)
+      if len(leftDate) = 10 and len(rightDate) = 10 then return leftDate + " to " + rightDate
+      return ""
+  end function
+
+  function dateForDetail(item as object, category as string) as string
+      if item = invalid then return ""
+      pathDate = ""
+      rangeDate = ""
+      if category = "homevideos" or category = "tvrecordings"
+          rangeDate = dateRangeFromTitleFields(item)
+          pathDate = dateFromFilePathFields(item)
+      end if
+      if category = "homevideos" or category = "tvrecordings"
+          if rangeDate <> "" then return rangeDate
+          if pathDate <> "" then return displayDateText(pathDate)
+          titleDate = dateFromTitleFields(item)
+          if category = "homevideos"
+              dateText = firstNonZeroStr(item, ["rokuDate", "recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "date", "year"])
+          else
+              dateText = firstNonZeroStr(item, ["rokuDate", "originalAvailable", "original_available", "originally_available", "recordTime", "record_time", "recordTimeUtc", "record_time_utc", "date", "create_time", "start_time", "year"])
+          end if
+          additional = item.lookUp("additional")
+          if dateText = "" and additional <> invalid
+              if category = "homevideos"
+                  dateText = safeStr(additional, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "date", "year"])
+              else
+                  dateText = safeStr(additional, ["originalAvailable", "original_available", "originally_available", "recordTime", "record_time", "recordTimeUtc", "record_time_utc", "date", "create_time", "start_time", "year"])
+              end if
+          end if
+          if dateText <> ""
+              displayDate = displayDateText(dateText)
+              if titleDate <> ""
+                  titleDisplayDate = displayDateText(titleDate)
+                  trimmedDate = trimArtificialPartialDateFromCandidate(titleDisplayDate, displayDate)
+                  if trimmedDate <> displayDate then return trimmedDate
+                  if morePreciseDate(titleDisplayDate, displayDate) then return titleDisplayDate
+              end if
+              return displayDate
+          end if
+          if titleDate <> "" then return displayDateText(titleDate)
+          return ""
+      end if
+      if category = "homevideos"
+          dateText = firstNonZeroStr(item, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "date", "year"])
+      else
+          dateText = firstNonZeroStr(item, ["originalAvailable", "original_available", "originally_available", "recordTime", "record_time", "recordTimeUtc", "record_time_utc", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year", "create_time", "start_time"])
+      end if
+      titleDate = dateFromTitleFields(item)
+      additional = item.lookUp("additional")
+      if dateText = "" and additional <> invalid
+          if category = "homevideos"
+              dateText = safeStr(additional, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "date", "year"])
+          else
+              dateText = safeStr(additional, ["originalAvailable", "original_available", "originally_available", "recordTime", "record_time", "recordTimeUtc", "record_time_utc", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year", "create_time", "start_time"])
+          end if
+          extra = additional.lookUp("extra")
+          if dateText = "" and extra <> invalid
+              extraObj = gridParsedObject(extra)
+              if extraObj <> invalid
+                  if category = "homevideos"
+                      dateText = safeStr(extraObj, ["recordTime", "record_time", "recordTimeUtc", "record_time_utc", "originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "date", "year"])
+                  else
+                      dateText = safeStr(extraObj, ["originalAvailable", "original_available", "originally_available", "recordTime", "record_time", "recordTimeUtc", "record_time_utc", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year", "create_time", "start_time"])
+                  end if
+              end if
+          end if
+      end if
+      if dateText = ""
+          dateText = titleDate
+      end if
+      if dateText = "" and pathDate <> "" then dateText = pathDate
+      if dateText = "" then return ""
+      displayDate = displayDateText(dateText)
+      if pathDate <> "" and (category = "homevideos" or category = "tvrecordings")
+          pathDisplayDate = displayDateText(pathDate)
+          if morePreciseDate(pathDisplayDate, displayDate) then return pathDisplayDate
+          trimmedDate = trimArtificialPartialDateFromCandidate(pathDisplayDate, displayDate)
+          if trimmedDate <> displayDate then return trimmedDate
+      end if
+      if titleDate <> ""
+          titleDisplayDate = displayDateText(titleDate)
+          if category = "homevideos" or category = "tvrecordings"
+              trimmedDate = trimArtificialPartialDateFromCandidate(titleDisplayDate, displayDate)
+              if trimmedDate <> displayDate then return trimmedDate
+              if morePreciseDate(titleDisplayDate, displayDate) then return titleDisplayDate
+              return displayDate
+          end if
+          if morePreciseDate(titleDisplayDate, displayDate) then return titleDisplayDate
+      else if category = "homevideos" or category = "tvrecordings"
+          return trimArtificialPartialDate(item, displayDate)
+      end if
+      return displayDate
+  end function
+
+  function dateRangeFromTitleFields(item as object) as string
+      if item = invalid then return ""
+      for each key in ["title", "name", "file_name", "filePath", "path"]
+          text = safeStr(item, [key])
+          found = dateRangeDisplayFromText(text)
+          if found <> "" then return found
+      end for
+      fileInfo = fileInfoFromItem(item)
+      if fileInfo.path <> "" then return dateRangeDisplayFromText(fileInfo.path)
+      return ""
+  end function
+
+  function trimArtificialPartialDateFromCandidate(candidate as string, displayDate as string) as string
+      if candidate = "" or displayDate = "" then return displayDate
+      if len(candidate) = 7 and len(displayDate) = 10 and right(displayDate, 3) = "-01"
+          if left(displayDate, 7) = candidate then return candidate
+      end if
+      if len(candidate) = 4 and len(displayDate) = 10 and right(displayDate, 6) = "-01-01"
+          if left(displayDate, 4) = candidate then return candidate
+      end if
+      return displayDate
+  end function
+
+  function trimArtificialPartialDate(item as object, displayDate as string) as string
+      if item = invalid or displayDate = "" then return displayDate
+      if len(displayDate) = 10 and right(displayDate, 3) = "-01"
+          monthPrefix = left(displayDate, 7)
+          if itemHasPartialDateText(item, monthPrefix) then return monthPrefix
+      end if
+      if len(displayDate) = 10 and right(displayDate, 6) = "-01-01"
+          yearPrefix = left(displayDate, 4)
+          if itemHasPartialDateText(item, yearPrefix) then return yearPrefix
+      end if
+      return displayDate
+  end function
+
+  function itemHasPartialDateText(item as object, expected as string) as boolean
+      if expected = "" then return false
+      for each key in ["title", "name", "file_name", "filePath", "path"]
+          text = safeStr(item, [key])
+          found = dateFromText(text)
+          if found = expected then return true
+      end for
+      fileInfo = fileInfoFromItem(item)
+      if fileInfo.path <> ""
+          found = dateFromText(fileInfo.path)
+          if found = expected then return true
+      end if
+      return false
+  end function
+
+  function morePreciseDate(candidate as string, current as string) as boolean
+      if candidate = "" then return false
+      if current = "" then return true
+      if len(candidate) > len(current) then return true
+      return false
+  end function
+
+  function dateFromTitleFields(item as object) as string
+      best = ""
+      for each key in ["title", "name", "file_name", "filePath", "path"]
+          text = safeStr(item, [key])
+          if containsFourDigitYear(text) and dateRangeText(text) then goto nextTitleDateField
+          found = dateFromText(text)
+          if morePreciseDate(found, best) then best = found
+          nextTitleDateField:
+      end for
+      fileInfo = fileInfoFromItem(item)
+      if fileInfo.path <> ""
+          if containsFourDigitYear(fileInfo.path) and dateRangeText(fileInfo.path) then return best
+          found = dateFromText(fileInfo.path)
+          if morePreciseDate(found, best) then best = found
+      end if
+      return best
+  end function
+
+  function dateFromFilePathFields(item as object) as string
+      best = ""
+      for each key in ["filePath", "path", "file_name"]
+          text = safeStr(item, [key])
+          if containsFourDigitYear(text) and dateRangeText(text) then goto nextPathDateField
+          found = dateFromText(text)
+          if morePreciseDate(found, best) then best = found
+          nextPathDateField:
+      end for
+      fileInfo = fileInfoFromItem(item)
+      if fileInfo.path <> ""
+          if containsFourDigitYear(fileInfo.path) and dateRangeText(fileInfo.path) then return best
+          found = dateFromText(fileInfo.path)
+          if morePreciseDate(found, best) then best = found
+      end if
+      return best
+  end function
+
+  function dateFromText(text as string) as string
+      if text = "" then return ""
+      cleaned = text
+      slash = 0
+      i = 1
+      while i <= len(cleaned)
+          if mid(cleaned, i, 1) = "/" then slash = i
+          i = i + 1
+      end while
+      if slash > 0 then cleaned = mid(cleaned, slash + 1)
+
+      best = ""
+      i = 1
+      while i <= len(cleaned)
+          normalized = monthNameDateAt(cleaned, i)
+          if morePreciseDate(normalized, best) then best = normalized
+
+          normalized = separatedYearDateAt(cleaned, i)
+          if morePreciseDate(normalized, best) then best = normalized
+
+          if i <= len(cleaned) - 9
+              y = mid(cleaned, i, 4)
+              sep1 = mid(cleaned, i + 4, 1)
+              m = mid(cleaned, i + 5, 2)
+              sep2 = mid(cleaned, i + 7, 1)
+              d = mid(cleaned, i + 8, 2)
+              if gridIntegerLike(y) and gridIntegerLike(m) and gridIntegerLike(d)
+                  if isDateSeparator(sep1) and isDateSeparator(sep2)
+                      normalized = validDateParts(y, m, d)
+                      if morePreciseDate(normalized, best) then best = normalized
+                  end if
+              end if
+          end if
+
+          if i <= len(cleaned) - 7
+              compact = mid(cleaned, i, 8)
+              if gridIntegerLike(compact)
+                  normalized = validDateParts(left(compact, 4), mid(compact, 5, 2), right(compact, 2))
+                  if morePreciseDate(normalized, best) then best = normalized
+              end if
+          end if
+
+          if i <= len(cleaned) - 9
+              m = mid(cleaned, i, 2)
+              sep1 = mid(cleaned, i + 2, 1)
+              d = mid(cleaned, i + 3, 2)
+              sep2 = mid(cleaned, i + 5, 1)
+              y = mid(cleaned, i + 6, 4)
+              if gridIntegerLike(y) and gridIntegerLike(m) and gridIntegerLike(d)
+                  if isDateSeparator(sep1) and isDateSeparator(sep2)
+                      normalized = validDateParts(y, m, d)
+                      if morePreciseDate(normalized, best) then best = normalized
+                  end if
+              end if
+          end if
+
+          if i <= len(cleaned) - 6
+              y = mid(cleaned, i, 4)
+              sep1 = mid(cleaned, i + 4, 1)
+              m = mid(cleaned, i + 5, 2)
+              if gridIntegerLike(y) and gridIntegerLike(m)
+                  if isDateSeparator(sep1)
+                      normalized = validYearMonthParts(y, m)
+                      if morePreciseDate(normalized, best) then best = normalized
+                  end if
+              end if
+          end if
+
+          if i <= len(cleaned) - 5
+              compactMonth = mid(cleaned, i, 6)
+              if gridIntegerLike(compactMonth)
+                  normalized = validYearMonthParts(left(compactMonth, 4), right(compactMonth, 2))
+                  if morePreciseDate(normalized, best) then best = normalized
+              end if
+          end if
+
+          normalized = separatedMonthDayYearAt(cleaned, i)
+          if morePreciseDate(normalized, best) then best = normalized
+
+          normalized = separatedMonthYearAt(cleaned, i)
+          if morePreciseDate(normalized, best) then best = normalized
+
+          if i <= len(cleaned) - 3
+              y = mid(cleaned, i, 4)
+              if gridIntegerLike(y)
+                  normalized = validYearPart(y)
+                  if morePreciseDate(normalized, best) then best = normalized
+              end if
+          end if
+
+          i = i + 1
+      end while
+      return best
+  end function
+
+  function isDateSeparator(ch as string) as boolean
+      return ch = "-" or ch = "_" or ch = "." or ch = " " or ch = "–" or ch = "—"
+  end function
+
+  function containsFourDigitYear(text as string) as boolean
+      i = 1
+      while i <= len(text) - 3
+          y = mid(text, i, 4)
+          if gridIntegerLike(y)
+              if validYearPart(y) <> "" then return true
+          end if
+          i = i + 1
+      end while
+      return false
+  end function
+
+  function monthNameDateAt(text as string, startIdx as integer) as string
+      month = 0
+      monthLen = 0
+      lower = lcase(mid(text, startIdx))
+      names = [
+          { name: "january", value: 1 }, { name: "jan", value: 1 },
+          { name: "february", value: 2 }, { name: "feb", value: 2 },
+          { name: "march", value: 3 }, { name: "mar", value: 3 },
+          { name: "april", value: 4 }, { name: "apr", value: 4 },
+          { name: "may", value: 5 },
+          { name: "june", value: 6 }, { name: "jun", value: 6 },
+          { name: "july", value: 7 }, { name: "jul", value: 7 },
+          { name: "august", value: 8 }, { name: "aug", value: 8 },
+          { name: "september", value: 9 }, { name: "sept", value: 9 }, { name: "sep", value: 9 },
+          { name: "october", value: 10 }, { name: "oct", value: 10 },
+          { name: "november", value: 11 }, { name: "nov", value: 11 },
+          { name: "december", value: 12 }, { name: "dec", value: 12 }
+      ]
+      for each item in names
+          name = item.name
+          if left(lower, len(name)) = name
+              nextIdx = startIdx + len(name)
+              boundaryOk = nextIdx > len(text)
+              if not boundaryOk
+                  nextCh = lcase(mid(text, nextIdx, 1))
+                  boundaryOk = not isAsciiLetter(nextCh)
+              end if
+              if boundaryOk
+                  month = item.value
+                  monthLen = len(name)
+                  exit for
+              end if
+          end if
+      end for
+      if month = 0 then return ""
+
+      idx = startIdx + monthLen
+      while idx <= len(text) and not gridIntegerLike(mid(text, idx, 1))
+          idx = idx + 1
+      end while
+      if idx > len(text) then return ""
+
+      firstStart = idx
+      while idx <= len(text) and gridIntegerLike(mid(text, idx, 1))
+          idx = idx + 1
+      end while
+      firstNumber = mid(text, firstStart, idx - firstStart)
+      if firstNumber = "" then return ""
+
+      while idx <= len(text) and not gridIntegerLike(mid(text, idx, 1))
+          idx = idx + 1
+      end while
+      secondNumber = ""
+      if idx <= len(text)
+          secondStart = idx
+          while idx <= len(text) and gridIntegerLike(mid(text, idx, 1))
+              idx = idx + 1
+          end while
+          secondNumber = mid(text, secondStart, idx - secondStart)
+      end if
+
+      if len(firstNumber) = 4
+          return validYearMonthParts(firstNumber, stri(month).trim())
+      end if
+      if secondNumber <> "" and len(secondNumber) = 4
+          return validDateParts(secondNumber, stri(month).trim(), firstNumber)
+      end if
+      return ""
+  end function
+
+  function isAsciiLetter(ch as string) as boolean
+      if ch = "" then return false
+      return ch >= "a" and ch <= "z"
+  end function
+
+  function twoDigitYearAt(text as string, startIdx as integer) as string
+      if startIdx > len(text) - 1 then return ""
+      yy = mid(text, startIdx, 2)
+      if not gridIntegerLike(yy) then return ""
+      beforeOk = startIdx = 1
+      afterOk = startIdx + 2 > len(text)
+      if not beforeOk
+          before = mid(text, startIdx - 1, 1)
+          beforeOk = not gridIntegerLike(before)
+      end if
+      if not afterOk
+          after = mid(text, startIdx + 2, 1)
+          afterOk = not gridIntegerLike(after)
+      end if
+      if not beforeOk or not afterOk then return ""
+      value = val(yy)
+      if value >= 40 then return "19" + yy
+      return "20" + yy
+  end function
+
+  function validDateParts(yearText as string, monthText as string, dayText as string) as string
+      year = val(yearText)
+      month = val(monthText)
+      day = val(dayText)
+      if year < 1900 or year > 2100 then return ""
+      if month < 1 or month > 12 then return ""
+      if day < 1 or day > 31 then return ""
+      return yearText + "-" + twoDigitText(month) + "-" + twoDigitText(day)
+  end function
+
+  function separatedYearDateAt(text as string, startIdx as integer) as string
+      if startIdx > len(text) - 5 then return ""
+      y = mid(text, startIdx, 4)
+      sep1 = mid(text, startIdx + 4, 1)
+      if not gridIntegerLike(y) then return ""
+      if not isDateSeparator(sep1) then return ""
+
+      monthStart = startIdx + 5
+      monthEnd = monthStart
+      while monthEnd <= len(text) and monthEnd < monthStart + 2 and gridIntegerLike(mid(text, monthEnd, 1))
+          monthEnd = monthEnd + 1
+      end while
+      monthText = mid(text, monthStart, monthEnd - monthStart)
+      if monthText = "" then return ""
+      yearMonth = validYearMonthParts(y, monthText)
+      if yearMonth = "" then return ""
+
+      if monthEnd > len(text) then return yearMonth
+      sep2 = mid(text, monthEnd, 1)
+      if not isDateSeparator(sep2) then return yearMonth
+
+      dayStart = monthEnd + 1
+      dayEnd = dayStart
+      while dayEnd <= len(text) and dayEnd < dayStart + 2 and gridIntegerLike(mid(text, dayEnd, 1))
+          dayEnd = dayEnd + 1
+      end while
+      dayText = mid(text, dayStart, dayEnd - dayStart)
+      if dayText = "" then return yearMonth
+      fullDate = validDateParts(y, monthText, dayText)
+      if fullDate <> "" then return fullDate
+      return yearMonth
+  end function
+
+  function separatedMonthYearAt(text as string, startIdx as integer) as string
+      if startIdx > len(text) - 5 then return ""
+      monthEnd = startIdx
+      while monthEnd <= len(text) and monthEnd < startIdx + 2 and gridIntegerLike(mid(text, monthEnd, 1))
+          monthEnd = monthEnd + 1
+      end while
+      monthText = mid(text, startIdx, monthEnd - startIdx)
+      if monthText = "" then return ""
+      sep = mid(text, monthEnd, 1)
+      if not isDateSeparator(sep) then return ""
+      yearStart = monthEnd + 1
+      if yearStart > len(text) - 3 then return ""
+      yearText = mid(text, yearStart, 4)
+      if not gridIntegerLike(yearText) then return ""
+      return validYearMonthParts(yearText, monthText)
+  end function
+
+  function separatedMonthDayYearAt(text as string, startIdx as integer) as string
+      if startIdx > len(text) - 7 then return ""
+      monthEnd = startIdx
+      while monthEnd <= len(text) and monthEnd < startIdx + 2 and gridIntegerLike(mid(text, monthEnd, 1))
+          monthEnd = monthEnd + 1
+      end while
+      monthText = mid(text, startIdx, monthEnd - startIdx)
+      if monthText = "" then return ""
+      sep1 = mid(text, monthEnd, 1)
+      if not isDateSeparator(sep1) then return ""
+
+      dayStart = monthEnd + 1
+      dayEnd = dayStart
+      while dayEnd <= len(text) and dayEnd < dayStart + 2 and gridIntegerLike(mid(text, dayEnd, 1))
+          dayEnd = dayEnd + 1
+      end while
+      dayText = mid(text, dayStart, dayEnd - dayStart)
+      if dayText = "" then return ""
+      sep2 = mid(text, dayEnd, 1)
+      if not isDateSeparator(sep2) then return ""
+
+      yearStart = dayEnd + 1
+      if yearStart > len(text) - 3 then return ""
+      yearText = mid(text, yearStart, 4)
+      if not gridIntegerLike(yearText) then return ""
+      return validDateParts(yearText, monthText, dayText)
+  end function
+
+  function validYearMonthParts(yearText as string, monthText as string) as string
+      year = val(yearText)
+      month = val(monthText)
+      if year < 1900 or year > 2100 then return ""
+      if month < 1 or month > 12 then return ""
+      return yearText + "-" + twoDigitText(month)
+  end function
+
+  function validYearPart(yearText as string) as string
+      year = val(yearText)
+      if year < 1900 or year > 2100 then return ""
+      return yearText
+  end function
+
+  function twoDigitText(value as integer) as string
+      text = stri(value).trim()
+      if len(text) = 1 then return "0" + text
+      return text
+  end function
+
+  function displayDateText(value as dynamic) as string
+      text = safeStr({ value: value }, ["value"])
+      if text = "" or text = "0" then return ""
+      normalized = separatedYearDateAt(text, 1)
+      if normalized <> "" then return normalized
+      if len(text) >= 10 and mid(text, 5, 1) = "-" and mid(text, 8, 1) = "-" then return left(text, 10)
+      if gridIntegerLike(text) and len(text) >= 10
+          seconds = val(left(text, 10))
+          if seconds > 946684800
+              dt = createObject("roDateTime")
+              dt.fromSeconds(seconds)
+              return dt.asDateString("short-month-no-weekday")
+          end if
+      end if
+      return text
+  end function
+
+  function gridIntegerLike(text as string) as boolean
+      if text = "" then return false
+      i = 1
+      while i <= len(text)
+          ch = mid(text, i, 1)
+          if ch < "0" or ch > "9" then return false
+          i = i + 1
+      end while
+      return true
+  end function
+
+  function playlistEpisodeShowBackdropUrl(item as object, authData as dynamic) as string
+      if item = invalid or authData = invalid then return ""
+      baseUrl = authData.baseUrl
+      sid = authData.sid
+      if baseUrl = invalid or baseUrl = "" or sid = invalid or sid = "" then return ""
+      saved = safeStr(item, ["showBackdropUrl", "show_backdrop_url", "tvshowBackdropUrl"])
+      if saved <> "" then return saved
+      tvshowId = firstNonZeroStr(item, ["tvshow_id", "tvshowId", "showId", "show_id"])
+      if tvshowId <> ""
+          url = baseUrl + "/webapi/entry.cgi?api=SYNO.VideoStation2.Backdrop&version=1&method=get"
+          url = url + "&id=" + tvshowId + "&type=tvshow&_sid=" + sid
+          if authData.synoToken <> invalid and authData.synoToken <> "" then url = url + "&SynoToken=" + authData.synoToken
+          return url
+      end if
+      return ""
+  end function
+
+  function summaryForDetail(item as object, itemType as string) as string
       title = safeStr(item, ["title", "name", "file_name"])
       summary = ""
       additional = item.lookUp("additional")
       if additional <> invalid
-          summary = safeStr(additional, ["summary", "description"])
+          if summary = "" then summary = safeStr(additional, ["summary"])
+          if summary = "" and itemType <> "movie" then summary = safeStr(additional, ["description"])
           if summary = ""
               extra = additional.lookUp("extra")
-              if extra <> invalid then summary = safeStr(extra, ["summary", "description"])
+              if extra <> invalid
+                  extraObj = gridParsedObject(extra)
+                  if extraObj <> invalid
+                      if summary = "" then summary = safeStr(extraObj, ["summary"])
+                      if summary = "" and itemType <> "movie" then summary = safeStr(extraObj, ["description"])
+                  end if
+              end if
           end if
       end if
-      if summary = "" then summary = safeStr(item, ["summary", "description"])
-      if summary = "" then summary = safeStr(item, ["tagline"])
+      if summary = "" then summary = safeStr(item, ["summary"])
+      if summary = "" and itemType <> "movie" then summary = safeStr(item, ["description"])
       if summary <> "" and title <> "" and lcase(summary.trim()) = lcase(title.trim()) then return ""
       return summary
   end function
@@ -1137,6 +1973,139 @@ sub init()
           end if
       end for
       return -1
+  end function
+
+  function ratingForDetail(item as object) as integer
+      keys = ["rating", "rate", "user_rating", "userRating", "my_rating", "myRating"]
+      value = ratingNumberFromObject(item, keys)
+      if value > 0 then return normalizeDetailRating(value)
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          value = ratingNumberFromObject(additional, keys)
+          if value > 0 then return normalizeDetailRating(value)
+          extra = gridParsedObject(additional.lookUp("extra"))
+          value = ratingNumberFromObject(extra, keys)
+          if value > 0 then return normalizeDetailRating(value)
+      end if
+      extra = gridParsedObject(item.lookUp("extra"))
+      value = ratingNumberFromObject(extra, keys)
+      if value > 0 then return normalizeDetailRating(value)
+      value = nestedDbRatingForDetail(item)
+      if value > 0 then return normalizeDetailRating(value)
+      return 0
+  end function
+
+  function ratingNumberFromObject(item as dynamic, keys as object) as float
+      if item = invalid then return -1
+      if type(item) <> "roAssociativeArray" then return -1
+      for each key in keys
+          value = item.lookUp(key)
+          if value <> invalid
+              t = type(value)
+              if t = "roInteger" or t = "Integer" or t = "roLongInteger" or t = "LongInteger" then return value
+              if t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double" then return value
+              if t = "roString" or t = "String"
+                  trimmed = value.trim()
+                  if trimmed <> "" then return val(trimmed)
+              end if
+          end if
+      end for
+      return -1
+  end function
+
+  function normalizeDetailRating(value as float) as integer
+      if value <= 0 then return 0
+      if value <= 10 then return int((value * 10) + 0.5)
+      if value > 100 then return 100
+      return int(value)
+  end function
+
+  function gridParsedObject(value as dynamic) as dynamic
+      if value = invalid then return invalid
+      if type(value) = "roAssociativeArray" then return value
+      if type(value) = "roString" or type(value) = "String"
+          trimmed = value.trim()
+          if trimmed = "" then return invalid
+          parsed = parseJSON(trimmed)
+          if parsed <> invalid and type(parsed) = "roAssociativeArray" then return parsed
+      end if
+      return invalid
+  end function
+
+  function nestedDbRatingForDetail(item as object) as integer
+      candidates = []
+      if item <> invalid
+          ratingValue = item.lookUp("rating")
+          if ratingValue <> invalid then candidates.push(ratingValue)
+          extra = gridParsedObject(item.lookUp("extra"))
+          if extra <> invalid then candidates.push(extra)
+          additional = item.lookUp("additional")
+          if additional <> invalid
+              ratingValue = additional.lookUp("rating")
+              if ratingValue <> invalid then candidates.push(ratingValue)
+              extra = gridParsedObject(additional.lookUp("extra"))
+              if extra <> invalid then candidates.push(extra)
+          end if
+      end if
+      best = 0
+      for each extraObj in candidates
+          anyRating = gridAnyNestedRating(extraObj, 0)
+          if anyRating > best then best = anyRating
+          if type(extraObj) = "roAssociativeArray"
+              for each dbKey in ["synoVideoDb", "synovideodb", "theMovieDb", "themoviedb", "theTVDb", "thetvdb"]
+                  db = extraObj.lookUp(dbKey)
+                  if db <> invalid and type(db) = "roAssociativeArray"
+                      ratingObj = db.lookUp("rating")
+                      if ratingObj <> invalid and type(ratingObj) = "roAssociativeArray"
+                          for each ratingKey in ["synovideodb", "synoVideoDb", "themoviedb", "theMovieDb", "thetvdb", "theTVDb", "rating"]
+                              value = ratingNumberFromObject(ratingObj, [ratingKey])
+                              if value > best then best = value
+                          end for
+                      end if
+                  end if
+              end for
+          end if
+      end for
+      return best
+  end function
+
+  function gridAnyNestedRating(value as dynamic, depth as integer) as float
+      if value = invalid or depth > 4 then return 0
+      t = type(value)
+      if t = "roInteger" or t = "Integer" or t = "roLongInteger" or t = "LongInteger" or t = "roFloat" or t = "Float" or t = "roDouble" or t = "Double"
+          return normalizeDetailRating(value)
+      end if
+      if t = "roString" or t = "String"
+          trimmed = value.trim()
+          if trimmed = "" then return 0
+          parsed = parseJSON(trimmed)
+          if parsed <> invalid then return gridAnyNestedRating(parsed, depth + 1)
+          return normalizeDetailRating(val(trimmed))
+      end if
+      if t = "roArray"
+          best = 0
+          for each child in value
+              score = gridAnyNestedRating(child, depth + 1)
+              if score > best then best = score
+          end for
+          return best
+      end if
+      if t = "roAssociativeArray"
+          best = 0
+          for each key in value
+              lower = lcase(key)
+              child = value.lookUp(key)
+              score = 0
+              if lower = "rating" or lower = "rate" or instr(1, lower, "rating") > 0 or lower = "imdb" or lower = "tmdb" or lower = "themoviedb" or lower = "thetvdb" or lower = "synovideodb"
+                  score = gridAnyNestedRating(child, depth + 1)
+              else if type(child) = "roAssociativeArray"
+                  score = gridAnyNestedRating(child, depth + 1)
+              end if
+              if score > best then best = score
+          end for
+          return best
+      end if
+      return 0
   end function
 
   function localListKeyForCategory(category as string) as string
@@ -1814,6 +2783,7 @@ sub init()
       addCategoryByTitle(ordered, items, "TV Show")
       addCategoryByTitle(ordered, items, "Home Video")
       addCategoryByTitle(ordered, items, "Ian's Shows")
+      addCustomTvShowCategory(ordered, items)
       for each item in items
           title = item.lookUp("title")
           if title <> invalid and title <> "Settings"
@@ -1833,6 +2803,25 @@ sub init()
           if title <> invalid and lcase(title) = lcase(wanted)
               target.push(item)
               return
+          end if
+      end for
+  end sub
+
+  sub addCustomTvShowCategory(target as object, items as object)
+      for each item in items
+          title = item.lookUp("title")
+          category = item.lookUp("category")
+          libraryId = item.lookUp("libraryId")
+          if category = "tvshows" and libraryId <> invalid and libraryId <> "" and libraryId <> "0"
+              exists = false
+              for each existing in target
+                  if existing.lookUp("title") = title then exists = true
+                  if existing.lookUp("libraryId") = libraryId then exists = true
+              end for
+              if not exists
+                  target.push(item)
+                  return
+              end if
           end if
       end for
   end sub

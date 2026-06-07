@@ -54,6 +54,7 @@ function orderedCategories(items as object) as object
     addCategoryByTitle(ordered, items, "TV Show")
     addCategoryByTitle(ordered, items, "Home Video")
     addCategoryByTitle(ordered, items, "Ian's Shows")
+    addCustomTvShowCategory(ordered, items)
 
     for each item in items
         title = item.lookUp("title")
@@ -74,6 +75,25 @@ sub addCategoryByTitle(target as object, items as object, wanted as string)
         if title <> invalid and lcase(title) = lcase(wanted)
             target.push(item)
             return
+        end if
+    end for
+end sub
+
+sub addCustomTvShowCategory(target as object, items as object)
+    for each item in items
+        title = item.lookUp("title")
+        category = item.lookUp("category")
+        libraryId = item.lookUp("libraryId")
+        if category = "tvshows" and libraryId <> invalid and libraryId <> "" and libraryId <> "0"
+            exists = false
+            for each existing in target
+                if existing.lookUp("title") = title then exists = true
+                if existing.lookUp("libraryId") = libraryId then exists = true
+            end for
+            if not exists
+                target.push(item)
+                return
+            end if
         end if
     end for
 end sub

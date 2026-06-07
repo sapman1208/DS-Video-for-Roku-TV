@@ -19,7 +19,7 @@ sub onContentSet(event as object)
     dateLabel.visible = false
     if content.playlistDate <> invalid and content.playlistDate <> ""
         dateLabel.text = content.playlistDate
-        if mode = "playlistWide" then dateLabel.visible = true
+        if mode = "playlistWide" or mode = "playlistHomeVideo" then dateLabel.visible = true
     end if
     poster = m.top.findNode("poster")
     iconPoster = m.top.findNode("iconPoster")
@@ -64,10 +64,18 @@ end sub
 
 sub adjustSecondaryLine(mode as string, titleText as string)
     if mode = "playlistEpisode" then return
-    if mode <> "compactPortrait" and mode <> "moviePortrait" and mode <> "playlistMovie" then return
+    if mode <> "compactPortrait" and mode <> "moviePortrait" and mode <> "playlistMovie" and mode <> "homeLandscape" then return
     year = m.top.findNode("yearLabel")
     if titleText = invalid then titleText = ""
-    if mode = "playlistMovie"
+    if mode = "homeLandscape"
+        if len(titleText) <= 36
+            year.translation = [0, 336]
+        else if len(titleText) <= 72
+            year.translation = [0, 358]
+        else
+            year.translation = [0, 380]
+        end if
+    else if mode = "playlistMovie"
         if len(titleText) <= 18
             year.translation = [0, 346]
         else if len(titleText) <= 36
@@ -106,13 +114,13 @@ sub applyLayoutMode(mode as string)
     year.height = 34
     year.color = "#8BAFD1"
 
-    if mode = "landscape" or mode = "homeLandscape" or mode = "showLandscape" or mode = "playlistWide"
+    if mode = "landscape" or mode = "homeLandscape" or mode = "showLandscape" or mode = "playlistWide" or mode = "playlistHomeVideo"
         bg.width = 520
         bg.height = 292
         poster.width = 520
         poster.height = 292
         poster.loadDisplayMode = "scaleToZoom"
-        if mode = "showLandscape" or mode = "playlistWide" then poster.loadDisplayMode = "scaleToFit"
+        if mode = "showLandscape" or mode = "playlistWide" or mode = "playlistHomeVideo" then poster.loadDisplayMode = "scaleToFit"
         m.top.findNode("iconPoster").width = 132
         m.top.findNode("iconPoster").height = 132
         m.top.findNode("iconPoster").translation = [194, 80]
@@ -126,12 +134,13 @@ sub applyLayoutMode(mode as string)
             title.height = 78
             title.maxLines = 3
             title.lineSpacing = -1
-            year.translation = [0, 386]
+            year.font = "font:TinySystemFont"
+            year.translation = [0, 336]
         else if mode = "showLandscape"
             title.height = 76
             title.maxLines = 3
             year.translation = [0, 386]
-        else if mode = "playlistWide"
+        else if mode = "playlistWide" or mode = "playlistHomeVideo"
             bg.height = 260
             poster.height = 260
             poster.loadDisplayMode = "scaleToZoom"
@@ -148,6 +157,13 @@ sub applyLayoutMode(mode as string)
             year.color = "#FFFFFF"
             dateLabel.translation = [0, 366]
             dateLabel.width = 520
+            if mode = "playlistHomeVideo"
+                title.height = 64
+                title.maxLines = 2
+                year.height = 0
+                dateLabel.translation = [0, 334]
+                dateLabel.height = 30
+            end if
         end if
     else if mode = "playlistSelector"
         bg.width = 220

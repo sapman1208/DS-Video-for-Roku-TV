@@ -6,6 +6,8 @@ A Roku channel for browsing and playing Synology Video Station libraries, with o
 
 - Browse Movie, TV Show, Home Video, TV Recording, custom Video Station libraries, playlists, favorites, watch list, and shared videos.
 - Show TV seasons, episode metadata, resume points, posters, episode thumbnails, and backdrops.
+- Show Home Video and TV Recording detail pages with favorites, clean display titles, dates, artwork, and playback controls.
+- Display Home Video dates from Synology metadata or filename-style date hints such as `2024`, `2024-03`, `2024-03-15`, or date ranges.
 - Load artwork, metadata, playlists, watched state, ratings, and captions directly from Synology.
 - Stream Roku-compatible MP4/M4V/MOV files directly.
 - Transcode incompatible files through a NAS FFmpeg HLS service.
