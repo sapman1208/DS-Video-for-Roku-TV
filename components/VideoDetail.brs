@@ -53,6 +53,7 @@ sub onVideoDataSet(event as object)
     if data = invalid then return
     m.detailRevealed = false
     m.waitForBackdrop = false
+    m.top.sourceListRemoved = false
     m.ratingOverride = invalid
     m.ratingFocusIndex = -1
     m.top.opacity = 0
@@ -424,22 +425,34 @@ sub onActionSelected(event as object)
         m.top.playVideo = m.top.videoData
     else if idx = 1
         checked = toggleAction(idx)
+        notifyLocalListChange(idx, checked)
         syncSynologyCollection(idx, checked)
         m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
     else if idx = 2
         checked = toggleAction(idx)
+        notifyLocalListChange(idx, checked)
         syncSynologyCollection(idx, checked)
         m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
     else if idx = 3
         checked = toggleAction(idx)
+        notifyLocalListChange(idx, checked)
         syncSynologyCollection(idx, checked)
         m.top.findNode("statusLabel").text = ""
         populateActions()
         restoreActionFocus(idx)
+    end if
+end sub
+
+sub notifyLocalListChange(idx as integer, checked as boolean)
+    key = actionKey(idx)
+    if key = "" then return
+    m.top.listChanged = true
+    if checked = false and isSourceListAction(key)
+        m.top.sourceListRemoved = true
     end if
 end sub
 
@@ -506,6 +519,7 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
     print "COLLECTION_SYNC_REQUEST key="; actionKey(idx); " enabled="; enabled; " type="; data.lookUp("type"); " title="; data.lookUp("title"); " videoId="; videoId; " mapper="; mapperId
     m.pendingCollectionIdx = idx
     m.pendingCollectionEnabled = enabled
+    m.pendingCollectionSourceListRemoval = isSourceListAction(actionKey(idx)) and enabled = false
     task = createObject("roSGNode", "APITask")
     task.request = {
         action: "toggleCollectionVideo",
@@ -535,7 +549,7 @@ sub onCollectionSyncResponse(event as object)
         if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0
             restoreActionFocus(m.pendingCollectionIdx)
         end if
-    else if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0
+    else if m.pendingCollectionIdx <> invalid and m.pendingCollectionIdx > 0 and m.pendingCollectionSourceListRemoval <> true
         key = actionKey(m.pendingCollectionIdx)
         if key <> "" and m.pendingCollectionEnabled <> invalid and m.actionOverrides <> invalid
             m.actionOverrides.addReplace(key, not m.pendingCollectionEnabled)
@@ -544,6 +558,12 @@ sub onCollectionSyncResponse(event as object)
         end if
     end if
 end sub
+
+function isSourceListAction(key as string) as boolean
+    data = m.top.videoData
+    if data = invalid then return false
+    return data.sourceListKey <> invalid and data.sourceListKey = key
+end function
 
 function collectionIdForAction(idx as integer) as string
     if idx = 1 then return "-1"

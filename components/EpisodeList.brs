@@ -203,6 +203,8 @@ sub init()
           else
               node.description = ""
           end if
+          dateText = episodeDateText(ep)
+          if dateText <> "" then node.addFields({ episodeDate: dateText })
           if shouldAssignEpisodePosterInitially(idx)
               poster = posterUrl(ep, m.top.authData)
               if poster <> ""

@@ -15,6 +15,13 @@ sub onContentSet(event as object)
     else
         m.top.findNode("episodeLabel").text = ""
     end if
+    dateLabel = m.top.findNode("dateLabel")
+    dateLabel.text = ""
+    dateLabel.visible = false
+    if content.episodeDate <> invalid and content.episodeDate <> ""
+        dateLabel.text = content.episodeDate
+        dateLabel.visible = true
+    end if
 
     poster = m.top.findNode("poster")
     if content.HDPosterUrl <> invalid and content.HDPosterUrl <> ""

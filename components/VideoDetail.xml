@@ -5,6 +5,7 @@
         <field id="playVideo" type="assocarray" alwaysNotify="true" />
         <field id="backPressed" type="boolean" alwaysNotify="true" />
         <field id="listChanged" type="boolean" alwaysNotify="true" />
+        <field id="sourceListRemoved" type="boolean" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/VideoDetail.brs" />
     <script type="text/brightscript" uri="pkg:/source/bslib.brs" />

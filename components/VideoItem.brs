@@ -14,6 +14,13 @@ sub onContentSet(event as object)
     applyLayoutMode(mode)
     m.top.findNode("titleLabel").text = content.title
     adjustSecondaryLine(mode, content.title)
+    dateLabel = m.top.findNode("dateLabel")
+    dateLabel.text = ""
+    dateLabel.visible = false
+    if content.playlistDate <> invalid and content.playlistDate <> ""
+        dateLabel.text = content.playlistDate
+        if mode = "playlistWide" then dateLabel.visible = true
+    end if
     poster = m.top.findNode("poster")
     iconPoster = m.top.findNode("iconPoster")
     iconPoster.visible = false
@@ -57,15 +64,25 @@ end sub
 
 sub adjustSecondaryLine(mode as string, titleText as string)
     if mode = "playlistEpisode" then return
-    if mode <> "compactPortrait" and mode <> "moviePortrait" then return
+    if mode <> "compactPortrait" and mode <> "moviePortrait" and mode <> "playlistMovie" then return
     year = m.top.findNode("yearLabel")
     if titleText = invalid then titleText = ""
-    if len(titleText) <= 18
-        year.translation = [0, 374]
-    else if len(titleText) <= 36
-        year.translation = [0, 394]
+    if mode = "playlistMovie"
+        if len(titleText) <= 18
+            year.translation = [0, 346]
+        else if len(titleText) <= 36
+            year.translation = [0, 370]
+        else
+            year.translation = [0, 388]
+        end if
     else
-        year.translation = [0, 412]
+        if len(titleText) <= 18
+            year.translation = [0, 374]
+        else if len(titleText) <= 36
+            year.translation = [0, 394]
+        else
+            year.translation = [0, 412]
+        end if
     end if
 end sub
 
@@ -74,6 +91,12 @@ sub applyLayoutMode(mode as string)
     poster = m.top.findNode("poster")
     title = m.top.findNode("titleLabel")
     year = m.top.findNode("yearLabel")
+    dateLabel = m.top.findNode("dateLabel")
+    dateLabel.visible = false
+    dateLabel.width = 220
+    dateLabel.height = 24
+    dateLabel.font = "font:TinySystemFont"
+    dateLabel.color = "#8BAFD1"
     title.font = "font:SmallSystemFont"
     title.maxLines = 2
     title.lineSpacing = 0
@@ -116,13 +139,35 @@ sub applyLayoutMode(mode as string)
             title.height = 42
             title.font = "font:SmallBoldSystemFont"
             title.maxLines = 1
-            year.translation = [0, 320]
-            year.height = 96
+            year.translation = [0, 306]
+            year.height = 58
             year.font = "font:TinySystemFont"
-            year.maxLines = 3
+            year.maxLines = 2
+            year.lineSpacing = 0
             year.wrap = true
             year.color = "#FFFFFF"
+            dateLabel.translation = [0, 366]
+            dateLabel.width = 520
         end if
+    else if mode = "playlistSelector"
+        bg.width = 220
+        bg.height = 220
+        poster.width = 220
+        poster.height = 220
+        poster.loadDisplayMode = "scaleToFit"
+        m.top.findNode("iconPoster").width = 118
+        m.top.findNode("iconPoster").height = 118
+        m.top.findNode("iconPoster").translation = [51, 51]
+        title.translation = [0, 236]
+        title.width = 220
+        title.height = 34
+        title.font = "font:TinySystemFont"
+        title.maxLines = 1
+        title.lineSpacing = 0
+        year.translation = [0, 276]
+        year.width = 220
+        year.height = 0
+        year.font = "font:TinySystemFont"
     else if mode = "playlistMovie"
         bg.width = 220
         bg.height = 300
@@ -134,13 +179,13 @@ sub applyLayoutMode(mode as string)
         m.top.findNode("iconPoster").translation = [60, 100]
         title.translation = [0, 308]
         title.width = 220
-        title.height = 38
+        title.height = 92
         title.font = "font:TinySystemFont"
-        title.maxLines = 1
+        title.maxLines = 3
         title.lineSpacing = -1
-        year.translation = [0, 344]
+        year.translation = [0, 388]
         year.width = 220
-        year.height = 28
+        year.height = 26
         year.font = "font:TinySystemFont"
         year.maxLines = 1
         year.wrap = false

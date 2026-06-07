@@ -297,7 +297,7 @@ sub init()
           grid.numRows = 2
       else if category = "playlists"
           grid.translation = [48, 150]
-          grid.itemSize = [220, 350]
+          grid.itemSize = [220, 274]
           grid.itemSpacing = [45, 22]
           grid.numColumns = 7
           grid.numRows = 1
@@ -337,8 +337,11 @@ sub init()
               node.addFields({ layoutMode: "homeLandscape" })
               cols = 3
           else if category = "tvrecordings"
-              node.addFields({ layoutMode: "landscape" })
+              node.addFields({ layoutMode: "homeLandscape" })
               cols = 3
+          else if category = "playlists" and iconUrl <> ""
+              node.addFields({ layoutMode: "playlistSelector" })
+              cols = 7
           else if iconUrl <> ""
               node.addFields({ layoutMode: "icon" })
               cols = 7
@@ -423,15 +426,20 @@ sub init()
 
       movieGrid.content = movieContent
       episodeGrid.content = episodeContent
-      movieRows = 0
-      movieCount = movieContent.getChildCount()
-      if movieCount > 0 then movieRows = int((movieCount + 6) / 7)
-      if movieRows < 1 then movieGrid.numRows = 1 else movieGrid.numRows = movieRows
-      episodeY = 150
-      if movieRows > 0 then episodeY = 150 + (movieRows * 395)
-      episodeGrid.translation = [48, episodeY]
+      movieRows = 1
+      if movieContent.getChildCount() > 7 then movieRows = 2
+      movieGrid.numRows = movieRows
+      episodeRows = 1
+      if episodeContent.getChildCount() > 3 then episodeRows = 2
+      episodeGrid.numRows = episodeRows
+      if movieContent.getChildCount() > 0
+          episodeGrid.translation = [98, 630]
+      else
+          episodeGrid.translation = [98, 150]
+      end if
       movieGrid.visible = movieContent.getChildCount() > 0
       episodeGrid.visible = episodeContent.getChildCount() > 0
+      if movieRows > 1 and movieGrid.visible = true then episodeGrid.visible = false
       movieGrid.observeField("itemFocused", "onPlaylistMovieFocused")
       movieGrid.observeField("itemSelected", "onPlaylistMovieSelected")
       episodeGrid.observeField("itemFocused", "onPlaylistEpisodeFocused")
@@ -451,6 +459,10 @@ sub init()
       if node.title = "" then node.title = "Untitled"
       node.description = playlistItemMeta(item)
       node.addFields({ layoutMode: layoutMode, playlistIndex: idx })
+      if layoutMode = "playlistWide"
+          dateText = playlistItemDate(item)
+          if dateText <> "" then node.addFields({ playlistDate: dateText })
+      end if
       poster = posterUrl(item, m.top.authData, m.category)
       if poster <> ""
           printArtworkPick("grid", categoryLabel(m.category), item, posterSource(item, m.top.authData, m.category))
@@ -485,6 +497,52 @@ sub init()
       stopArtworkTimers()
       selectVideoItem(m.playlistEpisodeItems[idx], m.category)
   end sub
+
+  function focusPlaylistMovieIndex(target as integer) as boolean
+      if m.playlistMovieItems = invalid then return false
+      if target < 0 or target >= m.playlistMovieItems.count() then return false
+      movieGrid = m.top.findNode("playlistMovieGrid")
+      if movieGrid = invalid then return false
+      episodeGrid = m.top.findNode("playlistEpisodeGrid")
+      if episodeGrid <> invalid
+          episodeGrid.translation = [98, 630]
+          if m.playlistMovieItems <> invalid and m.playlistMovieItems.count() > 7 then episodeGrid.visible = false
+      end if
+      movieGrid.visible = true
+      movieGrid.jumpToItem = target
+      movieGrid.setFocus(true)
+      m.focusedIndex = target
+      m.focusArea = "playlistMovies"
+      return true
+  end function
+
+  function focusPlaylistEpisodeSection() as boolean
+      episodeGrid = m.top.findNode("playlistEpisodeGrid")
+      if episodeGrid = invalid then return false
+      if m.playlistEpisodeItems = invalid or m.playlistEpisodeItems.count() = 0 then return false
+      movieGrid = m.top.findNode("playlistMovieGrid")
+      if movieGrid <> invalid then movieGrid.visible = false
+      episodeGrid.translation = [98, 150]
+      episodeGrid.visible = true
+      episodeGrid.jumpToItem = 0
+      episodeGrid.setFocus(true)
+      m.focusedIndex = 0
+      m.focusArea = "playlistEpisodes"
+      return true
+  end function
+
+  function focusPlaylistEpisodeIndex(target as integer) as boolean
+      if m.playlistEpisodeItems = invalid then return false
+      if target < 0 or target >= m.playlistEpisodeItems.count() then return false
+      episodeGrid = m.top.findNode("playlistEpisodeGrid")
+      if episodeGrid = invalid then return false
+      episodeGrid.visible = true
+      episodeGrid.jumpToItem = target
+      episodeGrid.setFocus(true)
+      m.focusedIndex = target
+      m.focusArea = "playlistEpisodes"
+      return true
+  end function
 
   function shouldAssignPosterInitially(category as string, idx as integer, cols as integer) as boolean
       if shouldDeferArtworkCache(category) then return idx < cols * 4
@@ -526,6 +584,22 @@ sub init()
           meta = meta + episodeTitle
       end if
       return meta
+  end function
+
+  function playlistItemDate(item as object) as string
+      dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
+      if dateText <> "" and dateText <> "0" then return dateText
+      additional = item.lookUp("additional")
+      if additional <> invalid
+          dateText = safeStr(additional, ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
+          if dateText <> "" and dateText <> "0" then return dateText
+          extra = additional.lookUp("extra")
+          if extra <> invalid
+              dateText = safeStr(extra, ["originalAvailable", "original_available", "originally_available", "original_available_date", "originally_available_date", "airDate", "air_date", "premiered", "date", "release_date", "year"])
+              if dateText <> "" and dateText <> "0" then return dateText
+          end if
+      end if
+      return ""
   end function
 
   function playlistItemIsMovie(item as object) as boolean
@@ -1510,15 +1584,28 @@ sub init()
               movieGrid.setFocus(true)
               m.focusArea = "playlistMovies"
               return true
+          else if m.playlistMovieItems <> invalid and m.playlistMovieItems.count() > 0
+              bottomRowStart = int((m.playlistMovieItems.count() - 1) / 7) * 7
+              if focusPlaylistMovieIndex(bottomRowStart) then return true
           end if
           m.top.findNode("categoryList").setFocus(true)
           m.focusArea = "nav"
           return true
       end if
       if key = "up" and m.focusArea = "playlistMovies"
+          if m.focusedIndex >= 7
+              target = m.focusedIndex - 7
+              if focusPlaylistMovieIndex(target) then return true
+          end if
           m.top.findNode("categoryList").setFocus(true)
           m.focusArea = "nav"
           return true
+      end if
+      if key = "left" and m.focusArea = "playlistMovies"
+          pageStart = int(m.focusedIndex / 7) * 7
+          if m.focusedIndex = pageStart and pageStart > 0
+              if focusPlaylistMovieIndex(pageStart - 1) then return true
+          end if
       end if
       if key = "down" and m.focusArea = "nav"
           if left(m.category, 6) = "local_"
@@ -1538,11 +1625,27 @@ sub init()
           return true
       end if
       if key = "down" and m.focusArea = "playlistMovies"
-          episodeGrid = m.top.findNode("playlistEpisodeGrid")
-          if episodeGrid <> invalid and episodeGrid.visible = true
-              episodeGrid.setFocus(true)
-              m.focusArea = "playlistEpisodes"
-              return true
+          if m.playlistMovieItems <> invalid
+              currentRow = int(m.focusedIndex / 7)
+              nextRowStart = (currentRow + 1) * 7
+              if nextRowStart < m.playlistMovieItems.count()
+                  target = m.focusedIndex + 7
+                  if target >= m.playlistMovieItems.count() then target = nextRowStart
+                  if focusPlaylistMovieIndex(target) then return true
+              end if
+          end if
+          if focusPlaylistEpisodeSection() then return true
+          return true
+      end if
+      if key = "down" and m.focusArea = "playlistEpisodes"
+          if m.playlistEpisodeItems <> invalid
+              currentRow = int(m.focusedIndex / 3)
+              nextRowStart = (currentRow + 1) * 3
+              if nextRowStart < m.playlistEpisodeItems.count()
+                  target = m.focusedIndex + 3
+                  if target >= m.playlistEpisodeItems.count() then target = nextRowStart
+                  if focusPlaylistEpisodeIndex(target) then return true
+              end if
           end if
           return true
       end if

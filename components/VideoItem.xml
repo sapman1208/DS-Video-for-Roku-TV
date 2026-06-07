@@ -12,5 +12,6 @@
         <Poster id="iconPoster" uri="" width="112" height="112" translation="[54, 109]" loadDisplayMode="scaleToFit" visible="false" />
         <Label id="titleLabel" text="" color="#FFFFFF" font="font:SmallSystemFont" translation="[0, 342]" width="220" height="48" wrap="true" maxLines="2" />
         <Label id="yearLabel" text="" color="#8BAFD1" font="font:SmallSystemFont" translation="[0, 394]" width="220" />
+        <Label id="dateLabel" text="" color="#8BAFD1" font="font:TinySystemFont" translation="[0, 0]" width="220" visible="false" />
     </children>
 </component>

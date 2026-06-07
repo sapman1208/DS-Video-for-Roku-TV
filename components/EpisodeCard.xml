@@ -9,7 +9,8 @@
     <children>
         <Rectangle id="bg" color="#272B2E" width="520" height="292" />
         <Poster id="poster" uri="" width="520" height="292" loadDisplayMode="scaleToZoom" />
-        <Label id="titleLabel" text="" color="#FFFFFF" font="font:SmallSystemFont" translation="[0, 308]" width="520" height="48" wrap="true" maxLines="2" />
-        <Label id="episodeLabel" text="" color="#B8B8B8" font="font:SmallSystemFont" translation="[0, 360]" width="520" />
+        <Label id="titleLabel" text="" color="#FFFFFF" font="font:TinySystemFont" translation="[0, 304]" width="520" height="46" wrap="true" maxLines="2" />
+        <Label id="episodeLabel" text="" color="#B8B8B8" font="font:TinySystemFont" translation="[0, 330]" width="520" height="24" />
+        <Label id="dateLabel" text="" color="#8BAFD1" font="font:TinySystemFont" translation="[0, 356]" width="520" height="24" visible="false" />
     </children>
 </component>
