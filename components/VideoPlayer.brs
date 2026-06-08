@@ -290,6 +290,7 @@ sub init()
       print "VIDEO_STATE state="; state; " pos="; safeDynamicString(m.videoNode.position); " dur="; safeDynamicString(m.videoNode.duration); " buffer="; debugAny(m.videoNode.bufferingStatus); " errCode="; safeDynamicString(m.videoNode.errorCode); " errMsg="; safeDynamicString(m.videoNode.errorMsg)
       if state = "playing"
           stopDirectStartupTimer()
+          ensureVideoFocus()
           m.hasPlayed = true
           if m.reportedStart <> true
               m.reportedStart = true
@@ -300,6 +301,7 @@ sub init()
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "start"
       else if state = "buffering"
+          ensureVideoFocus()
           if m.streamFmt <> "hls" and m.resumePosition <> invalid and m.resumePosition > 0 and m.hasPlayed <> true
               m.videoNode.control = "play"
           end if
@@ -319,7 +321,7 @@ sub init()
           ' Only exit if no error was shown — otherwise user reads the error and presses Back.
           if not m.hasError
               reason = "finished"
-              if m.userStopped then reason = "back"
+              if state = "stopped" or m.userStopped then reason = "back"
               reportPlaybackDone(reason)
           end if
       else if state = "error"
@@ -692,6 +694,12 @@ sub init()
       print "VIDEO_BUFFER "; event.getData()
   end sub
 
+  sub ensureVideoFocus()
+      if m.videoNode = invalid then return
+      if m.videoNode.visible = false then return
+      m.videoNode.setFocus(true)
+  end sub
+
   sub showError(msg as string)
       m.hasError = true
       m.top.findNode("backgroundRect").visible = true
@@ -712,6 +720,7 @@ sub init()
           reportPlaybackDone("back")
           return true
       else if key = "left" or key = "rewind"
+          ensureVideoFocus()
           if key = "rewind"
               seekBy(-120)
           else
@@ -719,6 +728,7 @@ sub init()
           end if
           return true
       else if key = "right" or key = "fastforward"
+          ensureVideoFocus()
           if key = "fastforward"
               seekBy(120)
           else
@@ -726,11 +736,12 @@ sub init()
           end if
           return true
       else if key = "play"
+          ensureVideoFocus()
           togglePlayPause()
           return true
       else if key = "up" or key = "OK" or key = "down"
           showPlaybackOverlay()
-          m.videoNode.setFocus(true)
+          ensureVideoFocus()
           return true
       end if
       return false

@@ -1,5 +1,6 @@
 sub init()
       m.screenStack = []
+      m.videoBackExit = false
       m.top.findNode("playbackFocusTimer").observeField("fire", "onPlaybackFocusTimer")
       m.top.findNode("autoplayContextTimer").observeField("fire", "onAutoplayContextTimer")
       if hasSavedCredentials()
@@ -115,6 +116,9 @@ sub init()
 
       ' Back from any screen except login — pop the stack
       if key = "back"
+          if m.currentScreen <> invalid and m.currentScreen.findNode("videoNode") <> invalid
+              m.videoBackExit = true
+          end if
           if isLocalPlaylistGrid(m.currentScreen)
               doBack()
               return true
@@ -169,8 +173,8 @@ sub init()
 
   sub doBack()
       if m.screenStack.count() > 1
-          closeVideoIfNeeded(m.currentScreen)
-          screenToRemove = m.currentScreen
+          screenToRemove = m.screenStack[m.screenStack.count() - 1]
+          closeVideoIfNeeded(screenToRemove)
           m.top.removeChild(screenToRemove)
           if screenToRemove = m.loginScreen then m.loginScreen = invalid
           m.screenStack.pop()
@@ -190,22 +194,27 @@ sub init()
               end if
           end if
           ' Focus the Group first, then the actual inner navigable widget
-          m.currentScreen.setFocus(true)
+          restoreCurrentScreenFocus()
           if m.listsChanged = true and m.currentScreen.subtype() = "VideoGrid"
               m.currentScreen.refreshLists = true
               m.listsChanged = false
           end if
-          innerIds = ["videoGrid", "playlistMovieGrid", "playlistEpisodeGrid", "episodeGrid", "categoryList"]
-          innerIdx = 0
-          while innerIdx < innerIds.count()
-              inner = m.currentScreen.findNode(innerIds[innerIdx])
-              if inner <> invalid and inner.visible <> false
-                  inner.setFocus(true)
-                  innerIdx = innerIds.count()
-              end if
-              innerIdx = innerIdx + 1
-          end while
       end if
+  end sub
+
+  sub restoreCurrentScreenFocus()
+      if m.currentScreen = invalid then return
+      innerIds = ["videoGrid", "playlistMovieGrid", "playlistEpisodeGrid", "episodeGrid", "categoryList", "actionGrid"]
+      innerIdx = 0
+      while innerIdx < innerIds.count()
+          inner = m.currentScreen.findNode(innerIds[innerIdx])
+          if inner <> invalid and inner.visible <> false
+              inner.setFocus(true)
+              return
+          end if
+          innerIdx = innerIdx + 1
+      end while
+      m.currentScreen.setFocus(true)
   end sub
 
   sub closeVideoIfNeeded(screen as object)
@@ -555,9 +564,12 @@ sub init()
       if playedVideo <> invalid and playedVideo.lookUp("autoplayEpisodes") = invalid and m.lastPlaybackVideo <> invalid and autoplayVideoKey(playedVideo) = autoplayVideoKey(m.lastPlaybackVideo)
           playedVideo = m.lastPlaybackVideo
       end if
-      if result <> invalid and result.lookUp("reason") = "finished"
+      wasBackExit = m.videoBackExit
+      m.videoBackExit = false
+      if result <> invalid and result.lookUp("reason") = "finished" and wasBackExit <> true
           if playedVideo <> invalid and playedVideo.lookUp("autoplayEpisodes") = invalid then attachEpisodeAutoplayContext(playedVideo)
           nextVideo = nextAutoplayEpisode(playedVideo)
+          if nextVideo = invalid then nextVideo = nextAutoplayHomeVideo(playedVideo)
       end if
       if playedVideo <> invalid and playedVideo.lookUp("type") = "episode"
           m.lastPlayedEpisode = playedVideo
@@ -572,11 +584,28 @@ sub init()
       if nextVideo = invalid
           focusVideo = playedVideo
           if focusVideo = invalid and m.lastPlayedEpisode <> invalid then focusVideo = m.lastPlayedEpisode
-          if focusVideo <> invalid then requestEpisodePlaybackFocus(focusVideo)
+          if focusVideo <> invalid then requestPlaybackFocus(focusVideo)
       end if
       if nextVideo <> invalid
           playVideo(nextVideo)
       end if
+  end sub
+
+  sub requestPlaybackFocus(videoData as object)
+      if videoData = invalid then return
+      if videoData.lookUp("type") = "homevideo"
+          requestGridPlaybackFocus(videoData)
+      else
+          requestEpisodePlaybackFocus(videoData)
+      end if
+  end sub
+
+  sub requestGridPlaybackFocus(videoData as object)
+      if videoData = invalid then return
+      if m.currentScreen = invalid then return
+      if m.currentScreen.subtype() <> "VideoGrid" then return
+      print "GRID_PLAYBACK_FOCUS_REQUEST title="; safeDynamicString(videoData.lookUp("title"))
+      m.currentScreen.playbackFocusVideo = videoData
   end sub
 
   sub requestEpisodePlaybackFocus(videoData as object)
@@ -618,6 +647,119 @@ sub init()
       nextVideo.resumeChoice = "start"
       nextVideo.resumePosition = 0
       return nextVideo
+  end function
+
+  function nextAutoplayHomeVideo(videoData as dynamic) as dynamic
+      if videoData = invalid then return invalid
+      if videoData.lookUp("type") <> "homevideo" then return invalid
+      grid = activeVideoGridScreen()
+      if grid = invalid then return invalid
+      items = grid.videoItems
+      if items = invalid or items.count() = 0 then return invalid
+      currentId = safeDynamicString(videoData.lookUp("id"))
+      currentKey = autoplayVideoKey(videoData)
+      idx = -1
+      i = 0
+      while i < items.count()
+          candidate = homeVideoPayloadForScene(items[i], grid, i)
+          candidateId = safeDynamicString(candidate.lookUp("id"))
+          if (currentId <> "" and currentId <> "0" and candidateId = currentId) or autoplayVideoKey(candidate) = currentKey
+              idx = i
+              i = items.count()
+          end if
+          i = i + 1
+      end while
+      nextIdx = idx + 1
+      if idx < 0 or nextIdx >= items.count() then return invalid
+      nextVideo = homeVideoPayloadForScene(items[nextIdx], grid, nextIdx)
+      nextVideo.resumeChoice = "start"
+      nextVideo.resumePosition = 0
+      print "HOMEVIDEO_AUTOPLAY_NEXT index="; nextIdx; " title="; safeDynamicString(nextVideo.lookUp("title"))
+      return nextVideo
+  end function
+
+  function activeVideoGridScreen() as dynamic
+      if m.screenStack = invalid then return invalid
+      idx = m.screenStack.count() - 1
+      while idx >= 0
+          screen = m.screenStack[idx]
+          if screen <> invalid and screen.subtype() = "VideoGrid" then return screen
+          idx = idx - 1
+      end while
+      return invalid
+  end function
+
+  function homeVideoPayloadForScene(item as object, grid as object, fallbackIndex as integer) as object
+      title = sceneSafeStr(item, ["title", "name", "file_name"])
+      displayTitle = stripSingleDateParenForScene(title)
+      if displayTitle = "" then displayTitle = title
+      fileInfo = sceneFileInfoFromItem(item)
+      rawId = item.lookUp("id")
+      if rawId = invalid then rawId = "0"
+      rawFileId = fileInfo.id
+      if rawFileId = invalid then rawFileId = rawId
+      category = "homevideos"
+      if grid <> invalid and grid.category <> invalid then category = grid.category
+      return {
+          type: "homevideo",
+          id: rawId,
+          fileId: rawFileId,
+          mapperId: sceneSafeStr(item, ["mapper_id", "mapperId"]),
+          sourceCategory: category,
+          collectionVideoType: "homevideo",
+          filePath: fileInfo.path,
+          originalAvailable: sceneSafeStr(item, ["rokuDisplayDate", "originalAvailable", "original_available", "originally_available", "date", "year"]),
+          title: displayTitle,
+          summary: sceneSafeStr(item, ["summary", "description", "tagline"]),
+          watchedRatio: 0,
+          fileWatched: fileInfo.watched,
+          rating: sceneNumberForItem(item, ["rating", "rate"]),
+          posterUrl: sceneSafeStr(item, ["posterUrl", "posterRemoteUrl"]),
+          posterRemoteUrl: sceneSafeStr(item, ["posterRemoteUrl", "posterUrl"]),
+          backdropUrl: sceneSafeStr(item, ["backdropUrl", "backdropRemoteUrl"]),
+          backdropRemoteUrl: sceneSafeStr(item, ["backdropRemoteUrl", "backdropUrl"]),
+          autoplayIndex: fallbackIndex,
+          authData: m.authData
+      }
+  end function
+
+  function sceneNumberForItem(item as object, keys as object) as integer
+      text = sceneSafeStr(item, keys)
+      if text = "" then return 0
+      return val(text)
+  end function
+
+  function stripSingleDateParenForScene(title as string) as string
+      openIdx = 0
+      closeIdx = 0
+      i = 1
+      while i <= len(title)
+          ch = mid(title, i, 1)
+          if ch = "(" then openIdx = i
+          if ch = ")" and openIdx > 0
+              closeIdx = i
+              inner = mid(title, openIdx + 1, closeIdx - openIdx - 1).trim()
+              if sceneLooksLikeDate(inner)
+                  before = left(title, openIdx - 1).trim()
+                  after = mid(title, closeIdx + 1).trim()
+                  if before <> "" and after = "" then return before
+              end if
+          end if
+          i = i + 1
+      end while
+      return title
+  end function
+
+  function sceneLooksLikeDate(value as string) as boolean
+      if value = "" then return false
+      hasDigit = false
+      i = 1
+      while i <= len(value)
+          code = asc(mid(value, i, 1))
+          if code >= 48 and code <= 57 then hasDigit = true
+          i = i + 1
+      end while
+      return hasDigit
   end function
 
   sub attachEpisodeAutoplayContext(videoData as object)

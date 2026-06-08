@@ -510,6 +510,8 @@ sub configurePosterFrame(data as object)
 
         m.top.findNode("titleLabel").translation = [760, 150]
         m.top.findNode("titleLabel").width = 1040
+        m.top.findNode("titleLabel").height = 72
+        m.top.findNode("titleLabel").maxLines = 1
         m.top.findNode("metaLabel").translation = [760, 230]
         m.top.findNode("metaLabel").width = 1000
         m.top.findNode("dateLabel").translation = [760, 285]
@@ -536,15 +538,17 @@ sub configurePosterFrame(data as object)
 
         m.top.findNode("titleLabel").translation = [540, 150]
         m.top.findNode("titleLabel").width = 1180
-        m.top.findNode("metaLabel").translation = [540, 230]
+        m.top.findNode("titleLabel").height = 122
+        m.top.findNode("titleLabel").maxLines = 2
+        m.top.findNode("metaLabel").translation = [540, 282]
         m.top.findNode("metaLabel").width = 1100
-        m.top.findNode("dateLabel").translation = [540, 285]
+        m.top.findNode("dateLabel").translation = [540, 282]
         m.top.findNode("dateLabel").width = 1100
-        m.top.findNode("ratingLabel").translation = [540, 288]
-        m.top.findNode("ratingGrid").translation = [664, 282]
-        m.top.findNode("summaryLabel").translation = [540, 386]
+        m.top.findNode("ratingLabel").translation = [540, 336]
+        m.top.findNode("ratingGrid").translation = [664, 330]
+        m.top.findNode("summaryLabel").translation = [540, 430]
         m.top.findNode("summaryLabel").width = 1180
-        m.top.findNode("summaryLabel").height = 470
+        m.top.findNode("summaryLabel").height = 426
         m.top.findNode("summaryLabel").font = "font:SmallSystemFont"
         m.top.findNode("actionGrid").translation = [540, 870]
         m.top.findNode("watchedStateLabel").translation = [110, 708]
@@ -575,22 +579,22 @@ sub applySummaryFit(summary as string, data as dynamic)
             if status <> invalid then status.translation = [760, 1010]
         end if
     else
-        label.translation = [540, 386]
+        label.translation = [540, 430]
         label.width = 1180
         label.font = "font:SmallSystemFont"
-        label.height = 470
+        label.height = 426
         actions.translation = [540, 870]
         if status <> invalid then status.translation = [540, 1005]
         if textLen > 760
             label.font = "font:TinySystemFont"
-            label.translation = [540, 374]
-            label.height = 500
+            label.translation = [540, 410]
+            label.height = 464
             actions.translation = [540, 890]
             if status <> invalid then status.translation = [540, 1015]
         end if
         if textLen > 1150
-            label.translation = [540, 366]
-            label.height = 510
+            label.translation = [540, 402]
+            label.height = 474
             actions.translation = [540, 898]
             if status <> invalid then status.translation = [540, 1020]
         end if
