@@ -286,10 +286,38 @@ sub init()
       if m.navCategories <> invalid then settingsScreen.navCategories = m.navCategories
       settingsScreen.observeField("selectedCategory", "onCategorySelected")
       settingsScreen.observeField("backPressed", "onBackPressed")
+      settingsScreen.observeField("settingsSaved", "onSettingsSaved")
       m.top.appendChild(settingsScreen)
       settingsScreen.setFocus(true)
       m.screenStack.push(settingsScreen)
       m.currentScreen = settingsScreen
+  end sub
+
+  sub onSettingsSaved(event as object)
+      if event = invalid then return
+      if event.getData() <> true then return
+      clearActiveScreens()
+      m.authData = invalid
+      m.navCategories = invalid
+      m.listsChanged = false
+      m.lastPlaybackVideo = invalid
+      m.lastPlayedEpisode = invalid
+      autoLogin()
+  end sub
+
+  sub clearActiveScreens()
+      if m.screenStack <> invalid
+          idx = m.screenStack.count() - 1
+          while idx >= 0
+              screen = m.screenStack[idx]
+              if screen <> invalid then m.top.removeChild(screen)
+              idx = idx - 1
+          end while
+      end if
+      if m.loginScreen <> invalid then m.top.removeChild(m.loginScreen)
+      m.loginScreen = invalid
+      m.currentScreen = invalid
+      m.screenStack = []
   end sub
 
   sub onVideoSelected(event as object)

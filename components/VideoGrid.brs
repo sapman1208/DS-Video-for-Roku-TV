@@ -2712,7 +2712,7 @@ sub init()
       items = response.items
       if items = invalid then return
       m.categories = orderedCategories(items)
-      m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login and transcode settings" })
+      m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login settings" })
       populateNavCategories()
   end sub
 

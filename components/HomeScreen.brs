@@ -42,7 +42,7 @@ sub onLibrariesLoaded(event as object)
     end if
 
     m.categories = orderedCategories(items)
-    m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login and transcode settings" })
+    m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login settings" })
     m.top.navCategories = m.categories
     populateCategories()
 end sub
