@@ -117,6 +117,9 @@ fi
 detect_spk_arch() {
   platform=$(/usr/syno/bin/synogetkeyvalue /etc.defaults/synoinfo.conf platform_name 2>/dev/null || true)
   machine=$(uname -m 2>/dev/null || true)
+  case "$platform" in
+    kvmx64) echo x86_64; return 0 ;;
+  esac
   case "$machine" in
     x86_64|amd64) echo x86_64; return 0 ;;
     aarch64|arm64)

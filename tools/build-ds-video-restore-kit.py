@@ -114,6 +114,8 @@ def detect_synology_arch() -> str:
         except (OSError, subprocess.CalledProcessError):
             continue
         if value:
+            if value == "kvmx64":
+                return "x86_64"
             if value in {"amd64", "x86_64"}:
                 return "x86_64"
             if value in {"aarch64", "arm64"}:
