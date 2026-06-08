@@ -1,4 +1,4 @@
-# Synology DS Video for Roku v1.0.385 Draft
+# Synology DS Video for Roku v1.0.394 Draft
 
 ## Release Notes
 
@@ -24,6 +24,11 @@ This build uses a NAS-side Video Station wrapper for normal Video Station playba
   - Protocol OK toggles HTTP/HTTPS.
   - Save writes credentials and returns focus to the Settings tab.
 - Regular login still saves credentials and lands in Movies.
+- Home Videos can autoplay to the next video, but pressing Back exits playback instead of starting another item.
+- After leaving Home Video playback, focus returns to the video that was actually playing, including autoplayed videos.
+- Home Video focus restoration ignores stale Roku selection events without blocking normal OK presses after focus moves.
+- Video playback now reasserts focus on the Roku video node so Up, OK, rewind, and fast-forward controls keep working after switching Home Videos.
+- Long movie titles wrap cleanly on detail pages instead of overlapping the release date.
 
 ### Release Assets
 
