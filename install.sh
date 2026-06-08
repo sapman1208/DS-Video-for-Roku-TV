@@ -7,6 +7,7 @@ INSTALL_DIR="${INSTALL_DIR:-/tmp/ds-video-restore-kit}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tmp/ds-video-restore-kit-download}"
 RUN_RESTORE=1
 PYTHON_BIN="${PYTHON_BIN:-}"
+SPK_ARCH="${SPK_ARCH:-auto}"
 INSECURE_FLAG=""
 RESTORE_ARGS=""
 
@@ -23,6 +24,7 @@ Options:
   --install-dir=PATH    Install restore-kit tools somewhere else.
   --download-dir=PATH   Store downloaded SPKs somewhere else.
   --branch=NAME         GitHub branch to download. Default: main.
+  --arch=ARCH           SPK architecture. Default: auto. VirtualDSM kvmx64 uses x86_64.
   --insecure            Pass --insecure to the Python downloader.
   --restore-args=ARGS   Extra args for ds-video-restore-kit.sh when --run is used.
   -h, --help            Show this help.
@@ -42,6 +44,7 @@ while [ $# -gt 0 ]; do
     --install-dir=*) INSTALL_DIR=${1#*=} ;;
     --download-dir=*) DOWNLOAD_DIR=${1#*=} ;;
     --branch=*) BRANCH=${1#*=} ;;
+    --arch=*) SPK_ARCH=${1#*=} ;;
     --insecure) INSECURE_FLAG="--insecure" ;;
     --restore-args=*) RESTORE_ARGS=${1#*=} ;;
     -h|--help) usage; exit 0 ;;
@@ -101,9 +104,17 @@ mkdir -p "$INSTALL_DIR"
 cp -R "$SOURCE_DIR/tools/." "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/ds-video-restore-kit.sh" "$INSTALL_DIR/build-ds-video-restore-kit.py"
 
+if [ "$SPK_ARCH" = "auto" ]; then
+  platform=$(/usr/syno/bin/synogetkeyvalue /etc.defaults/synoinfo.conf platform_name 2>/dev/null || true)
+  if [ "$platform" = "kvmx64" ]; then
+    SPK_ARCH="x86_64"
+    echo "Detected VirtualDSM kvmx64; using x86_64 SPKs."
+  fi
+fi
+
 echo "Downloading Synology SPKs for this NAS architecture"
 cd "$INSTALL_DIR"
-"$PYTHON_BIN" build-ds-video-restore-kit.py --output "$DOWNLOAD_DIR" --arch auto --include-optional --no-archive $INSECURE_FLAG
+"$PYTHON_BIN" build-ds-video-restore-kit.py --output "$DOWNLOAD_DIR" --arch "$SPK_ARCH" --include-optional --no-archive $INSECURE_FLAG
 rm -rf "$INSTALL_DIR/packages"
 cp -R "$DOWNLOAD_DIR/restore-kit/packages" "$INSTALL_DIR/"
 
