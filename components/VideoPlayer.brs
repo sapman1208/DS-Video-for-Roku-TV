@@ -42,6 +42,7 @@ sub init()
       m.maxStreamAttempts = 1
       m.retryingStream = false
       m.progressDebugTicks = 0
+      m.userSeekTarget = invalid
       printVideoDataDebug("VIDEO_DATA", videoData)
       if (m.resumePosition = invalid or m.resumePosition <= 0) and m.top.resumePosition <> invalid
           m.resumePosition = int(m.top.resumePosition)
@@ -202,14 +203,14 @@ sub init()
       if m.subtitleUrl <> invalid and m.subtitleUrl <> ""
           print "VIDEO_SUBTITLE_NATIVE_READY track="; m.subtitleUrl
       end if
-      video.setFocus(true)
+      ensureVideoFocus()
       m.hasPlayed = false
       playStartText = ""
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls" then playStartText = safeDynamicString(m.resumePosition)
       print "VIDEO_CONTENT fmt="; fmt; " streamFormat="; safeDynamicString(content.streamFormat); " title="; safeDynamicString(content.title); " url="; debugUrlSummary(content.url); " playStart="; playStartText
       print "VIDEO_PLAY fmt="; fmt
       if m.resumePosition <> invalid and m.resumePosition > 0 then print "VIDEO_RESUME position="; m.resumePosition
-      if m.resumePosition <> invalid and m.resumePosition > 0
+      if m.resumePosition <> invalid and m.resumePosition > 0 and m.nativeHlsResume <> true
           beginResumeHold()
       else
           setVideoMuted(false)
@@ -240,6 +241,8 @@ sub init()
   sub endResumeHold()
       m.resumeHoldActive = false
       m.videoNode.visible = true
+      m.videoNode.enableUI = true
+      ensureVideoFocus()
       setVideoMuted(false)
       overlay = m.top.findNode("resumeOverlay")
       if overlay <> invalid then overlay.visible = false
@@ -358,6 +361,7 @@ sub init()
       if event = invalid then return
       applyPendingSeek()
       saveResumePosition()
+      clearSettledUserSeekTarget()
       m.progressDebugTicks = m.progressDebugTicks + 1
       if m.progressDebugTicks >= 6
           m.progressDebugTicks = 0
@@ -390,6 +394,7 @@ sub init()
           timer = m.top.findNode("resumeSeekTimer")
           if timer <> invalid then timer.control = "stop"
           endResumeHold()
+          ensureVideoFocus()
           print "VIDEO_SEEK_DONE position="; currentPos; " target="; m.resumePosition
           return
       end if
@@ -401,11 +406,13 @@ sub init()
           timer = m.top.findNode("resumeSeekTimer")
           if timer <> invalid then timer.control = "stop"
           endResumeHold()
+          ensureVideoFocus()
           print "VIDEO_SEEK_GIVEUP position="; currentPos; " target="; m.resumePosition
           return
       end if
       m.seekAttempts = m.seekAttempts + 1
       m.videoNode.seek = m.resumePosition
+      ensureVideoFocus()
       print "VIDEO_SEEK attempt="; m.seekAttempts; " target="; m.resumePosition; " current="; currentPos
   end sub
 
@@ -424,18 +431,30 @@ sub init()
       if m.videoNode = invalid then return
       duration = int(m.videoNode.duration)
       current = int(m.videoNode.position)
-      target = current + deltaSeconds
+      base = current
+      if m.userSeekTarget <> invalid
+          base = int(m.userSeekTarget)
+      end if
+      target = base + deltaSeconds
       if target < 0 then target = 0
       if duration > 0 and target > duration - 5 then target = duration - 5
       if target < 0 then target = 0
+      m.userSeekTarget = target
       m.videoNode.seek = target
       if m.resumePosition <> invalid and m.resumePosition > 0
           m.seekApplied = true
           m.resumeSeekDoneAt = createObject("roTimespan")
           m.resumeSeekDoneAt.mark()
       end if
-      print "VIDEO_USER_SEEK from="; current; " to="; target; " delta="; deltaSeconds; " duration="; duration
+      print "VIDEO_USER_SEEK from="; current; " base="; base; " to="; target; " delta="; deltaSeconds; " duration="; duration
       showPlaybackOverlay()
+  end sub
+
+  sub clearSettledUserSeekTarget()
+      if m.userSeekTarget = invalid then return
+      current = int(m.videoNode.position)
+      target = int(m.userSeekTarget)
+      if abs(current - target) <= 5 then m.userSeekTarget = invalid
   end sub
 
   sub togglePlayPause()
@@ -676,8 +695,8 @@ sub init()
 
   sub ensureVideoFocus()
       if m.videoNode = invalid then return
-      if m.videoNode.visible = false then return
-      m.videoNode.setFocus(true)
+      m.videoNode.enableUI = true
+      if m.videoNode.visible = true then m.videoNode.setFocus(true)
   end sub
 
   sub showError(msg as string)
@@ -694,6 +713,7 @@ sub init()
 
   function onKeyEvent(key as string, press as boolean) as boolean
       if not press then return false
+      print "VIDEO_KEY key="; key; " state="; safeDynamicString(m.videoNode.state); " focus=player"
       if key = "back"
           m.userStopped = true
           m.videoNode.control = "stop"
@@ -701,24 +721,21 @@ sub init()
           return true
       else if key = "left" or key = "rewind"
           ensureVideoFocus()
-          if key = "rewind"
-              seekBy(-120)
-          else
-              seekBy(-30)
+          if key = "left" and m.top.findNode("controlOverlay").visible = true
+              seekBy(-90)
+              return true
           end if
-          return true
+          return false
       else if key = "right" or key = "fastforward"
           ensureVideoFocus()
-          if key = "fastforward"
-              seekBy(120)
-          else
-              seekBy(30)
+          if key = "right" and m.top.findNode("controlOverlay").visible = true
+              seekBy(90)
+              return true
           end if
-          return true
+          return false
       else if key = "play"
           ensureVideoFocus()
-          togglePlayPause()
-          return true
+          return false
       else if key = "up" or key = "OK" or key = "down"
           showPlaybackOverlay()
           ensureVideoFocus()

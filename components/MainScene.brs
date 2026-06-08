@@ -801,32 +801,29 @@ sub init()
       sorted = []
       if episodes = invalid then return sorted
       for each ep in episodes
-          sorted.push(ep)
+          if ep <> invalid
+              season = sceneEpisodeSeason(ep)
+              episode = sceneEpisodeNumber(ep)
+              if season <= 0 then season = 9999
+              if episode <= 0 then episode = 99999
+              item = {}
+              for each key in ep
+                  item[key] = ep[key]
+              end for
+              item.autoplaySortKey = scenePadAutoplayNumber(season, 4) + ":" + scenePadAutoplayNumber(episode, 5) + ":" + lcase(sceneSafeStr(ep, ["title", "name", "file_name"]))
+              sorted.push(item)
+          end if
       end for
-      i = 0
-      while i < sorted.count()
-          j = i + 1
-          while j < sorted.count()
-              leftSeason = sceneEpisodeSeason(sorted[i])
-              rightSeason = sceneEpisodeSeason(sorted[j])
-              leftNum = sceneEpisodeNumber(sorted[i])
-              rightNum = sceneEpisodeNumber(sorted[j])
-              shouldSwap = false
-              if rightSeason > 0 and (leftSeason <= 0 or rightSeason < leftSeason)
-                  shouldSwap = true
-              else if rightSeason = leftSeason and rightNum > 0 and (leftNum <= 0 or rightNum < leftNum)
-                  shouldSwap = true
-              end if
-              if shouldSwap
-                  tmp = sorted[i]
-                  sorted[i] = sorted[j]
-                  sorted[j] = tmp
-              end if
-              j = j + 1
-          end while
-          i = i + 1
-      end while
+      sorted.sortBy("autoplaySortKey")
       return sorted
+  end function
+
+  function scenePadAutoplayNumber(value as integer, width as integer) as string
+      text = stri(value).trim()
+      while len(text) < width
+          text = "0" + text
+      end while
+      return text
   end function
 
   function autoplayEpisodePayloadForScene(ep as object, showData as dynamic, authData as dynamic, fallbackIndex as integer) as object

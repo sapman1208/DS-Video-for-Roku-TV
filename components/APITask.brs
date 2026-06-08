@@ -1499,7 +1499,12 @@ sub init()
 
   function rokuVteWrapperStreamUrl(baseUrl as string, sid as string, token as string, fileId as string, resumePosition as integer) as string
       enc = createObject("roUrlTransfer")
-      url = localVideoBaseUrl(baseUrl) + "/webapi/VideoStation/rokuvte.cgi?sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1&start_over=1"
+      url = localVideoBaseUrl(baseUrl) + "/webapi/VideoStation/rokuvte.cgi?sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1"
+      if resumePosition > 0
+          url = url + "&resume=" + stri(resumePosition).trim()
+      else
+          url = url + "&start_over=1"
+      end if
       if token <> "" then url = url + "&token=" + enc.escape(token)
       return url
   end function
@@ -2247,7 +2252,7 @@ sub init()
                   if m.targetAttempt = 0
                       streamUrl = rokuVteWrapperStreamUrl(baseUrl, relaySid, relayToken, fileId, resumePosition)
                       print "ROKUVTE_WRAPPER_PLAY "; fsPath; " fileId="; fileId; " resume="; resumePosition
-                      nativeHlsResume = false
+                      nativeHlsResume = resumePosition > 0
                       m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, relaySid, relayToken, filePath), debugInfo: "Video Station RokuVTE wrapper " + left(fsPath, 120), directVte: true, nativeHlsResume: nativeHlsResume, resumePosition: resumePosition }
                       return
                   end if
