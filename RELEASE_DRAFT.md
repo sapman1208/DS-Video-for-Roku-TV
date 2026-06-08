@@ -1,4 +1,4 @@
-# Synology DS Video for Roku v1.0.384 Draft
+# Synology DS Video for Roku v1.0.385 Draft
 
 ## Release Notes
 
@@ -7,6 +7,7 @@ This build uses a NAS-side Video Station wrapper for normal Video Station playba
 ### What's New
 
 - Direct Video Station HLS playback path for AVI/transcoded files.
+- Wrapper HLS playback uses the local DSM HTTP address on the LAN, avoiding Roku HTTP response failures seen through the external HTTPS address.
 - Broader TV episode fallback for shows whose Video Station title includes a year but the folder name does not.
 - HLS resume no longer hides playback while Roku attempts an unreliable client-side seek.
 - TV episode loading uses Synology episode records first, with safer folder fallback details when no playable records are returned.

@@ -1,5 +1,5 @@
 sub Main()
-    print "MAIN_START build=384"
+    print "MAIN_START build=385"
     screen = CreateObject("roSGScreen")
     m.port = CreateObject("roMessagePort")
     screen.setMessagePort(m.port)

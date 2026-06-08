@@ -1815,6 +1815,9 @@ sub init()
   end function
 
   function localVideoBaseUrl(baseUrl as string) as string
+      lower = lcase(baseUrl)
+      if instr(1, lower, "sapman.duckdns.org:7520") > 0 then return "http://10.0.1.74:7515"
+      if instr(1, lower, "10.0.1.74:7520") > 0 then return "http://10.0.1.74:7515"
       return baseUrl
   end function
 
