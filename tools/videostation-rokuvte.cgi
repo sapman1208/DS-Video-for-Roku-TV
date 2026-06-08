@@ -27,6 +27,10 @@ def webapi_url(params):
     port = "5000"
     if ":" in host:
         port = host.rsplit(":", 1)[1]
+    if port == "5001":
+        port = "5000"
+    elif port == "7520":
+        port = "7515"
     return f"http://127.0.0.1:{port}/webapi/entry.cgi?{query}"
 
 

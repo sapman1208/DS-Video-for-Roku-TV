@@ -63,6 +63,10 @@ Credentials are saved on the Roku. Use `Settings` from the top navigation bar to
 
 Install the NAS wrapper if you want AVI and other Video Station-transcoded files to play through Synology's own HLS stream.
 
+HTTPS app settings are supported. When the wrapper is reached on DSM HTTPS
+ports such as `5001`, it calls Video Station internally through the matching
+local HTTP port, then returns HTTPS playlist and segment URLs to Roku.
+
 Download the release asset named:
 
 ```text
