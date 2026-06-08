@@ -28,14 +28,14 @@ patched RokuVTE wrapper.
 
 ## NAS `wget` Install
 
-SSH into the NAS as root, then download the GitHub `newbuild` branch:
+SSH into the NAS as root, then download the GitHub `main` branch:
 
 ```sh
 mkdir -p "/volume1/docker/DS Video/restore-kit"
 cd /tmp
-wget -O ds-video-newbuild.tar.gz "https://github.com/sapman1208/DS-Video-for-Roku-TV/archive/refs/heads/newbuild.tar.gz"
-tar -xzf ds-video-newbuild.tar.gz
-cp -R DS-Video-for-Roku-TV-newbuild/tools/. "/volume1/docker/DS Video/restore-kit/"
+wget -O ds-video-main.tar.gz "https://github.com/sapman1208/DS-Video-for-Roku-TV/archive/refs/heads/main.tar.gz"
+tar -xzf ds-video-main.tar.gz
+cp -R DS-Video-for-Roku-TV-main/tools/. "/volume1/docker/DS Video/restore-kit/"
 chmod +x "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" "/volume1/docker/DS Video/restore-kit/build-ds-video-restore-kit.py"
 ```
 
