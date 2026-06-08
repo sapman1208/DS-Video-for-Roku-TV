@@ -93,6 +93,14 @@ If you use HTTPS, or if your DSM web port is not the default `5000`, set `NAS_WE
 NAS_WEB_BASE=https://10.0.1.80:5001 ./install-videostation-rokuvte-wrapper.sh administrator@10.0.1.80
 ```
 
+If your DSM uses custom web ports, pass the HTTP and HTTPS ports to the
+installer. These values are saved on the NAS so the wrapper can call Video
+Station internally through the right local HTTP port:
+
+```sh
+NAS_HTTP_PORT=5000 NAS_HTTPS_PORT=5001 ./install-videostation-rokuvte-wrapper.sh administrator@10.0.1.80
+```
+
 On Windows, use WSL or Git Bash because the installer is a Bash script:
 
 ```sh
@@ -105,6 +113,12 @@ For HTTPS on Windows:
 
 ```sh
 NAS_WEB_BASE=https://10.0.1.80:5001 ./install-videostation-rokuvte-wrapper.sh administrator@10.0.1.80
+```
+
+For custom DSM ports on Windows:
+
+```sh
+NAS_HTTP_PORT=5000 NAS_HTTPS_PORT=5001 ./install-videostation-rokuvte-wrapper.sh administrator@10.0.1.80
 ```
 
 The installer backs up any existing wrapper files under `/root/rokuvte-wrapper-backup-YYYYMMDD-HHMMSS` before installing:

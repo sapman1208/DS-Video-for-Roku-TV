@@ -27,11 +27,25 @@ def webapi_url(params):
     port = "5000"
     if ":" in host:
         port = host.rsplit(":", 1)[1]
-    if port == "5001":
-        port = "5000"
-    elif port == "7520":
-        port = "7515"
+    port = internal_webapi_port(port)
     return f"http://127.0.0.1:{port}/webapi/entry.cgi?{query}"
+
+
+def internal_webapi_port(external_port):
+    port_map = {"5001": "5000"}
+    config_path = os.path.join(os.path.dirname(__file__), "rokuvte-port-map.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            custom_map = json.load(fh)
+        if isinstance(custom_map, dict):
+            for key, value in custom_map.items():
+                key = "".join(ch for ch in str(key) if ch.isdigit())
+                value = "".join(ch for ch in str(value) if ch.isdigit())
+                if key and value:
+                    port_map[key] = value
+    except Exception:
+        pass
+    return port_map.get(str(external_port), str(external_port))
 
 
 def request_json(url, body=None):
