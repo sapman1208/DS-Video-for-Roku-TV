@@ -28,28 +28,24 @@ patched RokuVTE wrapper.
 
 ## NAS `wget` Install
 
-SSH into the NAS as root, then download the GitHub `main` branch into `/tmp`.
-No shared folder is required:
+SSH into the NAS as root, then download and run the bootstrap installer:
 
 ```sh
 cd /tmp
-wget -O ds-video-main.tar.gz "https://github.com/sapman1208/DS-Video-for-Roku-TV/archive/refs/heads/main.tar.gz"
-tar -xzf ds-video-main.tar.gz
-rm -rf /tmp/ds-video-restore-kit
-mkdir -p /tmp/ds-video-restore-kit
-cp -R DS-Video-for-Roku-TV-main/tools/. /tmp/ds-video-restore-kit/
-chmod +x /tmp/ds-video-restore-kit/ds-video-restore-kit.sh /tmp/ds-video-restore-kit/build-ds-video-restore-kit.py
+wget -O ds-video-install.sh "https://raw.githubusercontent.com/sapman1208/DS-Video-for-Roku-TV/main/install.sh"
+sh ds-video-install.sh
 ```
 
-Download the Synology SPKs for this NAS architecture:
+That installs into `/tmp/ds-video-restore-kit`, downloads the Synology SPKs for
+the NAS architecture, and runs the restore.
+
+To prepare the restore-kit without running it:
 
 ```sh
-cd /tmp/ds-video-restore-kit
-python3 build-ds-video-restore-kit.py --output /tmp/ds-video-restore-kit-download --arch auto --include-optional --no-archive
-cp -R /tmp/ds-video-restore-kit-download/restore-kit/packages /tmp/ds-video-restore-kit/
+sh ds-video-install.sh --no-run
 ```
 
-Run the restore:
+To run the prepared restore-kit manually:
 
 ```sh
 LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug

@@ -63,32 +63,22 @@ tools/
 
 ## NAS `wget` Install
 
-The easiest restore-kit install is from an SSH session on the NAS. This example
-downloads the GitHub `main` branch and places the restore files in `/tmp`, so no
-shared folder is required:
+The easiest restore-kit install is from an SSH session on the NAS:
 
 ```sh
 cd /tmp
-wget -O ds-video-main.tar.gz "https://github.com/sapman1208/DS-Video-for-Roku-TV/archive/refs/heads/main.tar.gz"
-tar -xzf ds-video-main.tar.gz
-rm -rf /tmp/ds-video-restore-kit
-mkdir -p /tmp/ds-video-restore-kit
-cp -R DS-Video-for-Roku-TV-main/tools/. /tmp/ds-video-restore-kit/
-chmod +x /tmp/ds-video-restore-kit/ds-video-restore-kit.sh /tmp/ds-video-restore-kit/build-ds-video-restore-kit.py
+wget -O ds-video-install.sh "https://raw.githubusercontent.com/sapman1208/DS-Video-for-Roku-TV/main/install.sh"
+sh ds-video-install.sh
 ```
 
-Then download the Synology SPKs into the restore-kit folder:
+That downloads the GitHub `main` branch, installs the restore-kit tools into
+`/tmp/ds-video-restore-kit`, downloads the Synology SPKs for the NAS
+architecture, and runs the restore.
+
+To prepare the restore-kit without running it:
 
 ```sh
-cd /tmp/ds-video-restore-kit
-python3 build-ds-video-restore-kit.py --output /tmp/ds-video-restore-kit-download --arch auto --include-optional --no-archive
-cp -R /tmp/ds-video-restore-kit-download/restore-kit/packages /tmp/ds-video-restore-kit/
-```
-
-Run the restore:
-
-```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug
+sh ds-video-install.sh --no-run
 ```
 
 After restore, open Package Center, open Advanced Media Extensions / CodecPack,
