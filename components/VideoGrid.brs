@@ -174,7 +174,6 @@ sub init()
               baseUrl: authData.baseUrl,
               sid: authData.sid,
               synoToken: authData.synoToken,
-              proxyBaseUrl: authData.proxyBaseUrl,
               localKey: localKey,
               collectionId: collectionIdForLocalKey(localKey)
           }
@@ -207,7 +206,6 @@ sub init()
           baseUrl: authData.baseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
-          proxyBaseUrl: authData.proxyBaseUrl,
           libraryId: m.top.libraryId
       }
       if category = "homevideos"
@@ -305,7 +303,6 @@ sub init()
           baseUrl: authData.baseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
-          proxyBaseUrl: authData.proxyBaseUrl,
           libraryId: m.top.libraryId,
           offset: m.items.count(),
           limit: total - m.items.count()
@@ -891,11 +888,11 @@ sub init()
   end function
 
   function shouldCacheIanShowGridArtwork(category as string) as boolean
-      return category = "ians-shows" or (category = "tvshows" and tvShowProxyPosterAllowed(category))
+      return category = "ians-shows" or (category = "tvshows" and tvShowLibraryPosterAllowed(category))
   end function
 
   function categoryLabel(category as string) as string
-      if category = "tvshows" and tvShowProxyPosterAllowed(category) then return "ians-shows"
+      if category = "tvshows" and tvShowLibraryPosterAllowed(category) then return "ians-shows"
       return category
   end function
 
@@ -2326,7 +2323,7 @@ sub init()
           return posterUrl(item, authData, category)
       end function
 
-      function tvShowProxyPosterAllowed(category as string) as boolean
+      function tvShowLibraryPosterAllowed(category as string) as boolean
           if category <> "tvshows" and category <> "ians-shows" then return false
           if m.top.libraryId = invalid then return false
           libraryId = safeStr({ value: m.top.libraryId }, ["value"])
@@ -2701,7 +2698,6 @@ sub init()
       task.request = {
           action: "listLibraries",
           baseUrl: authData.baseUrl,
-          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken
       }

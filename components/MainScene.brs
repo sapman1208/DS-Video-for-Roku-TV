@@ -20,12 +20,6 @@ sub init()
       return "http://" + host + ":" + port
   end function
 
-  function savedProxyBaseUrl(host as string, port as string, useHttps as boolean) as string
-      if port = "" then port = "8099"
-      if useHttps then return "https://" + host + ":" + port
-      return "http://" + host + ":" + port
-  end function
-
   sub autoLogin()
       reg = createObject("roRegistrySection", "DSVideo")
       host = readProtectedSetting(reg, "nasAddress")
@@ -34,9 +28,6 @@ sub init()
       password = readProtectedSetting(reg, "password")
       useHttps = true
       if reg.exists("useHttps") then useHttps = (reg.read("useHttps") = "true")
-      transcodePort = "8099"
-      if reg.exists("transcodePort") then transcodePort = readProtectedSetting(reg, "transcodePort")
-
       task = createObject("roSGNode", "APITask")
       task.request = {
           action: "login",
@@ -47,7 +38,7 @@ sub init()
       task.observeField("response", "onAutoLoginResponse")
       task.control = "RUN"
       m.autoLoginTask = task
-      m.savedLogin = { host: host, transcodePort: transcodePort, useHttps: useHttps }
+      m.savedLogin = { host: host, useHttps: useHttps }
   end sub
 
   function readProtectedSetting(reg as object, key as string) as string
@@ -100,7 +91,7 @@ sub init()
   sub onAutoLoginResponse(event as object)
       response = event.getData()
       if response <> invalid and response.success = true
-          m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, proxyBaseUrl: savedProxyBaseUrl(m.savedLogin.host, m.savedLogin.transcodePort, m.savedLogin.useHttps) }
+          m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl }
           showHomeScreen(m.authData)
       else
           showLoginScreen()
@@ -396,30 +387,11 @@ sub init()
   end sub
 
   function shouldRefreshResumePosition(videoData as object) as boolean
-      if videoData = invalid then return false
-      if videoData.lookUp("type") <> "episode" then return false
-      if videoData.lookUp("resumeChoice") <> invalid then return false
-      if videoData.lookUp("resumeRefreshDone") = true then return false
-      if m.authData = invalid then return false
-      if m.authData.proxyBaseUrl = invalid or m.authData.proxyBaseUrl = "" then return false
-      if videoData.lookUp("filePath") = invalid or videoData.lookUp("filePath") = "" then return false
-      return true
+      return false
   end function
 
   sub startResumeRefresh(videoData as object)
-      videoData.resumeRefreshDone = true
-      task = createObject("roSGNode", "APITask")
-      task.request = {
-          action: "latestResume",
-          proxyBaseUrl: m.authData.proxyBaseUrl,
-          filePath: videoData.lookUp("filePath"),
-          showTitle: videoData.lookUp("showTitle"),
-          showMapperId: videoData.lookUp("showMapperId")
-      }
-      task.observeField("response", "onResumeRefreshDone")
-      task.control = "RUN"
-      m.resumeRefreshVideo = videoData
-      m.resumeRefreshTask = task
+      return
   end sub
 
   sub onResumeRefreshDone(event as object)

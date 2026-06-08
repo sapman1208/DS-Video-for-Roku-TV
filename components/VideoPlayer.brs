@@ -72,7 +72,6 @@ sub init()
       task.request = {
           action: "getStreamUrl",
           baseUrl: authData.baseUrl,
-          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
           fileId: fileId,
@@ -607,7 +606,6 @@ sub init()
       task.request = {
           action: "updateWatchStatus",
           baseUrl: authData.baseUrl,
-          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
           videoId: videoData.id,

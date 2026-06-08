@@ -41,7 +41,6 @@ sub init()
       if action = "listLibraries" then listLibraries(req)
       if action = "listEpisodes" then listEpisodes(req)
       if action = "movieMetadata" then movieMetadata(req)
-      if action = "latestResume" then latestResume(req)
       if action = "getStreamUrl" then getStreamUrl(req)
       if action = "refreshHomeVideoFilenameCache" then refreshHomeVideoFilenameCache(req)
   end sub
@@ -135,10 +134,10 @@ sub init()
       key = firstValidKey(result, ["tvshow", "tvshows"])
       if key <> ""
           m.skipCachedArtworkResolve = true
-          m.currentProxyPosterFallbackOnly = libraryParam = ""
+          m.currentLibraryPosterFallbackOnly = libraryParam = ""
           parseAndRespond(result, key, baseUrl, sid)
           m.skipCachedArtworkResolve = false
-          m.currentProxyPosterFallbackOnly = false
+          m.currentLibraryPosterFallbackOnly = false
           m.top.response.detail = "synology2 tvshow direct poster count=" + stri(m.top.response.items.count()).trim()
           print "GRID_SOURCE category="; gridCategory; " source=synology2 libraryParam="; libraryParam; " count="; m.top.response.items.count()
           return
@@ -149,10 +148,10 @@ sub init()
       key = firstValidKey(result, ["tvshows", "tvshow"])
       if key <> ""
           m.skipCachedArtworkResolve = true
-          m.currentProxyPosterFallbackOnly = libraryParam = ""
+          m.currentLibraryPosterFallbackOnly = libraryParam = ""
           parseAndRespond(result, key, baseUrl, sid)
           m.skipCachedArtworkResolve = false
-          m.currentProxyPosterFallbackOnly = false
+          m.currentLibraryPosterFallbackOnly = false
           m.top.response.detail = "synology1 tvshow direct poster count=" + stri(m.top.response.items.count()).trim()
           print "GRID_SOURCE category="; gridCategory; " source=synology1 libraryParam="; libraryParam; " count="; m.top.response.items.count()
           return
@@ -983,12 +982,6 @@ sub init()
       m.top.response = { success: true, items: [], total: 0, baseUrl: baseUrl, sid: sid, detail: detail }
   end sub
 
-  sub latestResume(req as object)
-      filePath = ""
-      if req.filePath <> invalid then filePath = idToStr(req.filePath)
-      m.top.response = { success: true, action: "latestResume", position: 0, filePath: filePath }
-  end sub
-
   ' ── Streaming ─────────────────────────────────────────────────────────────────
   ' ── Fetch the true file ID for a video record ───────────────────────────────
   ' Calls getinfo with additional=["file"] and returns additional.file[0].id.
@@ -1405,25 +1398,6 @@ sub init()
       return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(filePath)) + "&mode=open", sid, token)
   end function
 
-  function ffmpegProxyStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, sid as string, token as string, filePath as string, resumePosition as integer) as string
-      enc = createObject("roUrlTransfer")
-      src = fileStationStreamUrl(baseUrl, sid, token, filePath)
-      nonceClock = createObject("roDateTime")
-      nonce = stri(nonceClock.asSeconds())
-      nonce = nonce.trim()
-      nonceRand = stri(rnd(1000000000))
-      nonceRand = nonceRand.trim()
-      nonce = nonce + "-" + nonceRand
-      if instr(1, src, "?") > 0
-          src = src + "&roku_cache=" + nonce
-      else
-          src = src + "?roku_cache=" + nonce
-      end if
-      url = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/transcode?src=" + enc.escape(src)
-      if resumePosition > 0 then url = url + "&resume=" + stri(resumePosition).trim()
-      return url
-  end function
-
   function subtitlePathForVideo(filePath as string) as string
       lower = lcase(filePath)
       extensions = [".mkv", ".mp4", ".avi", ".m4v", ".mov", ".webm", ".m2ts"]
@@ -1468,22 +1442,6 @@ sub init()
           end if
       end for
   end sub
-
-  function ffmpegProxyBaseUrl(baseUrl as string, proxyBaseUrl as dynamic) as string
-      if proxyBaseUrl <> invalid and proxyBaseUrl <> "" then return proxyBaseUrl
-
-      withoutScheme = baseUrl
-      schemePos = instr(1, withoutScheme, "://")
-      if schemePos > 0 then withoutScheme = mid(withoutScheme, schemePos + 3)
-
-      slashPos = instr(1, withoutScheme, "/")
-      if slashPos > 0 then withoutScheme = left(withoutScheme, slashPos - 1)
-
-      colonPos = instr(1, withoutScheme, ":")
-      if colonPos > 0 then withoutScheme = left(withoutScheme, colonPos - 1)
-
-      return "https://" + withoutScheme + ":8099"
-  end function
 
   function libraryParamFromReq(req as object) as string
       if req.libraryId = invalid then return ""
@@ -1582,16 +1540,16 @@ sub init()
       return normalized
   end function
 
-  sub enrichTvShowsWithProxyItems(items as dynamic, proxyItems as object)
-      if items = invalid or proxyItems = invalid then return
+  sub enrichTvShowsWithLibraryItems(items as dynamic, libraryItems as object)
+      if items = invalid or libraryItems = invalid then return
       for each item in items
           title = idToStr(item.lookUp("title"))
           if title = "" then title = idToStr(item.lookUp("name"))
-          match = proxyTvShowByTitle(proxyItems, title)
+          match = libraryTvShowByTitle(libraryItems, title)
           if match = invalid
               mapper = idToStr(item.lookUp("mapper_id"))
               if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
-              match = proxyTvShowByMapper(proxyItems, mapper)
+              match = libraryTvShowByMapper(libraryItems, mapper)
           end if
           if match <> invalid
               matchId = idToStr(match.lookUp("id"))
@@ -1631,9 +1589,9 @@ sub init()
       end for
   end sub
 
-  function proxyTvShowByTitle(proxyItems as object, title as string) as dynamic
+  function libraryTvShowByTitle(libraryItems as object, title as string) as dynamic
       key = normalizedTitleKey(title)
-      for each item in proxyItems
+      for each item in libraryItems
           candidate = idToStr(item.lookUp("title"))
           if candidate = "" then candidate = idToStr(item.lookUp("name"))
           if normalizedTitleKey(candidate) = key then return item
@@ -1641,9 +1599,9 @@ sub init()
       return invalid
   end function
 
-  function proxyTvShowByMapper(proxyItems as object, mapper as string) as dynamic
+  function libraryTvShowByMapper(libraryItems as object, mapper as string) as dynamic
       if mapper = "" or mapper = "0" then return invalid
-      for each item in proxyItems
+      for each item in libraryItems
           candidate = idToStr(item.lookUp("mapper_id"))
           if candidate = "" or candidate = "0" then candidate = idToStr(item.lookUp("mapperId"))
           if candidate = mapper then return item
@@ -2053,7 +2011,6 @@ sub init()
   sub getStreamUrl(req as object)
       beginCandidateSelection(req)
       baseUrl = req.baseUrl
-      proxyBaseUrl = req.proxyBaseUrl
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
@@ -2125,25 +2082,11 @@ sub init()
           end if
       end if
 
-      ' Try the raw FileStation URL first. Direct MKV works on current Roku
-      ' firmware, and this keeps short-title movies like "10" off the proxy.
+      ' Try the raw FileStation URL first. Video Station HLS fallbacks are below.
       if shouldTryFileStationDirectPath(filePath)
           if respondWithFileStationStream(baseUrl, sid, token, filePath, diag) then return
       else if filePath <> ""
-          diag.push("direct deferred for transcode:" + filePath)
-      end if
-
-      if filePath <> ""
-          if shouldTryVideoStationTranscode(filePath)
-              fsPath = fileStationPath(filePath)
-              streamUrl = ffmpegProxyStreamUrl(baseUrl, proxyBaseUrl, sid, token, filePath, resumePosition)
-              print "FFMPEG_PROXY_PLAY path="; fsPath; " resume="; resumePosition
-              m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, sid, token, filePath), debugInfo: "FFmpeg proxy " + left(fsPath, 120) }
-              return
-          else
-              m.top.response = { success: false, error: "This file needs transcoding. Direct Roku playback is disabled for this container while we stabilize MP4 playback.", detail: "Path: " + fileStationPath(filePath) + chr(10) + "Type: " + mediaType }
-              return
-          end if
+          diag.push("direct deferred for Video Station stream:" + filePath)
       end if
 
       legacyType = videoStationStreamType(mediaType)
@@ -2965,17 +2908,6 @@ sub init()
       if v = "home_video" then return ["home_video", "homevideo"]
       if v = "tv_record" then return ["tv_record", "tvrecord"]
       return [v]
-  end function
-
-  function resolveVideoStationItem(proxyBaseUrl as dynamic, filePath as dynamic) as dynamic
-      if proxyBaseUrl = invalid or proxyBaseUrl = "" then return invalid
-      if filePath = invalid or filePath = "" then return invalid
-      enc = createObject("roUrlTransfer")
-      result = httpGet(proxyBaseUrl + "/resolve?path=" + enc.escape(filePath))
-      if result = invalid or result = "" then return invalid
-      json = parseJSON(result)
-      if json = invalid or json.success <> true then return invalid
-      return json.lookUp("item")
   end function
 
   sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string, token as string)

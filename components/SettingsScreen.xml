@@ -27,10 +27,8 @@
         <Label id="row3value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 532]" width="700" />
         <Label text="Password" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 602]" />
         <Label id="row4value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 632]" width="700" />
-        <Label text="Transcode Port" color="#FFD3D6" font="font:SmallSystemFont" translation="[610, 702]" />
-        <Label id="row5value" text="" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[610, 732]" width="700" />
-        <Rectangle color="#F47A82" width="760" height="2" translation="[580, 820]" opacity="0.55" />
-        <Label id="row6value" text="Save" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[930, 850]" />
+        <Rectangle color="#F47A82" width="760" height="2" translation="[580, 700]" opacity="0.55" />
+        <Label id="row6value" text="Save" color="#FFFFFF" font="font:MediumBoldSystemFont" translation="[930, 752]" />
         <Label id="statusLabel" text="" color="#44AAFF" font="font:MediumSystemFont" translation="[580, 960]" width="760" wrap="true" visible="false" />
     </children>
 </component>

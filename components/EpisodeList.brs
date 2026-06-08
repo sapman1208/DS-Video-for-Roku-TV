@@ -99,7 +99,6 @@ sub init()
       task.request = {
           action: "listEpisodes",
           baseUrl: authData.baseUrl,
-          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
           tvshowId: showData.id,
@@ -1360,7 +1359,6 @@ sub init()
       task.request = {
           action: "listLibraries",
           baseUrl: authData.baseUrl,
-          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken
       }

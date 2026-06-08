@@ -18,7 +18,6 @@ sub onAuthDataSet(event as object)
     task.request = {
         action: "listLibraries",
         baseUrl: authData.baseUrl,
-        proxyBaseUrl: authData.proxyBaseUrl,
         sid: authData.sid,
         synoToken: authData.synoToken
     }

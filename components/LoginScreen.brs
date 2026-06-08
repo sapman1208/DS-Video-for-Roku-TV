@@ -5,12 +5,11 @@ sub init()
       m.useHttps   = true
       m.username   = ""
       m.password   = ""
-      m.transcodePort = "8099"
       m.activeField = ""
       m.focusIndex = 0
       m.blockFirstOk = false
 
-      m.rowYs = [190, 290, 390, 490, 590, 690, 825]
+      m.rowYs = [190, 290, 390, 490, 590, 725]
 
       m.top.observeField("keyInput", "onKeyInput")
       m.top.observeField("settingsMode", "onSettingsModeChanged")
@@ -43,12 +42,6 @@ sub loadSavedCredentials()
       if reg.exists("useHttps") then m.useHttps = (reg.read("useHttps") = "true")
       if reg.exists("username") then m.username = readProtectedSetting(reg, "username")
       if reg.exists("password") then m.password = readProtectedSetting(reg, "password")
-      if reg.exists("transcodePort") then m.transcodePort = readProtectedSetting(reg, "transcodePort")
-      if reg.exists("proxyHost")
-          oldProxy = reg.read("proxyHost")
-          oldPort = portFromProxyUrl(oldProxy)
-          if oldPort <> "" then m.transcodePort = oldPort
-      end if
   end sub
 
 sub saveCredentials()
@@ -62,7 +55,6 @@ sub saveCredentials()
       end if
       writeProtectedSetting(reg, "username", m.username)
       writeProtectedSetting(reg, "password", m.password)
-      writeProtectedSetting(reg, "transcodePort", m.transcodePort)
       reg.flush()
   end sub
 
@@ -83,11 +75,6 @@ sub updateAllValues()
         m.top.findNode("row4value").text = "(not set)"
     else
         m.top.findNode("row4value").text = "••••••••"
-    end if
-    if m.transcodePort = ""
-        m.top.findNode("row5value").text = "8099"
-    else
-        m.top.findNode("row5value").text = m.transcodePort
     end if
 end sub
 
@@ -176,7 +163,7 @@ sub setHighlight(idx as integer)
     m.focusIndex = idx
     yPos = m.rowYs[idx]
     m.top.findNode("rowHighlight").translation = [580, yPos]
-    if idx = 6
+    if idx = 5
         m.top.findNode("rowHighlight").color = "#A91F2A"
     else
         m.top.findNode("rowHighlight").color = "#F05A63"
@@ -190,7 +177,7 @@ end function
 
 function handleKey(key as string) as boolean
     if key = "down"
-        if m.focusIndex < 6
+        if m.focusIndex < 5
             setHighlight(m.focusIndex + 1)
         end if
         return true
@@ -239,13 +226,10 @@ sub activateRow(idx as integer)
     else if idx = 4
         m.activeField = "password"
         showKeyboard("Password", "")
-    else if idx = 5
-        m.activeField = "transcodePort"
-        showKeyboard("Transcode Port", m.transcodePort)
-    else if idx = 6 and m.top.settingsMode = true
+    else if idx = 5 and m.top.settingsMode = true
         saveCredentials()
         showStatus("Settings saved. Press Back to return.", false)
-    else if idx = 6
+    else if idx = 5
         doLogin()
     end if
 end sub
@@ -285,9 +269,6 @@ sub onKeyboardDone(event as object)
             else
                 m.top.findNode("row4value").text = "••••••••"
             end if
-        else if m.activeField = "transcodePort"
-            if entered <> "" then m.transcodePort = entered
-            m.top.findNode("row5value").text = m.transcodePort
         end if
     end if
 
@@ -337,34 +318,13 @@ sub onLoginResponse(event as object)
     if response.success = true
         saveCredentials()
         showStatus("Connected! Loading library...", false)
-        m.top.authSuccess = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, proxyBaseUrl: proxyBaseUrlForHost(m.nasAddress, m.transcodePort, m.useHttps) }
+        m.top.authSuccess = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl }
     else
         err = response.error
         if err = invalid then err = "Login failed. Check credentials."
         showStatus(err, true)
     end if
 end sub
-
-function proxyBaseUrlForHost(nasHost as string, transcodePort as string, useHttps as boolean) as string
-    port = transcodePort
-    if port = "" then port = "8099"
-    if useHttps
-        return "https://" + nasHost + ":" + port
-    end if
-    return "http://" + nasHost + ":" + port
-end function
-
-function portFromProxyUrl(proxyUrl as string) as string
-    if proxyUrl = "" then return ""
-    value = proxyUrl
-    schemePos = instr(1, value, "://")
-    if schemePos > 0 then value = mid(value, schemePos + 3)
-    slashPos = instr(1, value, "/")
-    if slashPos > 0 then value = left(value, slashPos - 1)
-    colonPos = instr(1, value, ":")
-    if colonPos > 0 then return mid(value, colonPos + 1)
-    return ""
-end function
 
 sub showStatus(msg as string, isError as boolean)
     lbl = m.top.findNode("statusLabel")

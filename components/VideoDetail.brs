@@ -688,8 +688,6 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
     if data.videoStationId <> invalid then videoId = safeIntText(data.videoStationId)
     if videoId = "" or videoId = "0" then videoId = safeIntText(data.id)
     if videoId = "" or videoId = "0" then return
-    proxyBaseUrl = invalid
-    if data.authData.proxyBaseUrl <> invalid then proxyBaseUrl = data.authData.proxyBaseUrl
     filePath = invalid
     if data.filePath <> invalid then filePath = data.filePath
     mapperId = invalid
@@ -704,7 +702,6 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
     task.request = {
         action: "toggleCollectionVideo",
         baseUrl: data.authData.baseUrl,
-        proxyBaseUrl: proxyBaseUrl,
         sid: data.authData.sid,
         synoToken: data.authData.synoToken,
         localKey: actionKey(idx),

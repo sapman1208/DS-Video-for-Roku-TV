@@ -1,0 +1,83 @@
+v1.4.22
+- Changed to try 3 different Synology download domains to download the spk file(s).
+
+v1.4.21
+- Changed to make downloading packages more reliable. Issue #93
+
+v1.4.20
+- Bug fix for trying to start package that DSM was already starting. Issue #94
+
+v1.4.19
+- Added `--install=OPTION` option for use when the script is scheduled. OPTION can be either: 
+  - 'all' to install Video Station, Media Server and Advanced Media Codecs.
+  - 'novs' to install all except Video Station.
+  - 'noms' to install all except Media Server.
+  - 'onlyamc' to only install Advanced Media Codecs.
+- Added `-h, --help` option to show the options available.
+- Added `-v, --verison` option.
+
+v1.3.18
+- Changed `timeout 5.0m` to `timeout 5m`. Issue #72
+
+v1.3.17
+- Changed to install the latest DSM 7.1 Media Server 2.0.5-3152 as it is not affected by Synology-SA-24:28
+  - https://www.synology.com/en-uk/security/advisory/Synology_SA_24_28
+  - https://www.cve.org/CVERecord?id=CVE-2024-4464
+- Now shows which Media Server version is installed.
+- Bug fix for always re-installing Media Server even if correct version was already installed.
+- Bug fix for not updating Video Station or Media Server if old version was already installed by this script.
+
+v1.3.15
+- Added support for Alpine and Alpine4K (DS1817, DS1517 and DS416). Issue #49 and #54
+
+v1.3.14
+- Changed timeout to 20 seconds. 5 seconds didn't give enough time to read the choices and make a decision.
+- Changed "already installed" messages to include the package version.
+- Added check that already installed Media Server is the correct version, and uninstall it if it's not, then install correct version.
+
+v1.3.13
+- Menu now times out after 5 seconds so script continues if no choice made (for when script is scheduled).
+
+v1.3.12
+- Added menu with choices to skip installing Media Server, Video Station or both.
+
+v1.2.11
+- Bug fix for not deleting downloaded MediaServer spk from /tmp during cleanup.
+
+v1.2.10
+- Bug fix.
+
+v1.2.9
+- Increased connection timeout from 5 seconds to 30 seconds.
+- Removed download timeout (was 30 seconds).
+
+v1.2.8
+- Changed to uninstall Video Station first if wrong version of Video Station still installed after migration. Issue #24
+- Added Synology China package download URL for users in China.
+
+v1.2.7
+  - Changed so Advanced Media Extensions and Media Server don't need to be uninstalled after DSM update.
+    - Now starts already installed Advanced Media Extensions and Media Server if they aren't running.
+
+v1.1.6
+  - Now installs a version of Media Server that supports video and audio conversion.
+
+v1.0.5
+  - Bug fix for failing to download spk file for some models with certain CPU types.
+  - Changed to check for new script version before checking CPU model and DSM version.
+
+v1.0.4
+  - Cleaned up output messages (removed the Waiting for pkg to stop/start).
+  - Bug fix for 'rm: cannot remove' messages if temp spk file was already removed.
+
+v1.0.3
+  - Bug fix for not deleting temp spk file(s) if download failed or script exited with an error.
+
+v1.0.2
+  - Bug fix for not detecting newer script version available.
+
+v1.0.1
+  - Bug fix for not installing AME. Issue #3
+
+v1.0.0
+  - First release.

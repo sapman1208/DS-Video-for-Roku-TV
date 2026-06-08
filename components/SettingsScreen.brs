@@ -4,12 +4,11 @@ sub init()
     m.useHttps = true
     m.username = ""
     m.password = ""
-    m.transcodePort = "8099"
     m.activeField = ""
     m.focusIndex = 0
     m.focusArea = "settings"
     m.categories = []
-    m.rowYs = [190, 290, 390, 490, 590, 690, 825]
+    m.rowYs = [190, 290, 390, 490, 590, 725]
 
     nav = m.top.findNode("categoryList")
     nav.observeField("itemSelected", "onNavSelected")
@@ -30,7 +29,6 @@ sub loadSavedCredentials()
     if reg.exists("useHttps") then m.useHttps = (reg.read("useHttps") = "true")
     if reg.exists("username") then m.username = readProtectedSetting(reg, "username")
     if reg.exists("password") then m.password = readProtectedSetting(reg, "password")
-    if reg.exists("transcodePort") then m.transcodePort = readProtectedSetting(reg, "transcodePort")
 end sub
 
 sub saveCredentials()
@@ -44,7 +42,6 @@ sub saveCredentials()
     end if
     writeProtectedSetting(reg, "username", m.username)
     writeProtectedSetting(reg, "password", m.password)
-    writeProtectedSetting(reg, "transcodePort", m.transcodePort)
     reg.flush()
 end sub
 
@@ -65,11 +62,6 @@ sub updateAllValues()
         m.top.findNode("row4value").text = "(not set)"
     else
         m.top.findNode("row4value").text = "********"
-    end if
-    if m.transcodePort = ""
-        m.top.findNode("row5value").text = "8099"
-    else
-        m.top.findNode("row5value").text = m.transcodePort
     end if
 end sub
 
@@ -159,7 +151,7 @@ sub setHighlight(idx as integer)
     m.focusArea = "settings"
     m.top.findNode("rowHighlight").visible = true
     m.top.findNode("rowHighlight").translation = [580, m.rowYs[idx]]
-    if idx = 6
+    if idx = 5
         m.top.findNode("rowHighlight").color = "#A91F2A"
     else
         m.top.findNode("rowHighlight").color = "#F05A63"
@@ -185,7 +177,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
             m.top.setFocus(true)
             return true
         end if
-        if m.focusIndex < 6 then setHighlight(m.focusIndex + 1)
+        if m.focusIndex < 5 then setHighlight(m.focusIndex + 1)
         return true
     else if key = "up"
         if m.focusArea = "settings" and m.focusIndex = 0
@@ -298,9 +290,6 @@ sub activateRow(idx as integer)
         m.activeField = "password"
         showKeyboard("Password", "")
     else if idx = 5
-        m.activeField = "transcodePort"
-        showKeyboard("Transcode Port", m.transcodePort)
-    else if idx = 6
         saveCredentials()
         m.top.settingsSaved = true
     end if
@@ -328,8 +317,6 @@ sub onKeyboardDone(event as object)
             if entered <> "" then m.username = entered
         else if m.activeField = "password"
             m.password = entered
-        else if m.activeField = "transcodePort"
-            if entered <> "" then m.transcodePort = entered
         end if
         updateAllValues()
     end if
