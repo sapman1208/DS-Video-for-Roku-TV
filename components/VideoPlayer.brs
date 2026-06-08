@@ -200,7 +200,6 @@ sub init()
 
       video.content = content
       if m.subtitleUrl <> invalid and m.subtitleUrl <> ""
-          video.globalCaptionMode = "On"
           print "VIDEO_SUBTITLE_NATIVE_READY track="; m.subtitleUrl
       end if
       video.setFocus(true)
@@ -259,25 +258,6 @@ sub init()
       count = 0
       if tracks <> invalid then count = tracks.count()
       print "VIDEO_SUBTITLE_AVAILABLE count="; count
-      if count <= 0 then return
-      selected = ""
-      for each track in tracks
-          if track <> invalid
-              trackName = track.lookUp("TrackName")
-              if trackName = invalid then trackName = track.lookUp("trackName")
-              if trackName = invalid then trackName = track.lookUp("Name")
-              if trackName <> invalid and trackName <> ""
-                  selected = trackName
-                  exit for
-              end if
-          end if
-      end for
-      if selected = "" and m.subtitleUrl <> invalid then selected = m.subtitleUrl
-      if selected <> ""
-          m.videoNode.globalCaptionMode = "On"
-          m.videoNode.subtitleTrack = selected
-          print "VIDEO_SUBTITLE_SELECT_AVAILABLE track="; selected
-      end if
   end sub
 
   sub onCurrentSubtitleTrack(event as object)
