@@ -9,7 +9,7 @@ needed after DSM 7.2.2+ removed the supported Video Station path.
 Keep the restore files together under one folder:
 
 ```text
-/volume1/docker/DS Video/restore-kit
+/tmp/ds-video-restore-kit
 ```
 
 The script resolves everything relative to its own location, so it can be run
@@ -28,34 +28,39 @@ patched RokuVTE wrapper.
 
 ## NAS `wget` Install
 
-SSH into the NAS as root, then download the GitHub `main` branch:
+SSH into the NAS as root, then download the GitHub `main` branch into `/tmp`.
+No shared folder is required:
 
 ```sh
-mkdir -p "/volume1/docker/DS Video/restore-kit"
 cd /tmp
 wget -O ds-video-main.tar.gz "https://github.com/sapman1208/DS-Video-for-Roku-TV/archive/refs/heads/main.tar.gz"
 tar -xzf ds-video-main.tar.gz
-cp -R DS-Video-for-Roku-TV-main/tools/. "/volume1/docker/DS Video/restore-kit/"
-chmod +x "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" "/volume1/docker/DS Video/restore-kit/build-ds-video-restore-kit.py"
+rm -rf /tmp/ds-video-restore-kit
+mkdir -p /tmp/ds-video-restore-kit
+cp -R DS-Video-for-Roku-TV-main/tools/. /tmp/ds-video-restore-kit/
+chmod +x /tmp/ds-video-restore-kit/ds-video-restore-kit.sh /tmp/ds-video-restore-kit/build-ds-video-restore-kit.py
 ```
 
 Download the Synology SPKs for this NAS architecture:
 
 ```sh
-cd "/volume1/docker/DS Video/restore-kit"
-python3 build-ds-video-restore-kit.py --output "/volume1/docker/DS Video/ds-video-restore-kit-download" --arch auto --include-optional --no-archive
-cp -R "/volume1/docker/DS Video/ds-video-restore-kit-download/restore-kit/packages" "/volume1/docker/DS Video/restore-kit/"
+cd /tmp/ds-video-restore-kit
+python3 build-ds-video-restore-kit.py --output /tmp/ds-video-restore-kit-download --arch auto --include-optional --no-archive
+cp -R /tmp/ds-video-restore-kit-download/restore-kit/packages /tmp/ds-video-restore-kit/
 ```
 
 Run the restore:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug
 ```
 
 After restore, open Package Center, open Advanced Media Extensions / CodecPack,
 and sign in/install the codec entitlement before testing AVI, HEVC, AVC, or
 other transcoded playback.
+
+`/tmp` is fine for a one-time install. Copy `/tmp/ds-video-restore-kit` to a
+persistent shared folder afterward if you want to keep a local NAS backup.
 
 ## Build A Downloadable Kit
 
@@ -99,13 +104,13 @@ set an explicit list such as `--arch x86_64,armv8,rtd1296`.
 Run this as root on the fresh NAS VM:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug
 ```
 
 If DSM is using custom login ports, pass them on the same command:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --dsm-http-port=5000 --dsm-https-port=5001 --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --dsm-http-port=5000 --dsm-https-port=5001 --debug
 ```
 
 If no port flags are typed, the script defaults to standard DSM ports:
@@ -125,14 +130,14 @@ Only force the package restore when you intentionally want to reinstall the
 Synology packages:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --force-722-install --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --force-722-install --debug
 ```
 
 If you want to run the two install phases manually, use:
 
 ```sh
-/bin/bash "/volume1/docker/DS Video/restore-kit/Video_Station_for_DSM_722-1.4.22/videostation_for_722.sh" --install=all
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --install-rokuvte --debug
+/bin/bash /tmp/ds-video-restore-kit/Video_Station_for_DSM_722-1.4.22/videostation_for_722.sh --install=all
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --install-rokuvte --debug
 ```
 
 ## Preflight And Dry Run
@@ -140,13 +145,13 @@ If you want to run the two install phases manually, use:
 Check required files without installing:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --preflight-only --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --preflight-only --debug
 ```
 
 Show what would run:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --dry-run --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --dry-run --debug
 ```
 
 ## RokuVTE Wrapper
@@ -154,25 +159,25 @@ Show what would run:
 The latest patched RokuVTE wrapper is included under:
 
 ```text
-/volume1/docker/DS Video/restore-kit/rokuvte
+/tmp/ds-video-restore-kit/rokuvte
 ```
 
 Install or refresh only the Roku wrapper:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --install-rokuvte --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --install-rokuvte --debug
 ```
 
 Use custom DSM ports if needed:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --install-rokuvte --rokuvte-http=5000 --rokuvte-https=5001 --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --install-rokuvte --rokuvte-http=5000 --rokuvte-https=5001 --debug
 ```
 
 The equivalent DSM-style aliases are:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --install-rokuvte --dsm-http-port=5000 --dsm-https-port=5001 --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --install-rokuvte --dsm-http-port=5000 --dsm-https-port=5001 --debug
 ```
 
 The installer writes:
@@ -197,7 +202,7 @@ was signed in.
 Run only the saved 007revad script:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --run-722-script --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --run-722-script --debug
 ```
 
 This also respects the installed Video Station safeguard unless
@@ -206,14 +211,14 @@ This also respects the installed Video Station safeguard unless
 The local-SPK path is kept for reference and forensic testing only:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --local-spks --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --local-spks --debug
 ```
 
 For a multi-architecture kit, the script checks `packages/$SPK_ARCH` first.
 Override detection when needed:
 
 ```sh
-SPK_ARCH=rtd1296 /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --local-spks --debug
+SPK_ARCH=rtd1296 /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --local-spks --debug
 ```
 
 Do not use the old BSM-only CodecPack or DSM-version-limited Video Station SPKs
@@ -222,8 +227,8 @@ as the main recovery path. The known-good VM path used the 007revad script.
 Optional wrapper patchers are preserved but not applied by default:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --darknebular-wrapper --debug
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --alexpresso-wrapper --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --darknebular-wrapper --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --alexpresso-wrapper --debug
 ```
 
 ## Debug Logs
@@ -237,7 +242,7 @@ Logs are written to the `LOG` path if provided. Otherwise the default is:
 For clean VM testing, prefer timestamped logs:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug
 ```
 
 The debug log captures DSM version, model, platform, mounts, disk space, backup

@@ -64,35 +64,39 @@ tools/
 ## NAS `wget` Install
 
 The easiest restore-kit install is from an SSH session on the NAS. This example
-downloads the GitHub `main` branch and places the restore files in the expected
-DSM folder:
+downloads the GitHub `main` branch and places the restore files in `/tmp`, so no
+shared folder is required:
 
 ```sh
-mkdir -p "/volume1/docker/DS Video/restore-kit"
 cd /tmp
 wget -O ds-video-main.tar.gz "https://github.com/sapman1208/DS-Video-for-Roku-TV/archive/refs/heads/main.tar.gz"
 tar -xzf ds-video-main.tar.gz
-cp -R DS-Video-for-Roku-TV-main/tools/. "/volume1/docker/DS Video/restore-kit/"
-chmod +x "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" "/volume1/docker/DS Video/restore-kit/build-ds-video-restore-kit.py"
+rm -rf /tmp/ds-video-restore-kit
+mkdir -p /tmp/ds-video-restore-kit
+cp -R DS-Video-for-Roku-TV-main/tools/. /tmp/ds-video-restore-kit/
+chmod +x /tmp/ds-video-restore-kit/ds-video-restore-kit.sh /tmp/ds-video-restore-kit/build-ds-video-restore-kit.py
 ```
 
 Then download the Synology SPKs into the restore-kit folder:
 
 ```sh
-cd "/volume1/docker/DS Video/restore-kit"
-python3 build-ds-video-restore-kit.py --output "/volume1/docker/DS Video/ds-video-restore-kit-download" --arch auto --include-optional --no-archive
-cp -R "/volume1/docker/DS Video/ds-video-restore-kit-download/restore-kit/packages" "/volume1/docker/DS Video/restore-kit/"
+cd /tmp/ds-video-restore-kit
+python3 build-ds-video-restore-kit.py --output /tmp/ds-video-restore-kit-download --arch auto --include-optional --no-archive
+cp -R /tmp/ds-video-restore-kit-download/restore-kit/packages /tmp/ds-video-restore-kit/
 ```
 
 Run the restore:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug
 ```
 
 After restore, open Package Center, open Advanced Media Extensions / CodecPack,
 and sign in/install the codec entitlement before testing AVI, HEVC, AVC, or
 other transcoded playback.
+
+`/tmp` is fine for a one-time install. Copy `/tmp/ds-video-restore-kit` to a
+persistent shared folder afterward if you want to keep a local NAS backup.
 
 From macOS, Linux, Windows, or a NAS with Python 3, build a downloadable restore
 kit from Synology's package archive:
@@ -125,10 +129,11 @@ ds-video-restore-kit-download.zip
 ds-video-restore-kit-download.tar.gz
 ```
 
-Copy the generated `restore-kit` folder to the NAS:
+Copy the generated `restore-kit` folder to the NAS. `/tmp/ds-video-restore-kit`
+works for a one-time install:
 
 ```text
-/volume1/docker/DS Video/restore-kit
+/tmp/ds-video-restore-kit
 ```
 
 ## Fresh NAS Restore
@@ -136,13 +141,13 @@ Copy the generated `restore-kit` folder to the NAS:
 Run this as root on the NAS or VM:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --debug
 ```
 
 If DSM uses custom login ports, pass them on the same command:
 
 ```sh
-LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --dsm-http-port=5000 --dsm-https-port=5001 --debug
+LOG="/tmp/ds-video-restore-kit-$(date +%Y%m%d-%H%M%S).log" /bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --dsm-http-port=5000 --dsm-https-port=5001 --debug
 ```
 
 If no port flags are typed, the defaults are standard DSM ports: HTTP `5000`
@@ -159,7 +164,7 @@ package-restore phase so it does not reinstall or downgrade your existing
 package. To intentionally reinstall the Synology packages:
 
 ```sh
-/bin/sh "/volume1/docker/DS Video/restore-kit/ds-video-restore-kit.sh" --force-722-install --debug
+/bin/sh /tmp/ds-video-restore-kit/ds-video-restore-kit.sh --force-722-install --debug
 ```
 
 ## Codec Sign-In
