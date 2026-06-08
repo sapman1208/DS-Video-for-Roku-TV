@@ -989,27 +989,39 @@ sub init()
       lastUrl = ""
       bestEpisodes = []
       bestMetadata = []
+      loadClock = createObject("roTimespan")
+      loadClock.mark()
+      bestSource = ""
+      directMs = 0
+      directCandidate = ""
+
       for each candidateId in candidates
-          direct = directEpisodeListResult(baseUrl, sid, token, candidateId, showTitle, libraryId <> "")
+          direct = directEpisodeListResult(baseUrl, sid, token, candidateId, showTitle, libraryId)
+          directMs = int(loadClock.totalMilliseconds())
+          directCandidate = idToStr(candidateId)
           if direct.url <> "" then lastUrl = direct.url
           if direct.result <> invalid then lastResult = direct.result
           if direct.metadata.count() > bestMetadata.count() then bestMetadata = direct.metadata
-          if direct.episodes.count() > bestEpisodes.count() then bestEpisodes = direct.episodes
+          if direct.episodes.count() > bestEpisodes.count()
+              bestEpisodes = direct.episodes
+              bestSource = direct.source
+          end if
           if direct.episodes.count() > 0 then exit for
-          if libraryId <> "" and direct.metadata.count() > 0 then exit for
       end for
 
       if bestEpisodes.count() > 0
           if bestMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, bestMetadata)
           normalizeEpisodeItems(bestEpisodes)
-          enrichEpisodeSummariesFromVsmeta(bestEpisodes, baseUrl, sid, token)
           addDirectPosterIds(bestEpisodes)
           bestEpisodes = uniqueEpisodeItems(bestEpisodes)
-          print "EPISODE_SOURCE title="; showTitle; " source=synology-direct count="; bestEpisodes.count()
-          m.top.response = { success: true, items: bestEpisodes, total: bestEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "Synology episode records" }
+          totalMs = int(loadClock.totalMilliseconds())
+          postMs = totalMs - directMs
+          print "EPISODE_SOURCE source=synology-direct count="; bestEpisodes.count(); " totalMs="; totalMs; " directMs="; directMs; " postMs="; postMs
+          m.top.response = { success: true, items: bestEpisodes, total: bestEpisodes.count(), baseUrl: baseUrl, sid: sid }
           return
       end if
 
+      fallbackStartMs = int(loadClock.totalMilliseconds())
       fallbackEpisodes = findEpisodesByShowTitle(baseUrl, sid, token, showTitle)
       if fallbackEpisodes.count() > 0
           if bestMetadata.count() > 0 then fallbackEpisodes = mergeEpisodeMetadata(fallbackEpisodes, bestMetadata)
@@ -1018,12 +1030,14 @@ sub init()
           addDirectPosterIds(fallbackEpisodes)
           addFileStationSidecarPosterUrls(fallbackEpisodes, baseUrl, sid, token)
           fallbackEpisodes = uniqueEpisodeItems(fallbackEpisodes)
-          print "EPISODE_SOURCE title="; showTitle; " source=filestation-scan count="; fallbackEpisodes.count()
-          m.top.response = { success: true, items: fallbackEpisodes, total: fallbackEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "FileStation episode fallback" }
+          totalMs = int(loadClock.totalMilliseconds())
+          fallbackMs = totalMs - fallbackStartMs
+          print "EPISODE_SOURCE source=filestation-fallback count="; fallbackEpisodes.count(); " totalMs="; totalMs; " directMs="; directMs; " fallbackMs="; fallbackMs
+          m.top.response = { success: true, items: fallbackEpisodes, total: fallbackEpisodes.count(), baseUrl: baseUrl, sid: sid }
           return
       end if
 
-      detail = "No playable episode records after filtering." + chr(10) + "Last URL: " + left(lastUrl, 600)
+      detail = "No playable episode records after filtering." + chr(10) + "Title: " + showTitle + chr(10) + "Candidates: " + stri(candidates.count()).trim() + chr(10) + "Last URL: " + left(lastUrl, 600)
       if lastResult <> invalid then detail = detail + chr(10) + "Last response: " + left(lastResult, 900)
       m.top.response = { success: true, items: [], total: 0, baseUrl: baseUrl, sid: sid, detail: detail }
   end sub
@@ -1483,9 +1497,9 @@ sub init()
       return url
   end function
 
-  function rokuVteWrapperStreamUrl(baseUrl as string, sid as string, token as string, fileId as string) as string
+  function rokuVteWrapperStreamUrl(baseUrl as string, sid as string, token as string, fileId as string, resumePosition as integer) as string
       enc = createObject("roUrlTransfer")
-      url = localVideoBaseUrl(baseUrl) + "/webapi/VideoStation/rokuvte.cgi?sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1"
+      url = localVideoBaseUrl(baseUrl) + "/webapi/VideoStation/rokuvte.cgi?sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1&start_over=1"
       if token <> "" then url = url + "&token=" + enc.escape(token)
       return url
   end function
@@ -2231,9 +2245,10 @@ sub init()
                       print "VTE_RELAY_SESSION using existing"
                   end if
                   if m.targetAttempt = 0
-                      streamUrl = rokuVteWrapperStreamUrl(baseUrl, relaySid, relayToken, fileId)
-                      print "ROKUVTE_WRAPPER_PLAY "; fsPath; " fileId="; fileId
-                      m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, relaySid, relayToken, filePath), debugInfo: "Video Station RokuVTE wrapper " + left(fsPath, 120), directVte: true }
+                      streamUrl = rokuVteWrapperStreamUrl(baseUrl, relaySid, relayToken, fileId, resumePosition)
+                      print "ROKUVTE_WRAPPER_PLAY "; fsPath; " fileId="; fileId; " resume="; resumePosition
+                      nativeHlsResume = false
+                      m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, relaySid, relayToken, filePath), debugInfo: "Video Station RokuVTE wrapper " + left(fsPath, 120), directVte: true, nativeHlsResume: nativeHlsResume, resumePosition: resumePosition }
                       return
                   end if
                   m.top.response = { success: false, error: "Video Station wrapper playback failed.", detail: "Path: " + fsPath, attemptIndex: m.targetAttempt }
@@ -3173,10 +3188,12 @@ sub init()
       return "movie"
   end function
 
-  function directEpisodeListResult(baseUrl as string, sid as string, token as string, candidateId as string, showTitle as string, stopOnMetadata as boolean) as object
+  function directEpisodeListResult(baseUrl as string, sid as string, token as string, candidateId as string, showTitle as string, libraryId as string) as object
       emptyResult = { episodes: [], metadata: [], result: invalid, url: "", source: "" }
       id = idToStr(candidateId)
       if id = "" or id = "0" then return emptyResult
+      libraryParam = ""
+      if libraryId <> "" and libraryId <> "0" then libraryParam = "&library_id=" + libraryId
 
       richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22%5D"
       simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22originally_available%22%5D"
@@ -3199,6 +3216,7 @@ sub init()
               if attempt.idParam = "" then limit = "10000"
               params = "offset=0&limit=" + limit + "&sort_by=ep_num&sort_direction=asc"
               if attempt.idParam <> "" then params = attempt.idParam + "=" + id + "&" + params
+              params = params + libraryParam
               if additional <> "" then params = params + "&additional=" + additional
               url = apiUrl(baseUrl, attempt.api, attempt.path, attempt.version, "list", params, sid, token)
               result = httpGet(url)
@@ -3212,7 +3230,6 @@ sub init()
                   if parsed.count() > best.episodes.count() then best = candidate
                   if best.episodes.count() = 0 and meta.count() > best.metadata.count() then best = candidate
                   if parsed.count() > 0 then return candidate
-                  if stopOnMetadata and meta.count() > 0 then return candidate
                   if parsed.count() = 0 and meta.count() = 0 then exit for
               end if
               if best.url = "" then best = { episodes: [], metadata: [], result: result, url: url, source: "" }
@@ -4373,7 +4390,10 @@ sub init()
           if looksLikeShowFolder(item, showTitle) then keep = false
           if season = 0 and episode = 0 then keep = false
           if itemShowId <> "" and tvId <> "" and itemShowId <> tvId then keep = false
-          if fileInfo.id = invalid and fileInfo.path = "" then keep = false
+          if fileInfo.id = invalid and fileInfo.path = ""
+              episodeId = idToStr(item.lookUp("id"))
+              if episodeId = "" or episodeId = "0" then keep = false
+          end if
           if keep then filtered.push(item)
       end for
       return filtered
@@ -4598,8 +4618,8 @@ nextPrefixDir:
   end function
 
   function titleMatch(title as string, candidate as string) as boolean
-      lt = lcase(title)
-      lc = lcase(baseName(candidate))
+      lt = stripTrailingYearParen(lcase(title))
+      lc = stripTrailingYearParen(lcase(baseName(candidate)))
       if right(lc, 4) = ".mkv" then lc = left(lc, len(lc) - 4)
       if right(lc, 4) = ".mp4" then lc = left(lc, len(lc) - 4)
       if right(lc, 4) = ".avi" then lc = left(lc, len(lc) - 4)
@@ -4607,6 +4627,7 @@ nextPrefixDir:
       if right(lc, 5) = ".webm" then lc = left(lc, len(lc) - 5)
       if right(lc, 5) = ".m2ts" then lc = left(lc, len(lc) - 5)
       if right(lc, 4) = ".mov" then lc = left(lc, len(lc) - 4)
+      lc = stripTrailingYearParen(lc)
       if lt = lc then return true
       if isAllDigits(lt)
           if len(lc) > len(lt) and left(lc, len(lt)) = lt
@@ -4630,6 +4651,26 @@ nextPrefixDir:
           if left(nc, len(nt)) = nt then return true
       end if
       return false
+  end function
+
+  function stripTrailingYearParen(value as string) as string
+      text = value.trim()
+      if len(text) < 7 then return text
+      if right(text, 1) <> ")" then return text
+      openIdx = 0
+      idx = len(text)
+      while idx >= 1
+          if mid(text, idx, 1) = "("
+              openIdx = idx
+              exit while
+          end if
+          idx = idx - 1
+      end while
+      if openIdx <= 1 then return text
+      yearText = mid(text, openIdx + 1, len(text) - openIdx - 1)
+      if len(yearText) <> 4 then return text
+      if not isAllDigits(yearText) then return text
+      return left(text, openIdx - 1).trim()
   end function
 
   function isAllDigits(value as string) as boolean
@@ -4834,23 +4875,104 @@ nextPrefixDir:
       if title = "" then return results
       print "FIND_EPISODES title="; title
 
-      directPaths = ["/video/TV Shows/" + title, "/video/Ian's Shows/" + title, "/video/TV/" + title, "/video/Series/" + title]
-      for each directPath in directPaths
-          print "FIND_EPISODES direct="; directPath
-          collectEpisodeFiles(baseUrl, sid, token, directPath, 2, results)
-          if results.count() > 0 then return results
+      cleanTitle = stripTrailingYearParen(title)
+      titleVariants = [title]
+      if cleanTitle <> "" and cleanTitle <> title then titleVariants.push(cleanTitle)
+
+      for each titleVariant in titleVariants
+          directPaths = ["/video/TV Shows/" + titleVariant, "/video/Ian's Shows/" + titleVariant, "/video/TV/" + titleVariant, "/video/Series/" + titleVariant]
+          for each directPath in directPaths
+              print "FIND_EPISODES direct="; directPath
+              collectEpisodeFiles(baseUrl, sid, token, directPath, 2, results)
+              if results.count() > 0 then return results
+          end for
       end for
 
       searchPaths = ["/video/TV Shows", "/video/Ian's Shows", "/video/TV", "/video/Series"]
-      for each basePath in searchPaths
-          showDir = findShowDirInTree(baseUrl, sid, token, title, basePath, 1)
-          if showDir <> ""
-              print "FIND_EPISODES dir="; showDir
-              collectEpisodeFiles(baseUrl, sid, token, showDir, 2, results)
-              if results.count() > 0 then return results
+      for each titleVariant in titleVariants
+          for each basePath in searchPaths
+              showDir = findShowDirInTree(baseUrl, sid, token, titleVariant, basePath, 2)
+              if showDir <> ""
+                  print "FIND_EPISODES dir="; showDir
+                  collectEpisodeFiles(baseUrl, sid, token, showDir, 2, results)
+                  if results.count() > 0 then return results
+              end if
+          end for
+      end for
+
+      return results
+  end function
+
+  function findEpisodeFilesBySearch(baseUrl as string, sid as string, token as string, title as string, basePath as string) as object
+      results = []
+      word = firstSearchWord(title)
+      if word = "" then return results
+      enc = createObject("roUrlTransfer")
+      patterns = [word + "*", "*" + word + "*", title]
+      for each pattern in patterns
+          folderParam = "%5B%22" + enc.escape(basePath) + "%22%5D"
+          startUrl = apiUrl(baseUrl, "SYNO.FileStation.Search", "entry.cgi", "2", "start", "folder_path=" + folderParam + "&pattern=" + enc.escape(pattern) + "&filetype=file&recursive=true", sid, token)
+          print "FIND_EPISODES searchStart="; basePath; " pattern="; pattern
+          r = httpGet(startUrl)
+          if r <> invalid
+              j = parseJSON(r)
+              if j <> invalid and j.success = true and j.data <> invalid
+                  taskid = j.data.lookUp("taskid")
+                  if taskid <> invalid and taskid <> ""
+                      poll = 0
+                      while poll < 10
+                          listUrl = apiUrl(baseUrl, "SYNO.FileStation.Search", "entry.cgi", "2", "list", "taskid=" + enc.escape(taskid) + "&limit=5000", sid, token)
+                          lr = httpGetLong(listUrl, 10000)
+                          if lr <> invalid
+                              lj = parseJSON(lr)
+                              if lj <> invalid and lj.success = true and lj.data <> invalid
+                                  files = lj.data.lookUp("files")
+                                  if files <> invalid
+                                      for each f in files
+                                          fname = f.lookUp("name")
+                                          fpath = f.lookUp("path")
+                                          if fname <> invalid and fpath <> invalid
+                                              if isVideoFile(fname) and not pathContainsEaDir(fpath) and episodePathMatchesTitle(title, fpath)
+                                                  results.push(episodeItemFromFile(fpath))
+                                              end if
+                                          end if
+                                      end for
+                                      if results.count() > 0
+                                          cleanFileStationSearch(baseUrl, sid, token, taskid)
+                                          print "FIND_EPISODES searchCount="; results.count()
+                                          return results
+                                      end if
+                                  end if
+                                  finished = lj.data.lookUp("finished")
+                                  if finished = true then exit while
+                              end if
+                          end if
+                          poll = poll + 1
+                      end while
+                      cleanFileStationSearch(baseUrl, sid, token, taskid)
+                  end if
+              end if
           end if
       end for
       return results
+  end function
+
+  sub cleanFileStationSearch(baseUrl as string, sid as string, token as string, taskid as string)
+      enc = createObject("roUrlTransfer")
+      cleanUrl = apiUrl(baseUrl, "SYNO.FileStation.Search", "entry.cgi", "2", "clean", "taskid=" + enc.escape(taskid), sid, token)
+      httpGet(cleanUrl)
+  end sub
+
+  function pathContainsEaDir(path as string) as boolean
+      return instr(1, lcase(path), "/@eadir/") > 0
+  end function
+
+  function episodePathMatchesTitle(title as string, path as string) as boolean
+      if titleMatch(title, fileNameNoExt(path)) then return true
+      key = normalizedTitleKey(stripTrailingYearParen(title))
+      if key = "" then return false
+      pathKey = normalizedTitleKey(path)
+      return instr(1, pathKey, key) > 0
   end function
 
   ' Return path of first video file in a FileStation directory.

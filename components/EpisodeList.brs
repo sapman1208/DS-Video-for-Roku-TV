@@ -135,6 +135,7 @@ sub init()
           return
       end if
 
+      episodes = sortEpisodesForAutoplay(episodes)
       m.episodes = episodes
       m.top.episodeItems = episodes
       resetPosterRetryState()
@@ -396,7 +397,6 @@ sub init()
       m.keepSeasonFocus = true
       resetPosterRetryState()
       m.episodeFocusedIndex = 0
-      populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
   end sub
@@ -410,7 +410,6 @@ sub init()
       m.keepSeasonFocus = true
       resetPosterRetryState()
       m.episodeFocusedIndex = 0
-      populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
   end sub

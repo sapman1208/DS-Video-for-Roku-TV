@@ -367,9 +367,9 @@ sub init()
       player = createObject("roSGNode", "VideoPlayer")
       player.authData = m.authData
       if videoData.lookUp("resumeChoice") = "resume"
-          videoData.resumePosition = resumePosition
+          videoData.addReplace("resumePosition", resumePosition)
       else
-          videoData.resumePosition = 0
+          videoData.addReplace("resumePosition", 0)
       end if
       if videoData.lookUp("resumeChoice") <> invalid then videoData.delete("resumeChoice")
       player.resumePosition = videoData.resumePosition
@@ -467,12 +467,12 @@ sub init()
       if videoData = invalid then return
       print "RESUME_DIALOG idx="; idx; " saved="; m.pendingResumePosition
       if idx = 0
-          videoData.resumeChoice = "resume"
-          videoData.resumePosition = m.pendingResumePosition
+          videoData.addReplace("resumeChoice", "resume")
+          videoData.addReplace("resumePosition", m.pendingResumePosition)
       else
           clearResumePosition(videoData)
-          videoData.resumeChoice = "start"
-          videoData.resumePosition = 0
+          videoData.addReplace("resumeChoice", "start")
+          videoData.addReplace("resumePosition", 0)
       end if
       playVideo(videoData)
   end sub

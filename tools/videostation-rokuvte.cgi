@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import traceback
 import urllib.parse
 import urllib.request
@@ -45,6 +46,17 @@ def request_text(url):
         return res.read().decode("utf-8", "replace")
 
 
+def playlist_ready(playlist):
+    if not playlist or not playlist.lstrip().startswith("#EXTM3U"):
+        return False
+    for line in playlist.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return True
+    return "#EXT-X-ENDLIST" in playlist
+
+
 def run_sql(sql):
     if os.geteuid() == 228233:
         args = ["psql", "-U", "VideoStation", "-d", "video_metadata", "-X", "-q", "-t", "-A", "-c", sql]
@@ -60,6 +72,54 @@ def numeric_param(params, name):
     return "".join(ch for ch in str(raw) if ch.isdigit())
 
 
+def truthy_param(params, name):
+    raw = str((params.get(name) or [""])[0]).lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def resolve_file_and_mapper(file_id="", mapper_id=""):
+    file_id = "".join(ch for ch in str(file_id) if ch.isdigit())
+    mapper_id = "".join(ch for ch in str(mapper_id) if ch.isdigit())
+    if not mapper_id and file_id:
+        mapper_id = run_sql(f"select mapper_id from video_file where id = {file_id} limit 1")
+        mapper_id = "".join(ch for ch in mapper_id if ch.isdigit())
+    if not file_id and mapper_id:
+        file_id = run_sql(f"select id from video_file where mapper_id = {mapper_id} order by id limit 1")
+        file_id = "".join(ch for ch in file_id if ch.isdigit())
+    return file_id, mapper_id
+
+
+def reset_watch_position(file_id, mapper_id):
+    file_id, mapper_id = resolve_file_and_mapper(file_id, mapper_id)
+    if not file_id or not mapper_id:
+        return False
+    run_sql(f"update watch_status set position = 0, modify_date = now() where video_file_id = {file_id} and mapper_id = {mapper_id}")
+    return True
+
+
+def set_watch_position(file_id, mapper_id, position):
+    file_id, mapper_id = resolve_file_and_mapper(file_id, mapper_id)
+    position = "".join(ch for ch in str(position) if ch.isdigit()) or "0"
+    if not file_id or not mapper_id:
+        return False
+    uid = run_sql("select uid from watch_status order by modify_date desc nulls last limit 1")
+    uid = "".join(ch for ch in uid if ch.isdigit()) or "1026"
+    sql = f"""
+with updated as (
+  update watch_status
+  set position = {position}, modify_date = now()
+  where uid = {uid} and video_file_id = {file_id} and mapper_id = {mapper_id}
+  returning id
+)
+insert into watch_status(uid, video_file_id, mapper_id, position, create_date, modify_date)
+select {uid}, {file_id}, {mapper_id}, {position}, now(), now()
+where not exists (select 1 from updated)
+returning id
+"""
+    run_sql(sql)
+    return True
+
+
 def handle_watch_status(params):
     sid = (params.get("sid") or params.get("_sid") or [""])[0]
     if not sid:
@@ -73,12 +133,7 @@ def handle_watch_status(params):
         respond("400 Bad Request", "application/json; charset=utf-8", json.dumps({"success": False, "error": "missing file_id or mapper_id"}))
         return
 
-    if not mapper_id and file_id:
-        mapper_id = run_sql(f"select mapper_id from video_file where id = {file_id} limit 1")
-        mapper_id = "".join(ch for ch in mapper_id if ch.isdigit())
-    if not file_id and mapper_id:
-        file_id = run_sql(f"select id from video_file where mapper_id = {mapper_id} order by id limit 1")
-        file_id = "".join(ch for ch in file_id if ch.isdigit())
+    file_id, mapper_id = resolve_file_and_mapper(file_id, mapper_id)
     if not file_id or not mapper_id:
         respond("404 Not Found", "application/json; charset=utf-8", json.dumps({"success": False, "error": "file not resolved"}))
         return
@@ -148,6 +203,11 @@ def main():
         respond("400 Bad Request", "text/plain; charset=utf-8", "missing sid or file_id")
         return
 
+    if truthy_param(params, "start_over"):
+        reset_watch_position(file_id, "")
+    elif numeric_param(params, "resume"):
+        set_watch_position(file_id, "", numeric_param(params, "resume"))
+
     auth = {
         "api": "SYNO.VideoStation2.Streaming",
         "version": "1",
@@ -210,7 +270,12 @@ def main():
     if token:
         stream_params["SynoToken"] = token
     playlist_url = webapi_url(stream_params)
-    playlist = request_text(playlist_url)
+    playlist = ""
+    for attempt in range(10):
+        playlist = request_text(playlist_url)
+        if playlist_ready(playlist):
+            break
+        time.sleep(0.5)
     if not playlist.lstrip().startswith("#EXTM3U"):
         respond("502 Bad Gateway", "text/plain; charset=utf-8", playlist)
         return

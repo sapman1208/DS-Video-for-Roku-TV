@@ -37,6 +37,7 @@ sub init()
       m.watchStatusInFlight = false
       m.resumeSeekDoneAt = invalid
       m.resumePosition = resumePositionForVideo(videoData)
+      if videoData.lookUp("forceStartOver") = true then m.resumePosition = 0
       m.streamAttemptIndex = 0
       m.maxStreamAttempts = 1
       m.retryingStream = false
@@ -118,6 +119,16 @@ sub init()
       isLive = false
       if response.isLive = true then isLive = true
       m.isHlsStream = (fmt = "hls")
+      m.nativeHlsResume = response.nativeHlsResume = true
+      m.nativeHlsResumeBase = 0
+      if m.nativeHlsResume = true and response.resumePosition <> invalid
+          m.nativeHlsResumeBase = int(response.resumePosition)
+      end if
+      if m.isHlsStream = true and m.nativeHlsResume = true
+          m.resumePosition = m.nativeHlsResumeBase
+          m.seekApplied = true
+          print "VIDEO_RESUME_NATIVE_HLS position="; m.resumePosition
+      end if
       m.streamDebug = ""
       if response.debugInfo <> invalid then m.streamDebug = response.debugInfo
       if response.attemptIndex <> invalid then m.streamAttemptIndex = int(response.attemptIndex)
@@ -180,6 +191,11 @@ sub init()
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
           content.PlayStart = m.resumePosition
           content.playStart = m.resumePosition
+      else if fmt = "hls"
+          content.PlayStart = 0
+          content.playStart = 0
+          content.BookmarkPosition = 0
+          content.bookmarkPosition = 0
       end if
 
       video.content = content
@@ -194,8 +210,7 @@ sub init()
       print "VIDEO_CONTENT fmt="; fmt; " streamFormat="; safeDynamicString(content.streamFormat); " title="; safeDynamicString(content.title); " url="; debugUrlSummary(content.url); " playStart="; playStartText
       print "VIDEO_PLAY fmt="; fmt
       if m.resumePosition <> invalid and m.resumePosition > 0 then print "VIDEO_RESUME position="; m.resumePosition
-      pendingHlsResume = (fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0)
-      if fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0
+      if m.resumePosition <> invalid and m.resumePosition > 0
           beginResumeHold()
       else
           setVideoMuted(false)
@@ -203,9 +218,8 @@ sub init()
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
           video.control = "prebuffer"
       else
-      video.control = "play"
+          video.control = "play"
       end if
-      if pendingHlsResume then beginResumeHold()
       m.streamUrl = streamUrl
       m.streamFmt = fmt
       m.retryingStream = false
@@ -286,7 +300,7 @@ sub init()
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "start"
       else if state = "buffering"
-          if m.resumePosition <> invalid and m.resumePosition > 0 and m.hasPlayed <> true
+          if m.streamFmt <> "hls" and m.resumePosition <> invalid and m.resumePosition > 0 and m.hasPlayed <> true
               m.videoNode.control = "play"
           end if
       else if state = "finished" or state = "stopped"
@@ -599,6 +613,9 @@ sub init()
 
   function effectivePlaybackPosition() as integer
       playbackPos = int(m.videoNode.position)
+      if m.isHlsStream = true and m.nativeHlsResume = true and m.nativeHlsResumeBase > 0
+          return int(m.nativeHlsResumeBase) + playbackPos
+      end if
       if m.isHlsStream = true and m.resumePosition <> invalid and m.resumePosition > 0 and m.seekApplied = true and m.resumeSeekDoneAt <> invalid
           elapsed = int(m.resumeSeekDoneAt.totalMilliseconds() / 1000)
           resumeBasedPos = int(m.resumePosition) + elapsed
