@@ -888,13 +888,16 @@ sub init()
       ep = seasonEpisodes[idx]
       authData = m.top.authData
       selected = episodeVideoPayload(ep, authData, idx)
+      playlist = autoplayEpisodeList(authData)
+      selected.autoplayEpisodes = playlist
+      selected.autoplayIndex = autoplayIndexForEpisode(selected, playlist)
       m.top.selectedVideo = selected
   end sub
 
   function autoplayEpisodeList(authData as object) as object
       playlist = []
       if m.episodes = invalid then return playlist
-      seasonEpisodes = sortEpisodesForAutoplay(m.episodes)
+      seasonEpisodes = episodesForCurrentSeason()
       idx = 0
       while idx < seasonEpisodes.count()
           playlist.push(autoplayEpisodePayload(seasonEpisodes[idx], authData, idx))

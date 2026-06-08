@@ -1,5 +1,5 @@
 sub Main()
-    print "MAIN_START build=406-faster-scrub-overlay"
+    print "MAIN_START build=408-finish-watched"
     screen = CreateObject("roSGScreen")
     m.port = CreateObject("roMessagePort")
     screen.setMessagePort(m.port)

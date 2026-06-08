@@ -297,7 +297,7 @@ sub init()
           if seekTimer <> invalid then seekTimer.control = "stop"
           endResumeHold()
           if state = "finished" and not m.userStopped
-              clearResumePosition()
+              finishPlaybackPosition()
           else
               saveResumePosition()
           end if
@@ -603,7 +603,7 @@ sub init()
       if playbackPos < 30 then return
       duration = int(m.videoNode.duration)
       if duration > 0 and playbackPos > duration - 90
-          clearResumePosition()
+          finishPlaybackPosition()
           return
       end if
       reg = createObject("roRegistrySection", "DSVideoResume")
@@ -634,6 +634,24 @@ sub init()
           reg.flush()
       end if
       syncWatchStatus(0)
+  end sub
+
+  sub finishPlaybackPosition()
+      key = resumeKeyForVideo(m.top.videoData)
+      if key <> ""
+          reg = createObject("roRegistrySection", "DSVideoResume")
+          if reg.exists(key)
+              reg.delete(key)
+              reg.flush()
+          end if
+      end if
+      duration = int(m.videoNode.duration)
+      position = effectivePlaybackPosition()
+      if duration > 0 then position = duration
+      if position < 1 then position = 1
+      m.watchStatusInFlight = false
+      print "WATCH_STATUS_FINISHED position="; position; " duration="; duration
+      syncWatchStatus(position)
   end sub
 
   sub syncWatchStatus(position as integer)
