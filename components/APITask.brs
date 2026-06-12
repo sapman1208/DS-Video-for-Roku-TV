@@ -41,6 +41,7 @@ sub init()
       if action = "listLibraries" then listLibraries(req)
       if action = "listEpisodes" then listEpisodes(req)
       if action = "movieMetadata" then movieMetadata(req)
+      if action = "latestResume" then latestResume(req)
       if action = "getStreamUrl" then getStreamUrl(req)
       if action = "refreshHomeVideoFilenameCache" then refreshHomeVideoFilenameCache(req)
   end sub
@@ -80,6 +81,28 @@ sub init()
       if code = 403 then return "2-step verification required"
       if code = 404 then return "Authentication failed"
       return "Login error (code " + stri(code) + ")"
+  end function
+
+  function refreshVideoStationSession(baseUrl as string, username as dynamic, password as dynamic) as dynamic
+      if baseUrl = invalid or baseUrl = "" then return invalid
+      if username = invalid or password = invalid then return invalid
+      if username = "" then return invalid
+      enc = createObject("roUrlTransfer")
+      url = baseUrl + "/webapi/auth.cgi?api=SYNO.API.Auth&version=6&method=login&account=" + enc.escape(username) + "&passwd=" + enc.escape(password) + "&session=VideoStation&format=sid&enable_syno_token=yes"
+      result = httpGet(url)
+      if result = invalid or result = "" then
+          print "SESSION_REFRESH failed empty"
+          return invalid
+      end if
+      json = parseJSON(result)
+      if json = invalid or json.success <> true or json.data = invalid or json.data.sid = invalid or json.data.sid = "" then
+          print "SESSION_REFRESH failed resp="; left(result, 180)
+          return invalid
+      end if
+      synoToken = ""
+      if json.data.synotoken <> invalid then synoToken = json.data.synotoken
+      print "SESSION_REFRESH ok sidLen="; len(json.data.sid); " tokenLen="; len(synoToken)
+      return { sid: json.data.sid, synoToken: synoToken }
   end function
 
   ' ── Movies ───────────────────────────────────────────────────────────────────
@@ -134,10 +157,10 @@ sub init()
       key = firstValidKey(result, ["tvshow", "tvshows"])
       if key <> ""
           m.skipCachedArtworkResolve = true
-          m.currentLibraryPosterFallbackOnly = libraryParam = ""
+          m.currentProxyPosterFallbackOnly = libraryParam = ""
           parseAndRespond(result, key, baseUrl, sid)
           m.skipCachedArtworkResolve = false
-          m.currentLibraryPosterFallbackOnly = false
+          m.currentProxyPosterFallbackOnly = false
           m.top.response.detail = "synology2 tvshow direct poster count=" + stri(m.top.response.items.count()).trim()
           print "GRID_SOURCE category="; gridCategory; " source=synology2 libraryParam="; libraryParam; " count="; m.top.response.items.count()
           return
@@ -148,10 +171,10 @@ sub init()
       key = firstValidKey(result, ["tvshows", "tvshow"])
       if key <> ""
           m.skipCachedArtworkResolve = true
-          m.currentLibraryPosterFallbackOnly = libraryParam = ""
+          m.currentProxyPosterFallbackOnly = libraryParam = ""
           parseAndRespond(result, key, baseUrl, sid)
           m.skipCachedArtworkResolve = false
-          m.currentLibraryPosterFallbackOnly = false
+          m.currentProxyPosterFallbackOnly = false
           m.top.response.detail = "synology1 tvshow direct poster count=" + stri(m.top.response.items.count()).trim()
           print "GRID_SOURCE category="; gridCategory; " source=synology1 libraryParam="; libraryParam; " count="; m.top.response.items.count()
           return
@@ -369,11 +392,23 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
       videoId = idToStr(req.videoId)
       videoType = collectionVideoType(idToStr(req.videoType))
+      fileId = idToStr(req.fileId)
+      mapperId = idToStr(req.mapperId)
       position = 0
       if req.position <> invalid then position = int(req.position)
       if videoId = "" or videoId = "0" or position < 0
           m.top.response = { success: false, error: "Missing watch status id" }
           return
+      end if
+
+      wrapperResult = updateWatchStatusViaRokuVteWrapper(baseUrl, sid, token, fileId, mapperId, position)
+      if wrapperResult <> invalid
+          wrapperJson = parseJSON(wrapperResult)
+          if wrapperJson <> invalid and wrapperJson.success = true
+              m.top.response = { success: true, result: wrapperJson, source: "rokuvte-wrapper" }
+              return
+          end if
+          print "WATCH_STATUS_WRAPPER failed="; left(wrapperResult, 180)
       end if
 
       url = apiEndpoint(baseUrl, "SYNO.VideoStation.WatchStatus", "VideoStation/watchstatus.cgi", sid, token)
@@ -390,6 +425,17 @@ sub init()
           m.top.response = { success: false, error: "Synology watch status update failed", detail: left(result, 300) }
       end if
   end sub
+
+  function updateWatchStatusViaRokuVteWrapper(baseUrl as string, sid as string, token as string, fileId as string, mapperId as string, position as integer) as dynamic
+      if sid = "" then return invalid
+      if (fileId = "" or fileId = "0") and (mapperId = "" or mapperId = "0") then return invalid
+      enc = createObject("roUrlTransfer")
+      url = localVideoBaseUrl(baseUrl) + "/webapi/VideoStation/rokuvte.cgi?action=watch_status&sid=" + enc.escape(sid) + "&position=" + stri(position).trim()
+      if token <> "" then url = url + "&token=" + enc.escape(token)
+      if fileId <> "" and fileId <> "0" then url = url + "&file_id=" + enc.escape(fileId)
+      if mapperId <> "" and mapperId <> "0" then url = url + "&mapper_id=" + enc.escape(mapperId)
+      return httpGet(url)
+  end function
 
   sub setVideoWatched(req as object)
       baseUrl = req.baseUrl
@@ -943,27 +989,39 @@ sub init()
       lastUrl = ""
       bestEpisodes = []
       bestMetadata = []
+      loadClock = createObject("roTimespan")
+      loadClock.mark()
+      bestSource = ""
+      directMs = 0
+      directCandidate = ""
+
       for each candidateId in candidates
-          direct = directEpisodeListResult(baseUrl, sid, token, candidateId, showTitle, libraryId <> "")
+          direct = directEpisodeListResult(baseUrl, sid, token, candidateId, showTitle, libraryId)
+          directMs = int(loadClock.totalMilliseconds())
+          directCandidate = idToStr(candidateId)
           if direct.url <> "" then lastUrl = direct.url
           if direct.result <> invalid then lastResult = direct.result
           if direct.metadata.count() > bestMetadata.count() then bestMetadata = direct.metadata
-          if direct.episodes.count() > bestEpisodes.count() then bestEpisodes = direct.episodes
+          if direct.episodes.count() > bestEpisodes.count()
+              bestEpisodes = direct.episodes
+              bestSource = direct.source
+          end if
           if direct.episodes.count() > 0 then exit for
-          if libraryId <> "" and direct.metadata.count() > 0 then exit for
       end for
 
       if bestEpisodes.count() > 0
           if bestMetadata.count() > 0 then bestEpisodes = mergeEpisodeMetadata(bestEpisodes, bestMetadata)
           normalizeEpisodeItems(bestEpisodes)
-          enrichEpisodeSummariesFromVsmeta(bestEpisodes, baseUrl, sid, token)
           addDirectPosterIds(bestEpisodes)
           bestEpisodes = uniqueEpisodeItems(bestEpisodes)
-          print "EPISODE_SOURCE title="; showTitle; " source=synology-direct count="; bestEpisodes.count()
-          m.top.response = { success: true, items: bestEpisodes, total: bestEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "Synology episode records" }
+          totalMs = int(loadClock.totalMilliseconds())
+          postMs = totalMs - directMs
+          print "EPISODE_SOURCE source=synology-direct count="; bestEpisodes.count(); " totalMs="; totalMs; " directMs="; directMs; " postMs="; postMs
+          m.top.response = { success: true, items: bestEpisodes, total: bestEpisodes.count(), baseUrl: baseUrl, sid: sid }
           return
       end if
 
+      fallbackStartMs = int(loadClock.totalMilliseconds())
       fallbackEpisodes = findEpisodesByShowTitle(baseUrl, sid, token, showTitle)
       if fallbackEpisodes.count() > 0
           if bestMetadata.count() > 0 then fallbackEpisodes = mergeEpisodeMetadata(fallbackEpisodes, bestMetadata)
@@ -972,14 +1030,22 @@ sub init()
           addDirectPosterIds(fallbackEpisodes)
           addFileStationSidecarPosterUrls(fallbackEpisodes, baseUrl, sid, token)
           fallbackEpisodes = uniqueEpisodeItems(fallbackEpisodes)
-          print "EPISODE_SOURCE title="; showTitle; " source=filestation-scan count="; fallbackEpisodes.count()
-          m.top.response = { success: true, items: fallbackEpisodes, total: fallbackEpisodes.count(), baseUrl: baseUrl, sid: sid, detail: "FileStation episode fallback" }
+          totalMs = int(loadClock.totalMilliseconds())
+          fallbackMs = totalMs - fallbackStartMs
+          print "EPISODE_SOURCE source=filestation-fallback count="; fallbackEpisodes.count(); " totalMs="; totalMs; " directMs="; directMs; " fallbackMs="; fallbackMs
+          m.top.response = { success: true, items: fallbackEpisodes, total: fallbackEpisodes.count(), baseUrl: baseUrl, sid: sid }
           return
       end if
 
-      detail = "No playable episode records after filtering." + chr(10) + "Last URL: " + left(lastUrl, 600)
+      detail = "No playable episode records after filtering." + chr(10) + "Title: " + showTitle + chr(10) + "Candidates: " + stri(candidates.count()).trim() + chr(10) + "Last URL: " + left(lastUrl, 600)
       if lastResult <> invalid then detail = detail + chr(10) + "Last response: " + left(lastResult, 900)
       m.top.response = { success: true, items: [], total: 0, baseUrl: baseUrl, sid: sid, detail: detail }
+  end sub
+
+  sub latestResume(req as object)
+      filePath = ""
+      if req.filePath <> invalid then filePath = idToStr(req.filePath)
+      m.top.response = { success: true, action: "latestResume", position: 0, filePath: filePath }
   end sub
 
   ' ── Streaming ─────────────────────────────────────────────────────────────────
@@ -1398,6 +1464,81 @@ sub init()
       return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(filePath)) + "&mode=open", sid, token)
   end function
 
+  function ffmpegProxyStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, sid as string, token as string, filePath as string, resumePosition as integer) as string
+      enc = createObject("roUrlTransfer")
+      src = fileStationStreamUrl(baseUrl, sid, token, filePath)
+      nonceClock = createObject("roDateTime")
+      nonce = stri(nonceClock.asSeconds())
+      nonce = nonce.trim()
+      nonceRand = stri(rnd(1000000000))
+      nonceRand = nonceRand.trim()
+      nonce = nonce + "-" + nonceRand
+      if instr(1, src, "?") > 0
+          src = src + "&roku_cache=" + nonce
+      else
+          src = src + "?roku_cache=" + nonce
+      end if
+      url = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/transcode?src=" + enc.escape(src)
+      if resumePosition > 0 then url = url + "&resume=" + stri(resumePosition).trim()
+      return url
+  end function
+
+  function vteRelayStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, sid as string, token as string, fileId as string) as string
+      enc = createObject("roUrlTransfer")
+      url = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/vte-relay?base=" + enc.escape(localVideoBaseUrl(baseUrl)) + "&sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1"
+      if token <> "" then url = url + "&token=" + enc.escape(token)
+      return url
+  end function
+
+  function vtePlaylistStreamUrl(baseUrl as string, proxyBaseUrl as dynamic, sid as string, token as string, fileId as string) as string
+      enc = createObject("roUrlTransfer")
+      url = ffmpegProxyBaseUrl(baseUrl, proxyBaseUrl) + "/vte-playlist?base=" + enc.escape(localVideoBaseUrl(baseUrl)) + "&sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1"
+      if token <> "" then url = url + "&token=" + enc.escape(token)
+      return url
+  end function
+
+  function rokuVteWrapperStreamUrl(baseUrl as string, sid as string, token as string, fileId as string, resumePosition as integer) as string
+      enc = createObject("roUrlTransfer")
+      url = localVideoBaseUrl(baseUrl) + "/webapi/VideoStation/rokuvte.cgi?sid=" + enc.escape(sid) + "&file_id=" + enc.escape(fileId) + "&profile=sd_high&audio_track=-1"
+      if resumePosition > 0
+          url = url + "&resume=" + stri(resumePosition).trim()
+      else
+          url = url + "&start_over=1"
+      end if
+      if token <> "" then url = url + "&token=" + enc.escape(token)
+      return url
+  end function
+
+  function vteDirectStreamOpen(baseUrl as string, sid as string, token as string, fileId as string) as dynamic
+      enc = createObject("roUrlTransfer")
+      url = apiEndpoint(localVideoBaseUrl(baseUrl), "SYNO.VideoStation2.Streaming", "entry.cgi", sid, token)
+      hlsParam = "{""force_open_vte"":false,""profile"":""sd_high"",""audio_track"":-1}"
+      fileParam = "{""id"":" + fileId + ",""path"":""""}"
+      body = "api=SYNO.VideoStation2.Streaming&version=1&method=open&hls=" + enc.escape(hlsParam) + "&file=" + enc.escape(fileParam)
+      print "VTE_DIRECT_OPEN fileId="; fileId
+      result = httpPostForm(url, body)
+      if result = invalid or result = "" then
+          print "VTE_DIRECT_OPEN_RESP empty"
+          return invalid
+      end if
+      print "VTE_DIRECT_OPEN_RESP "; left(result, 300)
+      json = parseJSON(result)
+      if json = invalid or json.success <> true then return invalid
+      streamId = streamIdFromResponse(json)
+      if streamId = "" then return invalid
+      fmt = "hls"
+      if json.data <> invalid
+          responseFmt = json.data.lookUp("format")
+          if responseFmt <> invalid and responseFmt <> "" then fmt = responseFmt
+      end if
+      streamUrl = apiUrl(localVideoBaseUrl(baseUrl), "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "stream", "stream_id=" + streamId + "&format=" + fmt, sid, token)
+      cookie = "id=" + sid
+      if token <> "" then cookie = cookie + "; SynoToken=" + token
+      headers = { Cookie: cookie }
+      if token <> "" then headers.addReplace("X-SYNO-TOKEN", token)
+      return { streamUrl: streamUrl, headers: headers, streamId: streamId, format: fmt }
+  end function
+
   function subtitlePathForVideo(filePath as string) as string
       lower = lcase(filePath)
       extensions = [".mkv", ".mp4", ".avi", ".m4v", ".mov", ".webm", ".m2ts"]
@@ -1409,10 +1550,91 @@ sub init()
       return filePath + ".en.srt"
   end function
 
+  function parentPath(path as string) as string
+      lastSlash = 0
+      idx = 1
+      while idx <= len(path)
+          if mid(path, idx, 1) = "/" then lastSlash = idx
+          idx = idx + 1
+      end while
+      if lastSlash <= 1 then return ""
+      return left(path, lastSlash - 1)
+  end function
+
+  function sidecarNamePriority(fileName as string, videoBase as string) as integer
+      lowerName = lcase(fileName)
+      lowerBase = lcase(videoBase)
+      exactNames = [
+          lowerBase + ".en.srt",
+          lowerBase + ".eng.srt",
+          lowerBase + ".srt",
+          lowerBase + ".en.vtt",
+          lowerBase + ".eng.vtt",
+          lowerBase + ".vtt"
+      ]
+      idx = 0
+      while idx < exactNames.count()
+          if lowerName = exactNames[idx] then return idx + 1
+          idx = idx + 1
+      end while
+
+      if left(lowerName, len(lowerBase) + 1) <> lowerBase + "." then return 0
+      if right(lowerName, 4) <> ".srt" and right(lowerName, 4) <> ".vtt" then return 0
+      if instr(1, lowerName, ".en.") > 0 then return 20
+      if instr(1, lowerName, ".eng.") > 0 then return 21
+      if instr(1, lowerName, ".english.") > 0 then return 22
+      return 40
+  end function
+
+  function resolvedSubtitlePath(baseUrl as string, sid as string, token as string, filePath as string) as string
+      if filePath = "" then return ""
+      dirPath = parentPath(filePath)
+      if dirPath = "" then return subtitlePathForVideo(filePath)
+
+      videoBase = fileNameNoExt(filePath)
+      url = fileStationListUrl(baseUrl, sid, token, fileStationPath(dirPath), "file")
+      result = httpGet(url)
+      if result = invalid
+          print "VIDEO_SUBTITLE_RESOLVE listFailed fallback="; subtitlePathForVideo(filePath)
+          return subtitlePathForVideo(filePath)
+      end if
+
+      json = parseJSON(result)
+      if json = invalid or json.success <> true or json.data = invalid
+          print "VIDEO_SUBTITLE_RESOLVE invalidList fallback="; subtitlePathForVideo(filePath)
+          return subtitlePathForVideo(filePath)
+      end if
+      files = json.data.lookUp("files")
+      if files = invalid then return ""
+
+      bestPath = ""
+      bestPriority = 999
+      for each f in files
+          fname = f.lookUp("name")
+          fpath = f.lookUp("path")
+          if fname <> invalid and fpath <> invalid
+              priority = sidecarNamePriority(fname, videoBase)
+              if priority > 0 and priority < bestPriority
+                  bestPriority = priority
+                  bestPath = fpath
+              end if
+          end if
+      end for
+
+      if bestPath <> ""
+          print "VIDEO_SUBTITLE_RESOLVE selected="; bestPath
+          return bestPath
+      end if
+      print "VIDEO_SUBTITLE_RESOLVE none path="; filePath
+      return ""
+  end function
+
   function fileStationSubtitleUrl(baseUrl as string, sid as string, token as string, filePath as string) as string
       if filePath = "" then return ""
       enc = createObject("roUrlTransfer")
-      return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(subtitlePathForVideo(filePath))) + "&mode=open", sid, token)
+      subtitlePath = resolvedSubtitlePath(baseUrl, sid, token, filePath)
+      if subtitlePath = "" then return ""
+      return apiUrl(baseUrl, "SYNO.FileStation.Download", "entry.cgi", "2", "download", "path=" + enc.escape(fileStationPath(subtitlePath)) + "&mode=open", sid, token)
   end function
 
   function fileStationSidecarPosterPath(videoPath as string) as string
@@ -1442,6 +1664,11 @@ sub init()
           end if
       end for
   end sub
+
+  function ffmpegProxyBaseUrl(baseUrl as string, proxyBaseUrl as dynamic) as string
+      if proxyBaseUrl <> invalid and proxyBaseUrl <> "" then return proxyBaseUrl
+      return ""
+  end function
 
   function libraryParamFromReq(req as object) as string
       if req.libraryId = invalid then return ""
@@ -1540,16 +1767,16 @@ sub init()
       return normalized
   end function
 
-  sub enrichTvShowsWithLibraryItems(items as dynamic, libraryItems as object)
-      if items = invalid or libraryItems = invalid then return
+  sub enrichTvShowsWithProxyItems(items as dynamic, proxyItems as object)
+      if items = invalid or proxyItems = invalid then return
       for each item in items
           title = idToStr(item.lookUp("title"))
           if title = "" then title = idToStr(item.lookUp("name"))
-          match = libraryTvShowByTitle(libraryItems, title)
+          match = proxyTvShowByTitle(proxyItems, title)
           if match = invalid
               mapper = idToStr(item.lookUp("mapper_id"))
               if mapper = "" or mapper = "0" then mapper = idToStr(item.lookUp("mapperId"))
-              match = libraryTvShowByMapper(libraryItems, mapper)
+              match = proxyTvShowByMapper(proxyItems, mapper)
           end if
           if match <> invalid
               matchId = idToStr(match.lookUp("id"))
@@ -1589,9 +1816,9 @@ sub init()
       end for
   end sub
 
-  function libraryTvShowByTitle(libraryItems as object, title as string) as dynamic
+  function proxyTvShowByTitle(proxyItems as object, title as string) as dynamic
       key = normalizedTitleKey(title)
-      for each item in libraryItems
+      for each item in proxyItems
           candidate = idToStr(item.lookUp("title"))
           if candidate = "" then candidate = idToStr(item.lookUp("name"))
           if normalizedTitleKey(candidate) = key then return item
@@ -1599,9 +1826,9 @@ sub init()
       return invalid
   end function
 
-  function libraryTvShowByMapper(libraryItems as object, mapper as string) as dynamic
+  function proxyTvShowByMapper(proxyItems as object, mapper as string) as dynamic
       if mapper = "" or mapper = "0" then return invalid
-      for each item in libraryItems
+      for each item in proxyItems
           candidate = idToStr(item.lookUp("mapper_id"))
           if candidate = "" or candidate = "0" then candidate = idToStr(item.lookUp("mapperId"))
           if candidate = mapper then return item
@@ -1619,7 +1846,9 @@ sub init()
       for each d in diag
           diagStr = diagStr + d + chr(10)
       end for
-      return respondWithCandidate(streamUrl, streamFormatForPath(filePath), "FileStation " + left(fsPath, 80) + chr(10) + left(diagStr, 900), diag)
+      subtitleUrl = fileStationSubtitleUrl(baseUrl, sid, token, filePath)
+      if subtitleUrl <> "" then print "FILESTATION_SUBTITLE url="; subtitleUrl
+      return respondWithCandidateSubtitle(streamUrl, streamFormatForPath(filePath), "FileStation " + left(fsPath, 80) + chr(10) + left(diagStr, 900), diag, subtitleUrl)
   end function
 
   function apiPath(baseUrl as string, apiName as string, fallback as string) as string
@@ -1674,8 +1903,6 @@ sub init()
   end function
 
   function localVideoBaseUrl(baseUrl as string) as string
-      lower = lcase(baseUrl)
-      if instr(1, lower, "sapman.duckdns.org:7520") > 0 then return "https://10.0.1.74:7520"
       return baseUrl
   end function
 
@@ -1731,6 +1958,20 @@ sub init()
       diag.push(label)
       if m.candidateCount = m.targetAttempt
           m.top.response = { success: true, streamUrl: streamUrl, streamFormat: streamFormat, debugInfo: label, attemptIndex: m.targetAttempt }
+          return true
+      end if
+      m.candidateCount = m.candidateCount + 1
+      return false
+  end function
+
+  function respondWithCandidateSubtitle(streamUrl as string, streamFormat as string, debugInfo as string, diag as object, subtitleUrl as string) as boolean
+      label = "candidate " + idToStr(m.candidateCount) + " " + debugInfo
+      print "STREAM_CANDIDATE "; label
+      diag.push(label)
+      if m.candidateCount = m.targetAttempt
+          response = { success: true, streamUrl: streamUrl, streamFormat: streamFormat, debugInfo: label, attemptIndex: m.targetAttempt }
+          if subtitleUrl <> "" then response.addReplace("subtitleUrl", subtitleUrl)
+          m.top.response = response
           return true
       end if
       m.candidateCount = m.candidateCount + 1
@@ -1861,7 +2102,7 @@ sub init()
                   f = j.data.lookUp("format")
                   if f <> invalid and f <> "" then responseFmt = f
               end if
-              streamUrl = apiUrl(localVideoBaseUrl(baseUrl), "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "stream", "id=" + streamId + "&format=" + responseFmt, sid, token)
+              streamUrl = apiUrl(localVideoBaseUrl(baseUrl), "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "stream", "stream_id=" + streamId + "&format=" + responseFmt, sid, token)
               sfmt = "hls"
               if responseFmt = "raw" then sfmt = "mp4"
               return respondWithCandidate(streamUrl, sfmt, debugName + " stream=" + streamId + " fmt=" + responseFmt, diag)
@@ -2011,6 +2252,7 @@ sub init()
   sub getStreamUrl(req as object)
       beginCandidateSelection(req)
       baseUrl = req.baseUrl
+      proxyBaseUrl = req.proxyBaseUrl
       sid = req.sid
       token = ""
       if req.synoToken <> invalid then token = req.synoToken
@@ -2082,15 +2324,49 @@ sub init()
           end if
       end if
 
-      ' Try the raw FileStation URL first. Video Station HLS fallbacks are below.
+      ' Try the raw FileStation URL first. Direct MKV works on current Roku
+      ' firmware, and this keeps short-title movies like "10" on the direct path.
       if shouldTryFileStationDirectPath(filePath)
           if respondWithFileStationStream(baseUrl, sid, token, filePath, diag) then return
       else if filePath <> ""
-          diag.push("direct deferred for Video Station stream:" + filePath)
+          diag.push("direct deferred for transcode:" + filePath)
       end if
 
+      if filePath <> ""
+          if shouldTryVideoStationTranscode(filePath)
+              fsPath = fileStationPath(filePath)
+              if fileId <> "" and fileId <> "0"
+                  relaySid = sid
+                  relayToken = token
+                  refreshed = refreshVideoStationSession(baseUrl, req.username, req.password)
+                  if refreshed <> invalid
+                      relaySid = refreshed.sid
+                      relayToken = refreshed.synoToken
+                      print "VTE_RELAY_SESSION refreshed"
+                  else
+                      print "VTE_RELAY_SESSION using existing"
+                  end if
+                  if m.targetAttempt = 0
+                      streamUrl = rokuVteWrapperStreamUrl(baseUrl, relaySid, relayToken, fileId, resumePosition)
+                      print "ROKUVTE_WRAPPER_PLAY "; fsPath; " fileId="; fileId; " resume="; resumePosition
+                      nativeHlsResume = resumePosition > 0
+                      m.top.response = { success: true, streamUrl: streamUrl, streamFormat: "hls", isLive: false, subtitleUrl: fileStationSubtitleUrl(baseUrl, relaySid, relayToken, filePath), debugInfo: "Video Station RokuVTE wrapper " + left(fsPath, 120), directVte: true, nativeHlsResume: nativeHlsResume, resumePosition: resumePosition }
+                      return
+                  end if
+                  m.top.response = { success: false, error: "Video Station wrapper playback failed.", detail: "Path: " + fsPath, attemptIndex: m.targetAttempt }
+              else
+                  m.top.response = { success: false, error: "Video Station wrapper needs a file id for this video.", detail: "Path: " + fsPath }
+              end if
+              return
+          else
+              m.top.response = { success: false, error: "This file needs transcoding. Direct Roku playback is disabled for this container while we stabilize MP4 playback.", detail: "Path: " + fileStationPath(filePath) + chr(10) + "Type: " + mediaType }
+              return
+          end if
+      end if
+
+      needsVideoStationTranscode = shouldTryVideoStationTranscode(filePath)
       legacyType = videoStationStreamType(mediaType)
-      if filePath <> "" and not shouldTryFileStationDirectPath(filePath)
+      if filePath <> "" and not shouldTryFileStationDirectPath(filePath) and not needsVideoStationTranscode
           enc = createObject("roUrlTransfer")
           encodedPath = enc.escape(filePath)
           streamBase = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "format=hls_remux&id=", "", token)
@@ -2109,46 +2385,50 @@ sub init()
       pushUniqueString(fileIds, mapperId)
       pushUniqueString(fileIds, videoId)
 
-      ' ── B: Legacy streaming.cgi with the selected media type ──────────────────
-      ' This is the v1 streaming endpoint; longer timeout needed for transcode init
-      streamBase = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "format=hls_remux&id=", "", token)
-      for each candidateVideoId in videoIds
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls_remux", sid, token)
-          if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "legacy/hls_remux id=" + candidateVideoId, diag) then return
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls", sid, token)
-          if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "legacy/hls id=" + candidateVideoId, diag) then return
-          streamBaseRaw = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "format=raw&id=", "", token)
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType, sid, token)
-          if tryStreamOpen(openUrl, streamBaseRaw, sid, token, "mp4", "legacy/raw id=" + candidateVideoId, diag) then return
-      end for
+      if not needsVideoStationTranscode
+          ' ── B: Legacy streaming.cgi with the selected media type ──────────────
+          streamBase = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "format=hls_remux&id=", "", token)
+          for each candidateVideoId in videoIds
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls_remux", sid, token)
+              if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "legacy/hls_remux id=" + candidateVideoId, diag) then return
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls", sid, token)
+              if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "legacy/hls id=" + candidateVideoId, diag) then return
+              streamBaseRaw = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "format=raw&id=", "", token)
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType, sid, token)
+              if tryStreamOpen(openUrl, streamBaseRaw, sid, token, "mp4", "legacy/raw id=" + candidateVideoId, diag) then return
+          end for
 
-      streamBase = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "stream", "format=hls_remux&id=", "", token)
-      for each candidateVideoId in videoIds
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls_remux", sid, token)
-          if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "alias/hls_remux id=" + candidateVideoId, diag) then return
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls", sid, token)
-          if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "alias/hls id=" + candidateVideoId, diag) then return
-          streamBaseRaw = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "stream", "format=raw&id=", "", token)
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType, sid, token)
-          if tryStreamOpen(openUrl, streamBaseRaw, sid, token, "mp4", "alias/raw id=" + candidateVideoId, diag) then return
-      end for
+          streamBase = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "stream", "format=hls_remux&id=", "", token)
+          for each candidateVideoId in videoIds
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls_remux", sid, token)
+              if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "alias/hls_remux id=" + candidateVideoId, diag) then return
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&format=hls", sid, token)
+              if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "alias/hls id=" + candidateVideoId, diag) then return
+              streamBaseRaw = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "stream", "format=raw&id=", "", token)
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStationStreaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType, sid, token)
+              if tryStreamOpen(openUrl, streamBaseRaw, sid, token, "mp4", "alias/raw id=" + candidateVideoId, diag) then return
+          end for
 
-      ' ── D: v2 Streaming with file=[fileId] ───────────────────────────────────
-      streamBase = apiUrl(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "stream", "id=", "", token)
-      for each candidateVideoId in videoIds
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&accept_format=hls1080p", sid, token)
-          if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "v2/id-hls id=" + candidateVideoId, diag) then return
-          openUrl = apiUrl(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&accept_format=raw", sid, token)
-          if tryStreamOpen(openUrl, streamBase, sid, token, "mp4", "v2/id-raw id=" + candidateVideoId, diag) then return
-      end for
+          streamBase = apiUrl(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "stream", "stream_id=", "", token)
+          for each candidateVideoId in videoIds
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&accept_format=hls1080p", sid, token)
+              if tryStreamOpen(openUrl, streamBase, sid, token, "hls", "v2/id-hls id=" + candidateVideoId, diag) then return
+              openUrl = apiUrl(baseUrl, "SYNO.VideoStation2.Streaming", "entry.cgi", "1", "open", "id=" + candidateVideoId + "&type=" + legacyType + "&accept_format=raw", sid, token)
+              if tryStreamOpen(openUrl, streamBase, sid, token, "mp4", "v2/id-raw id=" + candidateVideoId, diag) then return
+          end for
+      end if
 
       for each candidateFileId in fileIds
           diag.push(summarizeV2FileInfo(baseUrl, sid, token, candidateFileId))
 
           officialFile = "{""id"":" + candidateFileId + ",""path"":""""}"
-          for each fmt in ["hls_remux", "raw"]
-              if tryV2StreamPost(baseUrl, sid, token, officialFile, fmt, "", "", "v2post/" + fmt + " official=" + candidateFileId, diag) then return
-          end for
+          if not shouldTryVideoStationTranscode(filePath)
+              for each fmt in ["hls_remux", "raw"]
+                  if tryV2StreamPost(baseUrl, sid, token, officialFile, fmt, "", "", "v2post/" + fmt + " official=" + candidateFileId, diag) then return
+              end for
+          else
+              if tryV2StreamPost(baseUrl, sid, token, officialFile, "hls_remux", "", "", "v2post/hls_remux official=" + candidateFileId, diag) then return
+          end if
           for each audioTrack in ["-1", "0", "1", ""]
               for each profile in ["sd_medium", "sd_high", "hd_medium", "hd_high"]
                   labelTrack = audioTrack
@@ -2199,6 +2479,11 @@ sub init()
           if respondWithFileStationStream(baseUrl, sid, token, filePath, diag) then return
       else if filePath <> ""
           diag.push("unsupported direct container:" + filePath)
+          if shouldTryVideoStationTranscode(filePath)
+              fsPath = fileStationPath(filePath)
+              m.top.response = { success: false, error: "This file needs Video Station wrapper playback, but no wrapper candidate succeeded.", detail: "Path: " + fsPath }
+              return
+          end if
       end if
 
       diagStr = ""
@@ -2910,6 +3195,17 @@ sub init()
       return [v]
   end function
 
+  function resolveVideoStationItem(proxyBaseUrl as dynamic, filePath as dynamic) as dynamic
+      if proxyBaseUrl = invalid or proxyBaseUrl = "" then return invalid
+      if filePath = invalid or filePath = "" then return invalid
+      enc = createObject("roUrlTransfer")
+      result = httpGet(proxyBaseUrl + "/resolve?path=" + enc.escape(filePath))
+      if result = invalid or result = "" then return invalid
+      json = parseJSON(result)
+      if json = invalid or json.success <> true then return invalid
+      return json.lookUp("item")
+  end function
+
   sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string, token as string)
       if result = invalid or result = ""
           m.top.response = { success: false, error: "No response from Synology collection API", items: [] }
@@ -2994,10 +3290,12 @@ sub init()
       return "movie"
   end function
 
-  function directEpisodeListResult(baseUrl as string, sid as string, token as string, candidateId as string, showTitle as string, stopOnMetadata as boolean) as object
+  function directEpisodeListResult(baseUrl as string, sid as string, token as string, candidateId as string, showTitle as string, libraryId as string) as object
       emptyResult = { episodes: [], metadata: [], result: invalid, url: "", source: "" }
       id = idToStr(candidateId)
       if id = "" or id = "0" then return emptyResult
+      libraryParam = ""
+      if libraryId <> "" and libraryId <> "0" then libraryParam = "&library_id=" + libraryId
 
       richAdditional = "%5B%22file%22,%22summary%22,%22extra%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22poster_mtime%22,%22backdrop_mtime%22,%22originally_available%22%5D"
       simpleAdditional = "%5B%22file%22,%22summary%22,%22watched_ratio%22,%22file_watched%22,%22last_watched%22,%22rating%22,%22originally_available%22%5D"
@@ -3020,6 +3318,7 @@ sub init()
               if attempt.idParam = "" then limit = "10000"
               params = "offset=0&limit=" + limit + "&sort_by=ep_num&sort_direction=asc"
               if attempt.idParam <> "" then params = attempt.idParam + "=" + id + "&" + params
+              params = params + libraryParam
               if additional <> "" then params = params + "&additional=" + additional
               url = apiUrl(baseUrl, attempt.api, attempt.path, attempt.version, "list", params, sid, token)
               result = httpGet(url)
@@ -3033,7 +3332,6 @@ sub init()
                   if parsed.count() > best.episodes.count() then best = candidate
                   if best.episodes.count() = 0 and meta.count() > best.metadata.count() then best = candidate
                   if parsed.count() > 0 then return candidate
-                  if stopOnMetadata and meta.count() > 0 then return candidate
                   if parsed.count() = 0 and meta.count() = 0 then exit for
               end if
               if best.url = "" then best = { episodes: [], metadata: [], result: result, url: url, source: "" }
@@ -3855,9 +4153,23 @@ sub init()
       end if
       if len(text) < 12 then return ""
       if right(text, 1) = chr(34) then return ""
+      text = trimVsmetaTrailingTag(text)
       if instr(1, text, "JFIF") > 0 then return ""
       if instr(1, text, "Exif") > 0 then return ""
       if instr(1, text, ".") = 0 and instr(1, text, "!") = 0 and instr(1, text, "?") = 0 then return ""
+      return text
+  end function
+
+  function trimVsmetaTrailingTag(text as string) as string
+      if len(text) < 3 then return text
+      lastChar = right(text, 1)
+      prevChar = mid(text, len(text) - 1, 1)
+      if len(lastChar) = 1
+          code = asc(lastChar)
+          if code >= 65 and code <= 90
+              if prevChar = "." or prevChar = "!" or prevChar = "?" then return left(text, len(text) - 1).trim()
+          end if
+      end if
       return text
   end function
 
@@ -4180,7 +4492,10 @@ sub init()
           if looksLikeShowFolder(item, showTitle) then keep = false
           if season = 0 and episode = 0 then keep = false
           if itemShowId <> "" and tvId <> "" and itemShowId <> tvId then keep = false
-          if fileInfo.id = invalid and fileInfo.path = "" then keep = false
+          if fileInfo.id = invalid and fileInfo.path = ""
+              episodeId = idToStr(item.lookUp("id"))
+              if episodeId = "" or episodeId = "0" then keep = false
+          end if
           if keep then filtered.push(item)
       end for
       return filtered
@@ -4405,8 +4720,8 @@ nextPrefixDir:
   end function
 
   function titleMatch(title as string, candidate as string) as boolean
-      lt = lcase(title)
-      lc = lcase(baseName(candidate))
+      lt = stripTrailingYearParen(lcase(title))
+      lc = stripTrailingYearParen(lcase(baseName(candidate)))
       if right(lc, 4) = ".mkv" then lc = left(lc, len(lc) - 4)
       if right(lc, 4) = ".mp4" then lc = left(lc, len(lc) - 4)
       if right(lc, 4) = ".avi" then lc = left(lc, len(lc) - 4)
@@ -4414,6 +4729,7 @@ nextPrefixDir:
       if right(lc, 5) = ".webm" then lc = left(lc, len(lc) - 5)
       if right(lc, 5) = ".m2ts" then lc = left(lc, len(lc) - 5)
       if right(lc, 4) = ".mov" then lc = left(lc, len(lc) - 4)
+      lc = stripTrailingYearParen(lc)
       if lt = lc then return true
       if isAllDigits(lt)
           if len(lc) > len(lt) and left(lc, len(lt)) = lt
@@ -4437,6 +4753,26 @@ nextPrefixDir:
           if left(nc, len(nt)) = nt then return true
       end if
       return false
+  end function
+
+  function stripTrailingYearParen(value as string) as string
+      text = value.trim()
+      if len(text) < 7 then return text
+      if right(text, 1) <> ")" then return text
+      openIdx = 0
+      idx = len(text)
+      while idx >= 1
+          if mid(text, idx, 1) = "("
+              openIdx = idx
+              exit while
+          end if
+          idx = idx - 1
+      end while
+      if openIdx <= 1 then return text
+      yearText = mid(text, openIdx + 1, len(text) - openIdx - 1)
+      if len(yearText) <> 4 then return text
+      if not isAllDigits(yearText) then return text
+      return left(text, openIdx - 1).trim()
   end function
 
   function isAllDigits(value as string) as boolean
@@ -4641,23 +4977,104 @@ nextPrefixDir:
       if title = "" then return results
       print "FIND_EPISODES title="; title
 
-      directPaths = ["/video/TV Shows/" + title, "/video/Ian's Shows/" + title, "/video/TV/" + title, "/video/Series/" + title]
-      for each directPath in directPaths
-          print "FIND_EPISODES direct="; directPath
-          collectEpisodeFiles(baseUrl, sid, token, directPath, 2, results)
-          if results.count() > 0 then return results
+      cleanTitle = stripTrailingYearParen(title)
+      titleVariants = [title]
+      if cleanTitle <> "" and cleanTitle <> title then titleVariants.push(cleanTitle)
+
+      for each titleVariant in titleVariants
+          directPaths = ["/video/TV Shows/" + titleVariant, "/video/Ian's Shows/" + titleVariant, "/video/TV/" + titleVariant, "/video/Series/" + titleVariant]
+          for each directPath in directPaths
+              print "FIND_EPISODES direct="; directPath
+              collectEpisodeFiles(baseUrl, sid, token, directPath, 2, results)
+              if results.count() > 0 then return results
+          end for
       end for
 
       searchPaths = ["/video/TV Shows", "/video/Ian's Shows", "/video/TV", "/video/Series"]
-      for each basePath in searchPaths
-          showDir = findShowDirInTree(baseUrl, sid, token, title, basePath, 1)
-          if showDir <> ""
-              print "FIND_EPISODES dir="; showDir
-              collectEpisodeFiles(baseUrl, sid, token, showDir, 2, results)
-              if results.count() > 0 then return results
+      for each titleVariant in titleVariants
+          for each basePath in searchPaths
+              showDir = findShowDirInTree(baseUrl, sid, token, titleVariant, basePath, 2)
+              if showDir <> ""
+                  print "FIND_EPISODES dir="; showDir
+                  collectEpisodeFiles(baseUrl, sid, token, showDir, 2, results)
+                  if results.count() > 0 then return results
+              end if
+          end for
+      end for
+
+      return results
+  end function
+
+  function findEpisodeFilesBySearch(baseUrl as string, sid as string, token as string, title as string, basePath as string) as object
+      results = []
+      word = firstSearchWord(title)
+      if word = "" then return results
+      enc = createObject("roUrlTransfer")
+      patterns = [word + "*", "*" + word + "*", title]
+      for each pattern in patterns
+          folderParam = "%5B%22" + enc.escape(basePath) + "%22%5D"
+          startUrl = apiUrl(baseUrl, "SYNO.FileStation.Search", "entry.cgi", "2", "start", "folder_path=" + folderParam + "&pattern=" + enc.escape(pattern) + "&filetype=file&recursive=true", sid, token)
+          print "FIND_EPISODES searchStart="; basePath; " pattern="; pattern
+          r = httpGet(startUrl)
+          if r <> invalid
+              j = parseJSON(r)
+              if j <> invalid and j.success = true and j.data <> invalid
+                  taskid = j.data.lookUp("taskid")
+                  if taskid <> invalid and taskid <> ""
+                      poll = 0
+                      while poll < 10
+                          listUrl = apiUrl(baseUrl, "SYNO.FileStation.Search", "entry.cgi", "2", "list", "taskid=" + enc.escape(taskid) + "&limit=5000", sid, token)
+                          lr = httpGetLong(listUrl, 10000)
+                          if lr <> invalid
+                              lj = parseJSON(lr)
+                              if lj <> invalid and lj.success = true and lj.data <> invalid
+                                  files = lj.data.lookUp("files")
+                                  if files <> invalid
+                                      for each f in files
+                                          fname = f.lookUp("name")
+                                          fpath = f.lookUp("path")
+                                          if fname <> invalid and fpath <> invalid
+                                              if isVideoFile(fname) and not pathContainsEaDir(fpath) and episodePathMatchesTitle(title, fpath)
+                                                  results.push(episodeItemFromFile(fpath))
+                                              end if
+                                          end if
+                                      end for
+                                      if results.count() > 0
+                                          cleanFileStationSearch(baseUrl, sid, token, taskid)
+                                          print "FIND_EPISODES searchCount="; results.count()
+                                          return results
+                                      end if
+                                  end if
+                                  finished = lj.data.lookUp("finished")
+                                  if finished = true then exit while
+                              end if
+                          end if
+                          poll = poll + 1
+                      end while
+                      cleanFileStationSearch(baseUrl, sid, token, taskid)
+                  end if
+              end if
           end if
       end for
       return results
+  end function
+
+  sub cleanFileStationSearch(baseUrl as string, sid as string, token as string, taskid as string)
+      enc = createObject("roUrlTransfer")
+      cleanUrl = apiUrl(baseUrl, "SYNO.FileStation.Search", "entry.cgi", "2", "clean", "taskid=" + enc.escape(taskid), sid, token)
+      httpGet(cleanUrl)
+  end sub
+
+  function pathContainsEaDir(path as string) as boolean
+      return instr(1, lcase(path), "/@eadir/") > 0
+  end function
+
+  function episodePathMatchesTitle(title as string, path as string) as boolean
+      if titleMatch(title, fileNameNoExt(path)) then return true
+      key = normalizedTitleKey(stripTrailingYearParen(title))
+      if key = "" then return false
+      pathKey = normalizedTitleKey(path)
+      return instr(1, pathKey, key) > 0
   end function
 
   ' Return path of first video file in a FileStation directory.

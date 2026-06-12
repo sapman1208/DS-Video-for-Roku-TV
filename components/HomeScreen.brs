@@ -18,6 +18,7 @@ sub onAuthDataSet(event as object)
     task.request = {
         action: "listLibraries",
         baseUrl: authData.baseUrl,
+        proxyBaseUrl: authData.proxyBaseUrl,
         sid: authData.sid,
         synoToken: authData.synoToken
     }
@@ -42,7 +43,7 @@ sub onLibrariesLoaded(event as object)
     end if
 
     m.categories = orderedCategories(items)
-    m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login settings" })
+    m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login and transcode settings" })
     m.top.navCategories = m.categories
     populateCategories()
 end sub

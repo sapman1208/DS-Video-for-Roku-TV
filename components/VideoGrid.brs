@@ -7,6 +7,7 @@ sub init()
       m.focusArea = "items"
       m.focusedIndex = 0
       m.lastKey = ""
+      m.playbackFocusGuardIndex = -1
       m.pendingNavIdx = -1
       m.posterRetryAttempts = {}
       m.posterRetryQueue = []
@@ -20,6 +21,7 @@ sub init()
       m.top.observeField("focusNavCategory", "onFocusNavCategory")
       m.top.observeField("refreshLists", "onRefreshLists")
       m.top.observeField("refreshArtwork", "onRefreshArtwork")
+      m.top.observeField("playbackFocusVideo", "onPlaybackFocusVideo")
       m.top.findNode("navLoadTimer").observeField("fire", "onNavLoadTimer")
       m.top.findNode("posterRetryTimer").observeField("fire", "onPosterRetryTimer")
       m.top.findNode("initialPosterRetryTimer").observeField("fire", "onInitialPosterRetryTimer")
@@ -174,6 +176,7 @@ sub init()
               baseUrl: authData.baseUrl,
               sid: authData.sid,
               synoToken: authData.synoToken,
+              proxyBaseUrl: authData.proxyBaseUrl,
               localKey: localKey,
               collectionId: collectionIdForLocalKey(localKey)
           }
@@ -206,6 +209,7 @@ sub init()
           baseUrl: authData.baseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
+          proxyBaseUrl: authData.proxyBaseUrl,
           libraryId: m.top.libraryId
       }
       if category = "homevideos"
@@ -303,6 +307,7 @@ sub init()
           baseUrl: authData.baseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
+          proxyBaseUrl: authData.proxyBaseUrl,
           libraryId: m.top.libraryId,
           offset: m.items.count(),
           limit: total - m.items.count()
@@ -530,6 +535,7 @@ sub init()
           idx = idx + 1
       end for
 
+      m.top.videoItems = m.items
       grid.content = content
       grid.visible = true
       if m.categories.count() > 0
@@ -888,11 +894,11 @@ sub init()
   end function
 
   function shouldCacheIanShowGridArtwork(category as string) as boolean
-      return category = "ians-shows" or (category = "tvshows" and tvShowLibraryPosterAllowed(category))
+      return category = "ians-shows" or (category = "tvshows" and tvShowProxyPosterAllowed(category))
   end function
 
   function categoryLabel(category as string) as string
-      if category = "tvshows" and tvShowLibraryPosterAllowed(category) then return "ians-shows"
+      if category = "tvshows" and tvShowProxyPosterAllowed(category) then return "ians-shows"
       return category
   end function
 
@@ -920,11 +926,79 @@ sub init()
   sub onItemFocused(event as object)
       idx = event.getData()
       if idx < 0 then return
+      if m.playbackFocusGuardIndex <> invalid and m.playbackFocusGuardIndex >= 0 and idx <> m.playbackFocusGuardIndex
+          print "GRID_CLEAR_FOCUS_GUARD category="; categoryLabel(m.category); " from="; m.playbackFocusGuardIndex; " to="; idx
+          m.playbackFocusGuardIndex = -1
+      end if
       m.focusedIndex = idx
       if m.category = "playlists" then return
       schedulePosterRows(idx)
       startScrollPosterRetryTimer()
   end sub
+
+  sub onPlaybackFocusVideo(event as object)
+      videoData = event.getData()
+      if videoData = invalid then return
+      if m.items = invalid or m.items.count() = 0 then return
+      target = playbackFocusIndex(videoData)
+      if target < 0 then return
+      grid = m.top.findNode("videoGrid")
+      if grid = invalid then return
+      grid.jumpToItem = target
+      grid.setFocus(true)
+      m.focusedIndex = target
+      m.focusArea = "items"
+      m.playbackFocusGuardIndex = target
+      schedulePosterRows(target)
+      print "GRID_PLAYBACK_FOCUS category="; categoryLabel(m.category); " index="; target; " title="; safeStr(videoData, ["title", "name"])
+  end sub
+
+  function playbackFocusIndex(videoData as object) as integer
+      targetKeys = playbackFocusKeysForVideo(videoData)
+      if targetKeys.count() = 0 then return -1
+      idx = 0
+      while idx < m.items.count()
+          item = m.items[idx]
+          itemKeys = playbackFocusKeysForItem(item)
+          for each targetKey in targetKeys
+              for each itemKey in itemKeys
+                  if targetKey <> "" and targetKey = itemKey then return idx
+              end for
+          end for
+          idx = idx + 1
+      end while
+      return -1
+  end function
+
+  function playbackFocusKeysForVideo(videoData as object) as object
+      keys = []
+      if videoData = invalid then return keys
+      filePath = safeStr(videoData, ["filePath"])
+      if filePath <> "" then keys.push("path:" + filePath)
+      fileId = safeStr(videoData, ["fileId"])
+      if fileId <> "" and fileId <> "0" then keys.push("file:" + fileId)
+      idText = safeStr(videoData, ["id"])
+      if idText <> "" and idText <> "0" then keys.push("id:" + idText)
+      title = safeStr(videoData, ["title", "name"])
+      if title <> "" then keys.push("title:" + lcase(title))
+      return keys
+  end function
+
+  function playbackFocusKeysForItem(item as object) as object
+      keys = []
+      if item = invalid then return keys
+      info = fileInfoFromItem(item)
+      if info.path <> "" then keys.push("path:" + info.path)
+      fileId = safeStr({ value: info.id }, ["value"])
+      if fileId <> "" and fileId <> "0" then keys.push("file:" + fileId)
+      idText = safeStr(item, ["id"])
+      if idText <> "" and idText <> "0" then keys.push("id:" + idText)
+      title = displayTitleForItem(item, m.category)
+      if title <> "" then keys.push("title:" + lcase(title))
+      rawTitle = safeStr(item, ["title", "name", "file_name"])
+      if rawTitle <> "" then keys.push("title:" + lcase(rawTitle))
+      return keys
+  end function
 
   sub schedulePosterRows(idx as integer)
       if m.category = "playlists" then return
@@ -1136,6 +1210,12 @@ sub init()
   sub onItemSelected(event as object)
       idx = event.getData()
       if idx < 0 or idx >= m.items.count() then return
+      if m.playbackFocusGuardIndex <> invalid and m.playbackFocusGuardIndex >= 0 and idx <> m.playbackFocusGuardIndex
+          print "GRID_IGNORE_STALE_SELECTION category="; categoryLabel(m.category); " index="; idx; " focused="; m.playbackFocusGuardIndex
+          m.playbackFocusGuardIndex = -1
+          return
+      end if
+      m.playbackFocusGuardIndex = -1
       stopArtworkTimers()
 
       item = m.items[idx]
@@ -2323,7 +2403,7 @@ sub init()
           return posterUrl(item, authData, category)
       end function
 
-      function tvShowLibraryPosterAllowed(category as string) as boolean
+      function tvShowProxyPosterAllowed(category as string) as boolean
           if category <> "tvshows" and category <> "ians-shows" then return false
           if m.top.libraryId = invalid then return false
           libraryId = safeStr({ value: m.top.libraryId }, ["value"])
@@ -2574,7 +2654,9 @@ sub init()
           end if
       end if
       if key = "down" and m.focusArea = "nav"
-          if left(m.category, 6) = "local_"
+          category = ""
+          if m.category <> invalid then category = m.category
+          if left(category, 6) = "local_"
               movieGrid = m.top.findNode("playlistMovieGrid")
               episodeGrid = m.top.findNode("playlistEpisodeGrid")
               if movieGrid <> invalid and movieGrid.visible = true
@@ -2698,6 +2780,7 @@ sub init()
       task.request = {
           action: "listLibraries",
           baseUrl: authData.baseUrl,
+          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken
       }
@@ -2712,7 +2795,7 @@ sub init()
       items = response.items
       if items = invalid then return
       m.categories = orderedCategories(items)
-      m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login settings" })
+      m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login and transcode settings" })
       populateNavCategories()
   end sub
 

@@ -8,11 +8,14 @@ sub init()
       m.activeField = ""
       m.focusIndex = 0
       m.blockFirstOk = false
+      m.pendingKeyboardFocus = 0
+      m.pendingKeyboardClose = false
 
-      m.rowYs = [190, 290, 390, 490, 590, 725]
+      m.rowYs = [190, 290, 390, 490, 590, 740]
 
       m.top.observeField("keyInput", "onKeyInput")
       m.top.observeField("settingsMode", "onSettingsModeChanged")
+      m.top.findNode("keyboardFocusTimer").observeField("fire", "onKeyboardFocusTimer")
 
       loadSavedCredentials()
       updateAllValues()
@@ -245,8 +248,15 @@ sub showKeyboard(title as string, currentText as string)
 end sub
 
 sub onKeyboardDone(event as object)
+    if m.currentDialog = invalid
+        m.activeField = ""
+        queueKeyboardFocusRestore(0)
+        return
+    end if
     btnIdx = event.getData()
     entered = m.currentDialog.text
+    completedField = m.activeField
+    print "LOGIN_KEYBOARD_DONE button="; btnIdx; " field="; completedField
 
     if btnIdx = 0
         if m.activeField = "address"
@@ -272,7 +282,47 @@ sub onKeyboardDone(event as object)
         end if
     end if
 
-    m.top.getScene().dialog = invalid
+    m.activeField = ""
+    m.pendingKeyboardClose = true
+    if completedField = "address"
+        queueKeyboardFocusRestore(0)
+    else
+        queueKeyboardFocusRestore(m.focusIndex)
+    end if
+end sub
+
+sub queueKeyboardFocusRestore(rowIndex as integer)
+    if rowIndex < 0 then rowIndex = 0
+    if rowIndex > 5 then rowIndex = 5
+    m.pendingKeyboardFocus = rowIndex
+    timer = m.top.findNode("keyboardFocusTimer")
+    if timer <> invalid
+        timer.control = "stop"
+        timer.control = "start"
+    else
+        restoreKeyboardFocus(rowIndex)
+    end if
+end sub
+
+sub onKeyboardFocusTimer(event as object)
+    print "LOGIN_KEYBOARD_REFOCUS row="; m.pendingKeyboardFocus
+    if m.pendingKeyboardClose = true
+        print "LOGIN_KEYBOARD_CLOSE_DELAYED"
+        if m.currentDialog <> invalid
+            m.currentDialog.close = true
+            m.currentDialog.unobserveField("buttonSelected")
+        end if
+        m.top.getScene().dialog = invalid
+        m.currentDialog = invalid
+        m.pendingKeyboardClose = false
+    end if
+    restoreKeyboardFocus(m.pendingKeyboardFocus)
+end sub
+
+sub restoreKeyboardFocus(rowIndex as integer)
+    if rowIndex < 0 then rowIndex = 0
+    if rowIndex > 5 then rowIndex = 5
+    setHighlight(rowIndex)
     m.top.setFocus(true)
 end sub
 
@@ -318,7 +368,7 @@ sub onLoginResponse(event as object)
     if response.success = true
         saveCredentials()
         showStatus("Connected! Loading library...", false)
-        m.top.authSuccess = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl }
+        m.top.authSuccess = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, username: m.username, password: m.password }
     else
         err = response.error
         if err = invalid then err = "Login failed. Check credentials."

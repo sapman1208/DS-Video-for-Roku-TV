@@ -18,7 +18,7 @@
         <Label id="watchedStateLabel" text="" color="#F4D84D" font="font:MediumBoldSystemFont" translation="[110, 708]" width="360" height="46" horizAlign="center" visible="false" />
         <Timer id="movieSummaryTimer" repeat="false" duration="0.35" />
         <Timer id="detailRevealTimer" repeat="false" duration="0.32" />
-        <Label id="titleLabel" text="" color="#FFFFFF" font="font:LargeBoldSystemFont" translation="[540, 150]" width="1180" height="72" />
+        <Label id="titleLabel" text="" color="#FFFFFF" font="font:LargeBoldSystemFont" translation="[540, 150]" width="1180" height="122" wrap="true" maxLines="2" />
         <Label id="metaLabel" text="" color="#C9CED3" font="font:MediumSystemFont" translation="[540, 230]" width="1100" height="110" />
         <Label id="dateLabel" text="" color="#C9CED3" font="font:MediumSystemFont" translation="[540, 285]" width="1100" height="44" visible="false" />
         <Label id="ratingLabel" text="Rating" color="#C9CED3" font="font:MediumSystemFont" translation="[540, 302]" width="120" height="44" />

@@ -32,5 +32,6 @@
         <Timer id="overlayRefreshTimer" repeat="true" duration="1" />
         <Timer id="overlayTimer" repeat="false" duration="5" />
         <Timer id="resumeSeekTimer" repeat="true" duration="0.75" />
+        <Timer id="directStartupTimer" repeat="false" duration="14" />
     </children>
 </component>

@@ -99,6 +99,7 @@ sub init()
       task.request = {
           action: "listEpisodes",
           baseUrl: authData.baseUrl,
+          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
           tvshowId: showData.id,
@@ -134,6 +135,7 @@ sub init()
           return
       end if
 
+      episodes = sortEpisodesForAutoplay(episodes)
       m.episodes = episodes
       m.top.episodeItems = episodes
       resetPosterRetryState()
@@ -395,7 +397,6 @@ sub init()
       m.keepSeasonFocus = true
       resetPosterRetryState()
       m.episodeFocusedIndex = 0
-      populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
   end sub
@@ -409,7 +410,6 @@ sub init()
       m.keepSeasonFocus = true
       resetPosterRetryState()
       m.episodeFocusedIndex = 0
-      populateSeasonTabs()
       populateEpisodeGrid(m.episodes, m.currentSeason)
       startInitialSeasonPosterRetryTimer()
   end sub
@@ -888,13 +888,16 @@ sub init()
       ep = seasonEpisodes[idx]
       authData = m.top.authData
       selected = episodeVideoPayload(ep, authData, idx)
+      playlist = autoplayEpisodeList(authData)
+      selected.autoplayEpisodes = playlist
+      selected.autoplayIndex = autoplayIndexForEpisode(selected, playlist)
       m.top.selectedVideo = selected
   end sub
 
   function autoplayEpisodeList(authData as object) as object
       playlist = []
       if m.episodes = invalid then return playlist
-      seasonEpisodes = sortEpisodesForAutoplay(m.episodes)
+      seasonEpisodes = episodesForCurrentSeason()
       idx = 0
       while idx < seasonEpisodes.count()
           playlist.push(autoplayEpisodePayload(seasonEpisodes[idx], authData, idx))
@@ -1359,6 +1362,7 @@ sub init()
       task.request = {
           action: "listLibraries",
           baseUrl: authData.baseUrl,
+          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken
       }
@@ -1373,7 +1377,7 @@ sub init()
       items = response.items
       if items = invalid then return
       m.categories = orderedCategories(items)
-      m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login settings" })
+      m.categories.push({ title: "Settings", category: "settings", desc: "Edit NAS login and transcode settings" })
       populateNavCategories()
   end sub
 

@@ -22,7 +22,6 @@ end sub
 
 sub updateVisual()
     opacity = 0
-    if m.selected or m.focused then opacity = 0.18
     if m.focused then opacity = 0.28
     m.top.findNode("focusBg").opacity = opacity
     if m.selected or m.focused

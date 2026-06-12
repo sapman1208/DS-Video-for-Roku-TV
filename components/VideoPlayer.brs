@@ -14,6 +14,7 @@ sub init()
       m.top.findNode("overlayRefreshTimer").observeField("fire", "onOverlayRefreshTimer")
       m.top.findNode("overlayTimer").observeField("fire", "onOverlayTimer")
       m.top.findNode("resumeSeekTimer").observeField("fire", "onResumeSeekTimer")
+      m.top.findNode("directStartupTimer").observeField("fire", "onDirectStartupTimer")
       m.hasError = false
       m.hasPlayed = false
       m.reportedStart = false
@@ -36,10 +37,12 @@ sub init()
       m.watchStatusInFlight = false
       m.resumeSeekDoneAt = invalid
       m.resumePosition = resumePositionForVideo(videoData)
+      if videoData.lookUp("forceStartOver") = true then m.resumePosition = 0
       m.streamAttemptIndex = 0
-      m.maxStreamAttempts = 12
+      m.maxStreamAttempts = 1
       m.retryingStream = false
       m.progressDebugTicks = 0
+      m.userSeekTarget = invalid
       printVideoDataDebug("VIDEO_DATA", videoData)
       if (m.resumePosition = invalid or m.resumePosition <= 0) and m.top.resumePosition <> invalid
           m.resumePosition = int(m.top.resumePosition)
@@ -72,8 +75,11 @@ sub init()
       task.request = {
           action: "getStreamUrl",
           baseUrl: authData.baseUrl,
+          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
+          username: authData.username,
+          password: authData.password,
           fileId: fileId,
           mapperId: videoData.mapperId,
           filePath: videoData.filePath,
@@ -114,11 +120,24 @@ sub init()
       isLive = false
       if response.isLive = true then isLive = true
       m.isHlsStream = (fmt = "hls")
+      m.nativeHlsResume = response.nativeHlsResume = true
+      m.nativeHlsResumeBase = 0
+      if m.nativeHlsResume = true and response.resumePosition <> invalid
+          m.nativeHlsResumeBase = int(response.resumePosition)
+      end if
+      if m.isHlsStream = true and m.nativeHlsResume = true
+          m.resumePosition = m.nativeHlsResumeBase
+          m.seekApplied = true
+          print "VIDEO_RESUME_NATIVE_HLS position="; m.resumePosition
+      end if
       m.streamDebug = ""
       if response.debugInfo <> invalid then m.streamDebug = response.debugInfo
       if response.attemptIndex <> invalid then m.streamAttemptIndex = int(response.attemptIndex)
       m.subtitleUrl = ""
       if response.subtitleUrl <> invalid then m.subtitleUrl = response.subtitleUrl
+      m.streamHttpHeaders = invalid
+      if response.httpHeaders <> invalid then m.streamHttpHeaders = response.httpHeaders
+      m.directVteAttempt = response.directVte = true
       if m.subtitleUrl <> invalid and m.subtitleUrl <> "" then print "VIDEO_SUBTITLE url="; m.subtitleUrl
       print "STREAM_READY attempt="; m.streamAttemptIndex; " fmt="; fmt; " live="; isLive; " url="; debugUrlSummary(streamUrl); " debug="; oneLine(left(safeDynamicString(m.streamDebug), 500))
       startPlayback(streamUrl, fmt, isLive)
@@ -148,8 +167,13 @@ sub init()
       content.addFields({
           HttpCertificatesFile: "common:/certs/ca-bundle.crt",
           HttpVerifyPeer: false,
-          HttpVerifyHost: false
+          HttpVerifyHost: false,
+          ForwardQueryStringParams: true
       })
+      if m.streamHttpHeaders <> invalid
+          content.addFields({ HttpHeaders: m.streamHttpHeaders })
+          print "VIDEO_HTTP_HEADERS count="; m.streamHttpHeaders.count()
+      end if
 
       videoData = m.top.videoData
       if videoData <> invalid and videoData.title <> invalid
@@ -168,22 +192,25 @@ sub init()
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
           content.PlayStart = m.resumePosition
           content.playStart = m.resumePosition
+      else if fmt = "hls"
+          content.PlayStart = 0
+          content.playStart = 0
+          content.BookmarkPosition = 0
+          content.bookmarkPosition = 0
       end if
 
       video.content = content
       if m.subtitleUrl <> invalid and m.subtitleUrl <> ""
-          video.globalCaptionMode = "On"
           print "VIDEO_SUBTITLE_NATIVE_READY track="; m.subtitleUrl
       end if
-      video.setFocus(true)
+      ensureVideoFocus()
       m.hasPlayed = false
       playStartText = ""
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls" then playStartText = safeDynamicString(m.resumePosition)
       print "VIDEO_CONTENT fmt="; fmt; " streamFormat="; safeDynamicString(content.streamFormat); " title="; safeDynamicString(content.title); " url="; debugUrlSummary(content.url); " playStart="; playStartText
       print "VIDEO_PLAY fmt="; fmt
       if m.resumePosition <> invalid and m.resumePosition > 0 then print "VIDEO_RESUME position="; m.resumePosition
-      pendingHlsResume = (fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0)
-      if fmt = "hls" and m.resumePosition <> invalid and m.resumePosition > 0
+      if m.resumePosition <> invalid and m.resumePosition > 0 and m.nativeHlsResume <> true
           beginResumeHold()
       else
           setVideoMuted(false)
@@ -191,12 +218,16 @@ sub init()
       if m.resumePosition <> invalid and m.resumePosition > 0 and fmt <> "hls"
           video.control = "prebuffer"
       else
-      video.control = "play"
+          video.control = "play"
       end if
-      if pendingHlsResume then beginResumeHold()
       m.streamUrl = streamUrl
       m.streamFmt = fmt
       m.retryingStream = false
+      if m.directVteAttempt = true
+          directTimer = m.top.findNode("directStartupTimer")
+          if directTimer <> invalid then directTimer.control = "start"
+          print "VIDEO_DIRECT_STARTUP_TIMER start"
+      end if
   end sub
 
   sub beginResumeHold()
@@ -210,6 +241,8 @@ sub init()
   sub endResumeHold()
       m.resumeHoldActive = false
       m.videoNode.visible = true
+      m.videoNode.enableUI = true
+      ensureVideoFocus()
       setVideoMuted(false)
       overlay = m.top.findNode("resumeOverlay")
       if overlay <> invalid then overlay.visible = false
@@ -228,25 +261,6 @@ sub init()
       count = 0
       if tracks <> invalid then count = tracks.count()
       print "VIDEO_SUBTITLE_AVAILABLE count="; count
-      if count <= 0 then return
-      selected = ""
-      for each track in tracks
-          if track <> invalid
-              trackName = track.lookUp("TrackName")
-              if trackName = invalid then trackName = track.lookUp("trackName")
-              if trackName = invalid then trackName = track.lookUp("Name")
-              if trackName <> invalid and trackName <> ""
-                  selected = trackName
-                  exit for
-              end if
-          end if
-      end for
-      if selected = "" and m.subtitleUrl <> invalid then selected = m.subtitleUrl
-      if selected <> ""
-          m.videoNode.globalCaptionMode = "On"
-          m.videoNode.subtitleTrack = selected
-          print "VIDEO_SUBTITLE_SELECT_AVAILABLE track="; selected
-      end if
   end sub
 
   sub onCurrentSubtitleTrack(event as object)
@@ -258,6 +272,8 @@ sub init()
       state = event.getData()
       print "VIDEO_STATE state="; state; " pos="; safeDynamicString(m.videoNode.position); " dur="; safeDynamicString(m.videoNode.duration); " buffer="; debugAny(m.videoNode.bufferingStatus); " errCode="; safeDynamicString(m.videoNode.errorCode); " errMsg="; safeDynamicString(m.videoNode.errorMsg)
       if state = "playing"
+          stopDirectStartupTimer()
+          ensureVideoFocus()
           m.hasPlayed = true
           if m.reportedStart <> true
               m.reportedStart = true
@@ -268,10 +284,12 @@ sub init()
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "start"
       else if state = "buffering"
-          if m.resumePosition <> invalid and m.resumePosition > 0 and m.hasPlayed <> true
+          ensureVideoFocus()
+          if m.streamFmt <> "hls" and m.resumePosition <> invalid and m.resumePosition > 0 and m.hasPlayed <> true
               m.videoNode.control = "play"
           end if
       else if state = "finished" or state = "stopped"
+          stopDirectStartupTimer()
           if m.retryingStream = true then return
           timer = m.top.findNode("progressTimer")
           if timer <> invalid then timer.control = "stop"
@@ -279,17 +297,18 @@ sub init()
           if seekTimer <> invalid then seekTimer.control = "stop"
           endResumeHold()
           if state = "finished" and not m.userStopped
-              clearResumePosition()
+              finishPlaybackPosition()
           else
               saveResumePosition()
           end if
           ' Only exit if no error was shown — otherwise user reads the error and presses Back.
           if not m.hasError
               reason = "finished"
-              if m.userStopped then reason = "back"
+              if state = "stopped" or m.userStopped then reason = "back"
               reportPlaybackDone(reason)
           end if
       else if state = "error"
+          stopDirectStartupTimer()
           if retryNextStreamCandidate() then return
           m.hasError = true
           endResumeHold()
@@ -298,6 +317,18 @@ sub init()
           print "VIDEO_ERROR_FINAL fmt="; safeDynamicString(m.streamFmt); " attempt="; safeDynamicString(m.streamAttemptIndex); " url="; debugUrlSummary(m.streamUrl); " code="; safeDynamicString(m.videoNode.errorCode); " msg="; safeDynamicString(m.videoNode.errorMsg)
           showError("Playback error (fmt=" + m.streamFmt + ")." + dbg)
       end if
+  end sub
+
+  sub stopDirectStartupTimer()
+      timer = m.top.findNode("directStartupTimer")
+      if timer <> invalid then timer.control = "stop"
+  end sub
+
+  sub onDirectStartupTimer(event as object)
+      if event = invalid then return
+      if m.directVteAttempt <> true then return
+      if m.hasPlayed = true then return
+      print "VIDEO_DIRECT_TIMEOUT no_proxy_retry"
   end sub
 
   function retryNextStreamCandidate() as boolean
@@ -330,6 +361,7 @@ sub init()
       if event = invalid then return
       applyPendingSeek()
       saveResumePosition()
+      clearSettledUserSeekTarget()
       m.progressDebugTicks = m.progressDebugTicks + 1
       if m.progressDebugTicks >= 6
           m.progressDebugTicks = 0
@@ -362,6 +394,7 @@ sub init()
           timer = m.top.findNode("resumeSeekTimer")
           if timer <> invalid then timer.control = "stop"
           endResumeHold()
+          ensureVideoFocus()
           print "VIDEO_SEEK_DONE position="; currentPos; " target="; m.resumePosition
           return
       end if
@@ -373,11 +406,13 @@ sub init()
           timer = m.top.findNode("resumeSeekTimer")
           if timer <> invalid then timer.control = "stop"
           endResumeHold()
+          ensureVideoFocus()
           print "VIDEO_SEEK_GIVEUP position="; currentPos; " target="; m.resumePosition
           return
       end if
       m.seekAttempts = m.seekAttempts + 1
       m.videoNode.seek = m.resumePosition
+      ensureVideoFocus()
       print "VIDEO_SEEK attempt="; m.seekAttempts; " target="; m.resumePosition; " current="; currentPos
   end sub
 
@@ -396,18 +431,30 @@ sub init()
       if m.videoNode = invalid then return
       duration = int(m.videoNode.duration)
       current = int(m.videoNode.position)
-      target = current + deltaSeconds
+      base = current
+      if m.userSeekTarget <> invalid
+          base = int(m.userSeekTarget)
+      end if
+      target = base + deltaSeconds
       if target < 0 then target = 0
       if duration > 0 and target > duration - 5 then target = duration - 5
       if target < 0 then target = 0
+      m.userSeekTarget = target
       m.videoNode.seek = target
       if m.resumePosition <> invalid and m.resumePosition > 0
           m.seekApplied = true
           m.resumeSeekDoneAt = createObject("roTimespan")
           m.resumeSeekDoneAt.mark()
       end if
-      print "VIDEO_USER_SEEK from="; current; " to="; target; " delta="; deltaSeconds; " duration="; duration
+      print "VIDEO_USER_SEEK from="; current; " base="; base; " to="; target; " delta="; deltaSeconds; " duration="; duration
       showPlaybackOverlay()
+  end sub
+
+  sub clearSettledUserSeekTarget()
+      if m.userSeekTarget = invalid then return
+      current = int(m.videoNode.position)
+      target = int(m.userSeekTarget)
+      if abs(current - target) <= 5 then m.userSeekTarget = invalid
   end sub
 
   sub togglePlayPause()
@@ -556,7 +603,7 @@ sub init()
       if playbackPos < 30 then return
       duration = int(m.videoNode.duration)
       if duration > 0 and playbackPos > duration - 90
-          clearResumePosition()
+          finishPlaybackPosition()
           return
       end if
       reg = createObject("roRegistrySection", "DSVideoResume")
@@ -567,6 +614,9 @@ sub init()
 
   function effectivePlaybackPosition() as integer
       playbackPos = int(m.videoNode.position)
+      if m.isHlsStream = true and m.nativeHlsResume = true and m.nativeHlsResumeBase > 0
+          return int(m.nativeHlsResumeBase) + playbackPos
+      end if
       if m.isHlsStream = true and m.resumePosition <> invalid and m.resumePosition > 0 and m.seekApplied = true and m.resumeSeekDoneAt <> invalid
           elapsed = int(m.resumeSeekDoneAt.totalMilliseconds() / 1000)
           resumeBasedPos = int(m.resumePosition) + elapsed
@@ -584,6 +634,24 @@ sub init()
           reg.flush()
       end if
       syncWatchStatus(0)
+  end sub
+
+  sub finishPlaybackPosition()
+      key = resumeKeyForVideo(m.top.videoData)
+      if key <> ""
+          reg = createObject("roRegistrySection", "DSVideoResume")
+          if reg.exists(key)
+              reg.delete(key)
+              reg.flush()
+          end if
+      end if
+      duration = int(m.videoNode.duration)
+      position = effectivePlaybackPosition()
+      if duration > 0 then position = duration
+      if position < 1 then position = 1
+      m.watchStatusInFlight = false
+      print "WATCH_STATUS_FINISHED position="; position; " duration="; duration
+      syncWatchStatus(position)
   end sub
 
   sub syncWatchStatus(position as integer)
@@ -606,10 +674,13 @@ sub init()
       task.request = {
           action: "updateWatchStatus",
           baseUrl: authData.baseUrl,
+          proxyBaseUrl: authData.proxyBaseUrl,
           sid: authData.sid,
           synoToken: authData.synoToken,
           videoId: videoData.id,
           videoType: videoData.type,
+          fileId: videoData.fileId,
+          mapperId: videoData.mapperId,
           filePath: videoData.filePath,
           position: position
       }
@@ -640,6 +711,12 @@ sub init()
       print "VIDEO_BUFFER "; event.getData()
   end sub
 
+  sub ensureVideoFocus()
+      if m.videoNode = invalid then return
+      m.videoNode.enableUI = true
+      if m.videoNode.visible = true then m.videoNode.setFocus(true)
+  end sub
+
   sub showError(msg as string)
       m.hasError = true
       m.top.findNode("backgroundRect").visible = true
@@ -654,31 +731,32 @@ sub init()
 
   function onKeyEvent(key as string, press as boolean) as boolean
       if not press then return false
+      print "VIDEO_KEY key="; key; " state="; safeDynamicString(m.videoNode.state); " focus=player"
       if key = "back"
           m.userStopped = true
           m.videoNode.control = "stop"
           reportPlaybackDone("back")
           return true
       else if key = "left" or key = "rewind"
-          if key = "rewind"
-              seekBy(-120)
-          else
-              seekBy(-30)
+          ensureVideoFocus()
+          if key = "left" and m.top.findNode("controlOverlay").visible = true
+              seekBy(-90)
+              return true
           end if
-          return true
+          return false
       else if key = "right" or key = "fastforward"
-          if key = "fastforward"
-              seekBy(120)
-          else
-              seekBy(30)
+          ensureVideoFocus()
+          if key = "right" and m.top.findNode("controlOverlay").visible = true
+              seekBy(90)
+              return true
           end if
-          return true
+          return false
       else if key = "play"
-          togglePlayPause()
-          return true
+          ensureVideoFocus()
+          return false
       else if key = "up" or key = "OK" or key = "down"
           showPlaybackOverlay()
-          m.videoNode.setFocus(true)
+          ensureVideoFocus()
           return true
       end if
       return false
