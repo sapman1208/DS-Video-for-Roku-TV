@@ -1,5 +1,5 @@
 sub Main()
-    print "MAIN_START build=410-direct-mp4-sidecar-subtitles"
+    print "MAIN_START version=1.8.12-direct-mp4-sidecar-subtitles"
     screen = CreateObject("roSGScreen")
     m.port = CreateObject("roMessagePort")
     screen.setMessagePort(m.port)
