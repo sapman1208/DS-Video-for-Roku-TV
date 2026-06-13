@@ -1,5 +1,5 @@
 sub Main()
-    print "MAIN_START version=1.8.12-season-boundary-autoplay"
+    print "MAIN_START version=1.8.12-background-autoplay-context"
     screen = CreateObject("roSGScreen")
     m.port = CreateObject("roMessagePort")
     screen.setMessagePort(m.port)

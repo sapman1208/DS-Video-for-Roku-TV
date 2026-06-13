@@ -888,9 +888,6 @@ sub init()
       ep = seasonEpisodes[idx]
       authData = m.top.authData
       selected = episodeVideoPayload(ep, authData, idx)
-      playlist = autoplayEpisodeList(authData)
-      selected.autoplayEpisodes = playlist
-      selected.autoplayIndex = autoplayIndexForEpisode(selected, playlist)
       m.top.selectedVideo = selected
   end sub
 
