@@ -897,7 +897,7 @@ sub init()
   function autoplayEpisodeList(authData as object) as object
       playlist = []
       if m.episodes = invalid then return playlist
-      seasonEpisodes = episodesForCurrentSeason()
+      seasonEpisodes = sortEpisodesForAutoplay(m.episodes)
       idx = 0
       while idx < seasonEpisodes.count()
           playlist.push(autoplayEpisodePayload(seasonEpisodes[idx], authData, idx))
