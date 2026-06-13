@@ -1,5 +1,5 @@
 sub Main()
-    print "MAIN_START version=1.8.12-background-autoplay-context"
+    print "MAIN_START version=1.8.12-autoplay-filename-order"
     screen = CreateObject("roSGScreen")
     m.port = CreateObject("roMessagePort")
     screen.setMessagePort(m.port)

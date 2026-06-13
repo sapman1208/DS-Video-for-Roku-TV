@@ -893,11 +893,76 @@ sub init()
   end function
 
   function sceneEpisodeSeason(item as object) as integer
-      return sceneFirstNumber(item, ["seasonNumber", "season_number", "season", "season_num", "season_index"])
+      value = sceneFirstNumber(item, ["seasonNumber", "season_number", "season", "season_num", "season_index"])
+      if value > 0 then return value
+      info = sceneEpisodeInfoFromItem(item)
+      return info.season
   end function
 
   function sceneEpisodeNumber(item as object) as integer
-      return sceneFirstNumber(item, ["episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"])
+      value = sceneFirstNumber(item, ["episodeNumber", "episode_number", "episode", "episode_num", "ep_num", "ep_index"])
+      if value > 0 then return value
+      info = sceneEpisodeInfoFromItem(item)
+      return info.episode
+  end function
+
+  function sceneEpisodeInfoFromItem(item as object) as object
+      fileInfo = sceneFileInfoFromItem(item)
+      if fileInfo.path <> "" then return sceneEpisodeInfoFromPath(fileInfo.path)
+      title = sceneSafeStr(item, ["title", "name", "file_name"])
+      return sceneEpisodeInfoFromPath(title)
+  end function
+
+  function sceneEpisodeInfoFromPath(path as string) as object
+      name = sceneBaseNameNoExt(path)
+      lower = lcase(name)
+      season = 0
+      episode = 0
+
+      idx = 1
+      while idx <= len(lower) - 5
+          if mid(lower, idx, 1) = "s" and mid(lower, idx + 3, 1) = "e"
+              season = int(val(mid(lower, idx + 1, 2)))
+              episode = int(val(mid(lower, idx + 4, 2)))
+              if season > 0 or episode > 0 then return { season: season, episode: episode }
+          else if mid(lower, idx, 1) = "s" and mid(lower, idx + 4, 1) = "e"
+              season = int(val(mid(lower, idx + 1, 2)))
+              episode = int(val(mid(lower, idx + 5, 2)))
+              if season > 0 or episode > 0 then return { season: season, episode: episode }
+          end if
+          idx = idx + 1
+      end while
+
+      idx = 1
+      while idx <= len(lower) - 3
+          ch = mid(lower, idx, 1)
+          code = asc(ch)
+          if code >= 48 and code <= 57 and mid(lower, idx + 2, 1) = "x"
+              season = int(val(ch))
+              episode = int(val(mid(lower, idx + 3, 2)))
+              if season > 0 or episode > 0 then return { season: season, episode: episode }
+          end if
+          idx = idx + 1
+      end while
+
+      return { season: 0, episode: 0 }
+  end function
+
+  function sceneBaseNameNoExt(path as string) as string
+      name = path
+      lastSlash = 0
+      idx = 1
+      while idx <= len(path)
+          if mid(path, idx, 1) = "/" then lastSlash = idx
+          idx = idx + 1
+      end while
+      if lastSlash > 0 then name = mid(path, lastSlash + 1)
+      lname = lcase(name)
+      extensions = [".mkv", ".mp4", ".avi", ".m4v", ".mov", ".webm", ".m2ts"]
+      for each ext in extensions
+          if right(lname, len(ext)) = ext then return left(name, len(name) - len(ext))
+      end for
+      return name
   end function
 
   function sceneFirstNumber(item as object, keys as object) as integer
