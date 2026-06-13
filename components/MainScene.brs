@@ -383,7 +383,7 @@ sub init()
       if videoData.lookUp("resumeChoice") <> invalid then videoData.delete("resumeChoice")
       player.resumePosition = videoData.resumePosition
       player.videoData = videoData
-      if videoData <> invalid and videoData.lookUp("type") = "episode"
+      if videoData <> invalid and (videoData.lookUp("type") = "episode" or videoData.lookUp("type") = "movie")
           m.lastPlaybackVideo = videoData
       end if
       player.observeField("playbackResult", "onPlaybackDone")
@@ -569,6 +569,7 @@ sub init()
       if result <> invalid and result.lookUp("reason") = "finished" and wasBackExit <> true
           if playedVideo <> invalid and playedVideo.lookUp("autoplayEpisodes") = invalid then attachEpisodeAutoplayContext(playedVideo)
           nextVideo = nextAutoplayEpisode(playedVideo)
+          if nextVideo = invalid then nextVideo = nextAutoplayMovie(playedVideo)
           if nextVideo = invalid then nextVideo = nextAutoplayHomeVideo(playedVideo)
       end if
       if playedVideo <> invalid and playedVideo.lookUp("type") = "episode"
@@ -593,7 +594,7 @@ sub init()
 
   sub requestPlaybackFocus(videoData as object)
       if videoData = invalid then return
-      if videoData.lookUp("type") = "homevideo"
+      if videoData.lookUp("type") = "homevideo" or videoData.lookUp("type") = "movie"
           requestGridPlaybackFocus(videoData)
       else
           requestEpisodePlaybackFocus(videoData)
@@ -678,6 +679,38 @@ sub init()
       return nextVideo
   end function
 
+  function nextAutoplayMovie(videoData as dynamic) as dynamic
+      if videoData = invalid then return invalid
+      if videoData.lookUp("type") <> "movie" then return invalid
+      seriesKey = movieSeriesKeyForScene(videoData)
+      if seriesKey = "" then return invalid
+      grid = activeVideoGridScreen()
+      if grid = invalid then return invalid
+      items = grid.videoItems
+      if items = invalid or items.count() = 0 then return invalid
+      currentKey = autoplayVideoKey(videoData)
+      idx = -1
+      i = 0
+      while i < items.count()
+          candidate = moviePayloadForScene(items[i], grid, i)
+          if movieSeriesKeyForScene(candidate) = seriesKey
+              if autoplayVideoKey(candidate) = currentKey
+                  idx = i
+                  i = items.count()
+              end if
+          end if
+          i = i + 1
+      end while
+      nextIdx = idx + 1
+      if idx < 0 or nextIdx >= items.count() then return invalid
+      nextVideo = moviePayloadForScene(items[nextIdx], grid, nextIdx)
+      if movieSeriesKeyForScene(nextVideo) <> seriesKey then return invalid
+      nextVideo.resumeChoice = "start"
+      nextVideo.resumePosition = 0
+      print "MOVIE_AUTOPLAY_NEXT series="; seriesKey; " index="; nextIdx; " title="; safeDynamicString(nextVideo.lookUp("title"))
+      return nextVideo
+  end function
+
   function activeVideoGridScreen() as dynamic
       if m.screenStack = invalid then return invalid
       idx = m.screenStack.count() - 1
@@ -712,6 +745,38 @@ sub init()
           title: displayTitle,
           summary: sceneSafeStr(item, ["summary", "description", "tagline"]),
           watchedRatio: 0,
+          fileWatched: fileInfo.watched,
+          rating: sceneNumberForItem(item, ["rating", "rate"]),
+          posterUrl: sceneSafeStr(item, ["posterUrl", "posterRemoteUrl"]),
+          posterRemoteUrl: sceneSafeStr(item, ["posterRemoteUrl", "posterUrl"]),
+          backdropUrl: sceneSafeStr(item, ["backdropUrl", "backdropRemoteUrl"]),
+          backdropRemoteUrl: sceneSafeStr(item, ["backdropRemoteUrl", "backdropUrl"]),
+          autoplayIndex: fallbackIndex,
+          authData: m.authData
+      }
+  end function
+
+  function moviePayloadForScene(item as object, grid as object, fallbackIndex as integer) as object
+      fileInfo = sceneFileInfoFromItem(item)
+      rawId = item.lookUp("id")
+      if rawId = invalid then rawId = "0"
+      rawFileId = fileInfo.id
+      if rawFileId = invalid then rawFileId = rawId
+      category = "movies"
+      if grid <> invalid and grid.category <> invalid then category = grid.category
+      return {
+          type: "movie",
+          id: rawId,
+          videoStationId: sceneSafeStr(item, ["videoStationId", "video_station_id", "posterId"]),
+          fileId: rawFileId,
+          mapperId: sceneSafeStr(item, ["mapper_id", "mapperId"]),
+          sourceCategory: category,
+          collectionVideoType: "movie",
+          filePath: fileInfo.path,
+          originalAvailable: sceneSafeStr(item, ["originalAvailable", "original_available", "originally_available", "release_date", "date", "year", "create_time"]),
+          title: sceneSafeStr(item, ["title", "name", "file_name"]),
+          summary: sceneSafeStr(item, ["summary", "description", "tagline"]),
+          watchedRatio: sceneNumberForItem(item, ["watched_ratio", "watchedRatio"]),
           fileWatched: fileInfo.watched,
           rating: sceneNumberForItem(item, ["rating", "rate"]),
           posterUrl: sceneSafeStr(item, ["posterUrl", "posterRemoteUrl"]),
@@ -760,6 +825,74 @@ sub init()
           i = i + 1
       end while
       return hasDigit
+  end function
+
+  function movieSeriesKeyForScene(item as dynamic) as string
+      title = normalizedMovieTitleForScene(sceneSafeStr(item, ["title", "name", "file_name"]))
+      if title = "" then return ""
+      if instr(1, title, "back to the future") > 0 then return "back to the future"
+      if instr(1, title, "final destination") > 0 then return "final destination"
+      if instr(1, title, "dont breathe") > 0 then return "dont breathe"
+      if instr(1, title, "amazing spider man") > 0 or instr(1, title, "spider man") > 0 then return "spider man"
+      if instr(1, title, "star wars") > 0 or instr(1, title, "empire strikes back") > 0 then return "star wars"
+      if instr(1, title, "star trek") > 0 then return "star trek"
+      if instr(1, title, "scream") = 1 then return "scream"
+      if instr(1, title, "scary movie") = 1 then return "scary movie"
+      if instr(1, title, "john wick") > 0 then return "john wick"
+      if instr(1, title, "harry potter") > 0 then return "harry potter"
+      if instr(1, title, "hunger games") > 0 then return "hunger games"
+      if instr(1, title, "toy story") > 0 then return "toy story"
+      if instr(1, title, "transformers") > 0 then return "transformers"
+      if instr(1, title, "twilight") > 0 then return "twilight"
+      if instr(1, title, "ice age") > 0 then return "ice age"
+      if instr(1, title, "fear street") > 0 then return "fear street"
+      if instr(1, title, "futurama") > 0 then return "futurama"
+      if instr(1, title, "south park") > 0 then return "south park"
+      if instr(1, title, "home alone") > 0 then return "home alone"
+      if instr(1, title, "hocus pocus") > 0 then return "hocus pocus"
+      if instr(1, title, "hurricane bianca") > 0 then return "hurricane bianca"
+      if title = "finding nemo" or title = "finding dory" then return "finding"
+      if instr(1, title, "terrifier") > 0 then return "terrifier"
+      if instr(1, title, "the strangers") > 0 or instr(1, title, "strangers") = 1 then return "strangers"
+      if instr(1, title, "texas chain saw massacre") > 0 or instr(1, title, "texas chainsaw massacre") > 0 then return "texas chainsaw massacre"
+      if instr(1, title, "naked gun") > 0 then return "naked gun"
+      if instr(1, title, "lion king") > 0 then return "lion king"
+      if instr(1, title, "underworld") > 0 then return "underworld"
+      if instr(1, title, "sherlock holmes") > 0 then return "sherlock holmes"
+      if instr(1, title, "wrong turn") > 0 then return "wrong turn"
+      if instr(1, title, "venom") > 0 then return "venom"
+      if title = "halloween" or instr(1, title, "halloween ii") = 1 or instr(1, title, "halloween 4") = 1 or instr(1, title, "halloween kills") = 1 or instr(1, title, "halloween ends") = 1 then return "halloween"
+      if title = "friday the 13th" or instr(1, title, "friday the 13th part") = 1 then return "friday the 13th"
+      return ""
+  end function
+
+  function normalizedMovieTitleForScene(title as string) as string
+      lower = lcase(title)
+      out = ""
+      lastSpace = true
+      i = 1
+      while i <= len(lower)
+          ch = mid(lower, i, 1)
+          code = asc(ch)
+          isWord = (code >= 48 and code <= 57) or (code >= 97 and code <= 122)
+          if isWord
+              out = out + ch
+              lastSpace = false
+          else if ch = "'"
+              ' Keep contractions together: Don't -> dont.
+          else if code = 226
+              ' Curly apostrophes are UTF-8; dropping this byte avoids splitting contractions.
+          else if not lastSpace
+              out = out + " "
+              lastSpace = true
+          end if
+          i = i + 1
+      end while
+      out = out.trim()
+      if left(out, 4) = "the " then out = mid(out, 5)
+      if left(out, 2) = "a " then out = mid(out, 3)
+      if left(out, 3) = "an " then out = mid(out, 4)
+      return out
   end function
 
   sub attachEpisodeAutoplayContext(videoData as object)

@@ -283,10 +283,14 @@ sub init()
           return
       end if
 
-      m.items = items
+      if m.top.category = "movies"
+          m.items = sortMovieItemsForDisplay(items)
+      else
+          m.items = items
+      end if
       resetPosterRetryState()
       m.category = m.top.category
-      populateGrid(items)
+      populateGrid(m.items)
       maybeLoadRemainingHomeVideos(response)
       if m.category <> "playlists"
           startInitialPosterRetryTimer()
@@ -562,8 +566,6 @@ sub init()
       for each item in items
           if playlistItemIsMovie(item)
               m.playlistMovieItems.push(item)
-              node = playlistContentNode(item, "playlistMovie", m.playlistMovieItems.count() - 1)
-              movieContent.appendChild(node)
           else
               m.playlistEpisodeItems.push(item)
               layoutMode = "playlistWide"
@@ -572,6 +574,14 @@ sub init()
               episodeContent.appendChild(node)
           end if
       end for
+      m.playlistMovieItems = sortMovieItemsForDisplay(m.playlistMovieItems)
+      idx = 0
+      while idx < m.playlistMovieItems.count()
+          node = playlistContentNode(m.playlistMovieItems[idx], "playlistMovie", idx)
+          movieContent.appendChild(node)
+          idx = idx + 1
+      end while
+      m.top.videoItems = m.playlistMovieItems
 
       movieGrid.content = movieContent
       episodeGrid.content = episodeContent
@@ -2284,6 +2294,131 @@ sub init()
       if safeStr(item, ["summary", "description"]) <> "" then score = score + 5
       if fileInfoFromItem(item).path <> "" then score = score + 5
       return score
+  end function
+
+  function sortMovieItemsForDisplay(items as object) as object
+      sorted = []
+      if items = invalid then return sorted
+      for each item in items
+          if item <> invalid
+              item.addReplace("movieSortKey", movieDisplaySortKey(item))
+              sorted.push(item)
+          end if
+      end for
+      sorted.sortBy("movieSortKey")
+      return sorted
+  end function
+
+  function movieDisplaySortKey(item as object) as string
+      series = movieSeriesKey(item)
+      dateKey = movieReleaseSortDate(item)
+      orderKey = movieSeriesOrderKey(item, series)
+      titleKey = normalizedMovieTitle(safeStr(item, ["title", "name", "file_name"]))
+      if series = "" then series = titleKey
+      if orderKey <> "" then return series + ":" + orderKey + ":" + dateKey + ":" + titleKey
+      return series + ":" + dateKey + ":" + titleKey
+  end function
+
+  function movieSeriesOrderKey(item as object, series as string) as string
+      title = normalizedMovieTitle(safeStr(item, ["title", "name", "file_name"]))
+      if series = "star wars"
+          if instr(1, title, "episode i ") > 0 then return "0001"
+          if instr(1, title, "episode ii ") > 0 then return "0002"
+          if instr(1, title, "episode iii ") > 0 then return "0003"
+          if instr(1, title, "solo ") = 1 then return "0004"
+          if instr(1, title, "rogue one") > 0 then return "0005"
+          if title = "star wars" or instr(1, title, "new hope") > 0 then return "0006"
+          if instr(1, title, "empire strikes back") > 0 then return "0007"
+          if instr(1, title, "return of the jedi") > 0 then return "0008"
+          if instr(1, title, "force awakens") > 0 then return "0009"
+          if instr(1, title, "last jedi") > 0 then return "0010"
+          if instr(1, title, "rise of skywalker") > 0 then return "0011"
+      else if series = "lion king"
+          if title = "lion king" then return "0001"
+          if instr(1, title, "lion king 1") > 0 then return "0002"
+          if instr(1, title, "lion king ii") > 0 then return "0003"
+          if instr(1, title, "lion king 2") > 0 then return "0003"
+      end if
+      return ""
+  end function
+
+  function movieReleaseSortDate(item as object) as string
+      dateText = dateForDetail(item, "movies")
+      if dateText = "" then dateText = safeStr(item, ["originalAvailable", "original_available", "originally_available", "release_date", "date", "year", "create_time"])
+      found = dateFromText(dateText)
+      if found = "" then found = dateFromTitleFields(item)
+      if found = "" then return "9999-99-99"
+      if len(found) = 4 then return found + "-00-00"
+      if len(found) = 7 then return found + "-00"
+      return found
+  end function
+
+  function movieSeriesKey(item as object) as string
+      title = normalizedMovieTitle(safeStr(item, ["title", "name", "file_name"]))
+      if title = "" then return ""
+      if instr(1, title, "back to the future") > 0 then return "back to the future"
+      if instr(1, title, "final destination") > 0 then return "final destination"
+      if instr(1, title, "dont breathe") > 0 then return "dont breathe"
+      if instr(1, title, "amazing spider man") > 0 or instr(1, title, "spider man") > 0 then return "spider man"
+      if instr(1, title, "star wars") > 0 or instr(1, title, "empire strikes back") > 0 then return "star wars"
+      if instr(1, title, "star trek") > 0 then return "star trek"
+      if instr(1, title, "scream") = 1 then return "scream"
+      if instr(1, title, "scary movie") = 1 then return "scary movie"
+      if instr(1, title, "john wick") > 0 then return "john wick"
+      if instr(1, title, "harry potter") > 0 then return "harry potter"
+      if instr(1, title, "hunger games") > 0 then return "hunger games"
+      if instr(1, title, "toy story") > 0 then return "toy story"
+      if instr(1, title, "transformers") > 0 then return "transformers"
+      if instr(1, title, "twilight") > 0 then return "twilight"
+      if instr(1, title, "ice age") > 0 then return "ice age"
+      if instr(1, title, "fear street") > 0 then return "fear street"
+      if instr(1, title, "futurama") > 0 then return "futurama"
+      if instr(1, title, "south park") > 0 then return "south park"
+      if instr(1, title, "home alone") > 0 then return "home alone"
+      if instr(1, title, "hocus pocus") > 0 then return "hocus pocus"
+      if instr(1, title, "hurricane bianca") > 0 then return "hurricane bianca"
+      if title = "finding nemo" or title = "finding dory" then return "finding"
+      if instr(1, title, "terrifier") > 0 then return "terrifier"
+      if instr(1, title, "the strangers") > 0 or instr(1, title, "strangers") = 1 then return "strangers"
+      if instr(1, title, "texas chain saw massacre") > 0 or instr(1, title, "texas chainsaw massacre") > 0 then return "texas chainsaw massacre"
+      if instr(1, title, "naked gun") > 0 then return "naked gun"
+      if instr(1, title, "lion king") > 0 then return "lion king"
+      if instr(1, title, "underworld") > 0 then return "underworld"
+      if instr(1, title, "sherlock holmes") > 0 then return "sherlock holmes"
+      if instr(1, title, "wrong turn") > 0 then return "wrong turn"
+      if instr(1, title, "venom") > 0 then return "venom"
+      if title = "halloween" or instr(1, title, "halloween ii") = 1 or instr(1, title, "halloween 4") = 1 or instr(1, title, "halloween kills") = 1 or instr(1, title, "halloween ends") = 1 then return "halloween"
+      if title = "friday the 13th" or instr(1, title, "friday the 13th part") = 1 then return "friday the 13th"
+      return ""
+  end function
+
+  function normalizedMovieTitle(title as string) as string
+      lower = lcase(title)
+      out = ""
+      lastSpace = true
+      i = 1
+      while i <= len(lower)
+          ch = mid(lower, i, 1)
+          code = asc(ch)
+          isWord = (code >= 48 and code <= 57) or (code >= 97 and code <= 122)
+          if isWord
+              out = out + ch
+              lastSpace = false
+          else if ch = "'"
+              ' Keep contractions together: Don't -> dont.
+          else if code = 226
+              ' Curly apostrophes are UTF-8; dropping this byte avoids splitting contractions.
+          else if not lastSpace
+              out = out + " "
+              lastSpace = true
+          end if
+          i = i + 1
+      end while
+      out = out.trim()
+      if left(out, 4) = "the " then out = mid(out, 5)
+      if left(out, 2) = "a " then out = mid(out, 3)
+      if left(out, 3) = "an " then out = mid(out, 4)
+      return out
   end function
 
   function filterRemovedItems(items as object, removedKeys as object) as object

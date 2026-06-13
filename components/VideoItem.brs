@@ -79,9 +79,9 @@ sub adjustSecondaryLine(mode as string, titleText as string)
         if len(titleText) <= 18
             year.translation = [0, 346]
         else if len(titleText) <= 36
-            year.translation = [0, 370]
+            year.translation = [0, 368]
         else
-            year.translation = [0, 388]
+            year.translation = [0, 374]
         end if
     else
         if len(titleText) <= 18
@@ -195,10 +195,10 @@ sub applyLayoutMode(mode as string)
         m.top.findNode("iconPoster").translation = [60, 100]
         title.translation = [0, 308]
         title.width = 220
-        title.height = 92
+        title.height = 58
         title.font = "font:TinySystemFont"
-        title.maxLines = 3
-        title.lineSpacing = -1
+        title.maxLines = 2
+        title.lineSpacing = 0
         year.translation = [0, 388]
         year.width = 220
         year.height = 26

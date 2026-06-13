@@ -317,7 +317,7 @@ sub applyMovieMetadataResponse(response as object)
     summary = ""
     if response.summary <> invalid then summary = response.summary
     if summary = "" and m.movieFallbackSummary <> invalid then summary = m.movieFallbackSummary
-    if summary <> ""
+    if shouldApplySummaryText(summary)
         m.detailData.addReplace("summary", summary)
         m.top.findNode("summaryLabel").text = summary
         applySummaryFit(summary, m.detailData)
@@ -422,16 +422,10 @@ sub onDetailState(event as object)
     end if
     summary = ""
     if response.summary <> invalid then summary = response.summary
-    if summary <> ""
-        currentSummary = m.top.findNode("summaryLabel").text
-        shouldApply = currentSummary = ""
-        if currentSummary = "No description available." then shouldApply = true
-        if len(summary) > len(currentSummary) then shouldApply = true
-        if shouldApply
-            m.detailData.addReplace("summary", summary)
-            m.top.findNode("summaryLabel").text = summary
-            applySummaryFit(summary, m.detailData)
-        end if
+    if shouldApplySummaryText(summary)
+        m.detailData.addReplace("summary", summary)
+        m.top.findNode("summaryLabel").text = summary
+        applySummaryFit(summary, m.detailData)
     end if
     if response.showBackdropUrl <> invalid and response.showBackdropUrl <> ""
         m.detailData.addReplace("backdropUrl", response.showBackdropUrl)
@@ -674,6 +668,16 @@ sub syncRating(rating as integer)
     task.control = "RUN"
     m.ratingSyncTask = task
 end sub
+
+function shouldApplySummaryText(summary as string) as boolean
+    if summary = "" then return false
+    currentSummary = m.top.findNode("summaryLabel").text
+    if currentSummary = "" then return true
+    if currentSummary = "No description available." then return true
+    if lcase(summary.trim()) = lcase(currentSummary.trim()) then return false
+    if len(summary) > len(currentSummary) then return true
+    return false
+end function
 
 sub onDetailStateSyncResponse(event as object)
     response = event.getData()
