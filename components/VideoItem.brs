@@ -260,9 +260,9 @@ sub applyLayoutMode(mode as string)
         year.width = 220
         if mode = "compactPortrait" or mode = "moviePortrait"
             title.font = "font:TinySystemFont"
-            title.height = 76
-            title.maxLines = 3
-            title.lineSpacing = -1
+            title.height = 58
+            title.maxLines = 2
+            title.lineSpacing = 0
             year.translation = [0, 412]
             year.font = "font:TinySystemFont"
             year.height = 78
