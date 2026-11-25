@@ -49,11 +49,7 @@ sub init()
   ' ── Authentication ────────────────────────────────────────────────────────────
   sub doLogin(req as object)
       baseUrl = req.baseUrl
-      enc = createObject("roUrlTransfer")
-      user = enc.escape(req.username)
-      pass = enc.escape(req.password)
-      url = baseUrl + "/webapi/auth.cgi?api=SYNO.API.Auth&version=6&method=login&account=" + user + "&passwd=" + pass + "&session=VideoStation&format=sid&enable_syno_token=yes"
-      result = httpGet(url)
+      result = requestVideoStationLogin(baseUrl, req.username, req.password)
       if result = invalid or result = ""
           m.top.response = { success: false, error: "Network error - check address and port", sid: "" }
           return
@@ -75,7 +71,25 @@ sub init()
       end if
   end sub
 
+  function requestVideoStationLogin(baseUrl as string, username as string, password as string) as dynamic
+      enc = createObject("roUrlTransfer")
+      endpoint = baseUrl + "/webapi/auth.cgi?api=SYNO.API.Auth&method=login"
+      credentials = "&account=" + enc.escape(username) + "&passwd=" + enc.escape(password) + "&session=VideoStation&format=sid"
+      for each version in [6, 4, 3, 2, 1]
+          url = endpoint + "&version=" + stri(version).trim() + credentials
+          if version = 6 then url = url + "&enable_syno_token=yes"
+          result = httpGet(url)
+          if result = invalid or result = "" then return result
+          response = parseJSON(result)
+          if response = invalid then return result
+          if response.success = true or response.error = invalid then return result
+          if response.error.code <> 104 then return result
+      end for
+      return result
+  end function
+
   function loginError(code as integer) as string
+      if code = 104 then return "Unsupported Synology login API (code 104)"
       if code = 400 then return "Incorrect username or password"
       if code = 401 then return "Account disabled"
       if code = 402 then return "Permission denied"
@@ -88,16 +102,14 @@ sub init()
       if baseUrl = invalid or baseUrl = "" then return invalid
       if username = invalid or password = invalid then return invalid
       if username = "" then return invalid
-      enc = createObject("roUrlTransfer")
-      url = baseUrl + "/webapi/auth.cgi?api=SYNO.API.Auth&version=6&method=login&account=" + enc.escape(username) + "&passwd=" + enc.escape(password) + "&session=VideoStation&format=sid&enable_syno_token=yes"
-      result = httpGet(url)
+      result = requestVideoStationLogin(baseUrl, username, password)
       if result = invalid or result = "" then
           print "SESSION_REFRESH failed empty"
           return invalid
       end if
       json = parseJSON(result)
       if json = invalid or json.success <> true or json.data = invalid or json.data.sid = invalid or json.data.sid = "" then
-          print "SESSION_REFRESH failed resp="; left(result, 180)
+          print "SESSION_REFRESH failed authentication"
           return invalid
       end if
       synoToken = ""
