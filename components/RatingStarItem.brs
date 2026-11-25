@@ -14,7 +14,7 @@ end sub
 sub applyStarContent(content as dynamic)
     base = m.top.findNode("starBase")
     fill = m.top.findNode("starFill")
-    if base <> invalid then base.opacity = 0.25
+    if base <> invalid then base.opacity = 0.60
     if fill = invalid then return
     fill.opacity = 0
     fill.uri = "pkg:/images/detail-star.png"

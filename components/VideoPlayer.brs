@@ -76,6 +76,7 @@ sub init()
           action: "getStreamUrl",
           baseUrl: authData.baseUrl,
           proxyBaseUrl: authData.proxyBaseUrl,
+          legacy: authData.legacy,
           sid: authData.sid,
           synoToken: authData.synoToken,
           username: authData.username,
@@ -651,6 +652,11 @@ sub init()
       if position < 1 then position = 1
       m.watchStatusInFlight = false
       print "WATCH_STATUS_FINISHED position="; position; " duration="; duration
+      auth = m.top.authData
+      video = m.top.videoData
+      if auth <> invalid and auth.legacy <> invalid and auth.legacy.onlyLegacyVideo = true and video <> invalid
+          if video.type = "episode" or video.type = "movie" then return
+      end if
       syncWatchStatus(position)
   end sub
 

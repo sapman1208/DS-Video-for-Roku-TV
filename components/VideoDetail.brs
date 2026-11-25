@@ -62,6 +62,11 @@ sub onVideoDataSet(event as object)
     m.waitForMovieMetadata = false
     m.top.sourceListRemoved = false
     m.ratingOverride = invalid
+    m.legacyRatingKey = legacyRatingKey(data)
+    if m.legacyRatingKey <> ""
+        ratings = createObject("roRegistrySection", "DSVideoLegacyRatings")
+        if ratings.exists(m.legacyRatingKey) then m.ratingOverride = int(val(ratings.read(m.legacyRatingKey)))
+    end if
     m.ratingFocusIndex = -1
     m.top.opacity = 0
     print "DETAIL_SET type="; data.lookUp("type"); " title="; data.lookUp("title"); " rating="; data.lookUp("rating")
@@ -380,6 +385,7 @@ sub startDetailStateFetch(data as object)
     task.observeField("response", "onDetailState")
     task.request = {
         action: "detailState",
+        legacy: data.authData.legacy,
         baseUrl: data.authData.baseUrl,
         sid: data.authData.sid,
         synoToken: data.authData.synoToken,
@@ -437,6 +443,7 @@ sub onDetailState(event as object)
     if response.hasWatched = true and response.watchedRatio <> invalid
         m.detailData.addReplace("watchedRatio", response.watchedRatio)
         if response.watchedRatio = 0 then m.detailData.addReplace("fileWatched", false)
+        if response.watchedRatio >= 100 then m.detailData.addReplace("fileWatched", true)
         populateWatchedState()
     end if
     if m.actionOverrides <> invalid
@@ -643,11 +650,27 @@ sub onRatingSelected(event as object)
     print "RATING_SELECT idx="; idx; " currentStars="; current; " newRating="; rating
     setLocalRating(rating)
     populateRatingStars()
-    syncRating(rating)
+    if m.legacyRatingKey <> ""
+        ratings = createObject("roRegistrySection", "DSVideoLegacyRatings")
+        ratings.write(m.legacyRatingKey, stri(rating).trim())
+        ratings.flush()
+    else
+        syncRating(rating)
+    end if
     grid = m.top.findNode("ratingGrid")
     grid.jumpToItem = idx
     grid.setFocus(true)
 end sub
+
+function legacyRatingKey(data as object) as string
+    auth = data.authData
+    if auth = invalid or auth.legacy = invalid or auth.legacy.onlyLegacyVideo <> true then return ""
+    id = videoIdForSync(data)
+    if id = "" or id = "0" or data.type = invalid then return ""
+    username = ""
+    if auth.username <> invalid then username = auth.username
+    return formatJSON([auth.baseUrl, username, data.type, id])
+end function
 
 sub syncRating(rating as integer)
     data = m.top.videoData
@@ -711,6 +734,7 @@ sub syncSynologyCollection(idx as integer, enabled as boolean)
     task = createObject("roSGNode", "APITask")
     task.request = {
         action: "toggleCollectionVideo",
+        legacy: data.authData.legacy,
         baseUrl: data.authData.baseUrl,
         proxyBaseUrl: proxyBaseUrl,
         sid: data.authData.sid,
@@ -1076,6 +1100,7 @@ sub populateWatchedState()
     label = m.top.findNode("watchedStateLabel")
     if label = invalid then return
     watchedState = explicitWatchedState()
+    if watchedState < 0 and hasNumericField(m.detailData, ["watched_ratio", "watchedRatio"]) and watchedRatioValue() = 0 then watchedState = 0
     print "WATCHED_RENDER state="; watchedState; " ratio="; watchedRatioValue()
     if watchedState = 0
         label.text = "Unwatched"

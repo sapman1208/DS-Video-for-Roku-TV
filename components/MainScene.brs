@@ -93,7 +93,7 @@ sub init()
   sub onAutoLoginResponse(event as object)
       response = event.getData()
       if response <> invalid and response.success = true
-          m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, username: m.savedLogin.username, password: m.savedLogin.password }
+          m.authData = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, legacy: response.legacy, username: m.savedLogin.username, password: m.savedLogin.password }
           showHomeScreen(m.authData)
       else
           showLoginScreen()
@@ -549,6 +549,33 @@ sub init()
       return text
   end function
 
+  sub markLegacyVideoFinished(video as dynamic)
+      auth = m.authData
+      if video = invalid or auth = invalid or auth.legacy = invalid or auth.legacy.onlyLegacyVideo <> true then return
+      if video.type <> "episode" and video.type <> "movie" then return
+      videoId = video.id
+      if video.videoStationId <> invalid and video.videoStationId <> "" and video.videoStationId <> "0" then videoId = video.videoStationId
+      task = createObject("roSGNode", "APITask")
+      task.request = {
+          action: "setVideoWatched",
+          baseUrl: auth.baseUrl,
+          sid: auth.sid,
+          synoToken: auth.synoToken,
+          legacy: auth.legacy,
+          videoId: videoId,
+          videoType: video.type,
+          watched: true
+      }
+      task.observeField("response", "onLegacyVideoFinished")
+      m.legacyFinishedTask = task
+      task.control = "RUN"
+  end sub
+
+  sub onLegacyVideoFinished(event as object)
+      response = event.getData()
+      if response <> invalid then print "LEGACY_WATCHED_SYNC success="; response.success
+  end sub
+
   sub onPlaybackDone(event as object)
       if m.currentScreen = invalid then return
       if m.currentScreen.findNode("videoNode") = invalid then return
@@ -567,6 +594,7 @@ sub init()
       wasBackExit = m.videoBackExit
       m.videoBackExit = false
       if result <> invalid and result.lookUp("reason") = "finished" and wasBackExit <> true
+          markLegacyVideoFinished(playedVideo)
           if playedVideo <> invalid and playedVideo.lookUp("autoplayEpisodes") = invalid then attachEpisodeAutoplayContext(playedVideo)
           nextVideo = nextAutoplayEpisode(playedVideo)
           if nextVideo = invalid then nextVideo = nextAutoplayMovie(playedVideo)

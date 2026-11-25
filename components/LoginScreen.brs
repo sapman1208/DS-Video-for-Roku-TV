@@ -368,7 +368,7 @@ sub onLoginResponse(event as object)
     if response.success = true
         saveCredentials()
         showStatus("Connected! Loading library...", false)
-        m.top.authSuccess = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, username: m.username, password: m.password }
+        m.top.authSuccess = { sid: response.sid, synoToken: response.synoToken, baseUrl: response.baseUrl, legacy: response.legacy, username: m.username, password: m.password }
     else
         err = response.error
         if err = invalid then err = "Login failed. Check credentials."

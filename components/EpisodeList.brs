@@ -1248,6 +1248,17 @@ sub init()
       if id = "" or id = "0" then id = safeStr(item, ["mapper_id", "mapperId"])
       id = id.trim()
       if id = "" or id = "0" then return ""
+      legacy = authData.legacy
+      if legacy <> invalid and legacy.posterPath <> invalid and legacy.posterPath <> ""
+          endpoint = baseUrl + "/webapi/" + legacy.posterPath
+          if left(legacy.posterPath, 1) = "/" then endpoint = baseUrl + legacy.posterPath
+          url = endpoint + "?api=SYNO.VideoStation.Poster&method=getimage&version=" + legacy.posterVersion
+          url = url + "&_sid=" + sid + "&id=" + escapeQueryValue(id) + "&type=" + "tvshow_episode"
+          url = url + "&poster_mtime=" + escapeQueryValue(posterMtime(item))
+          if token <> "" then url = url + "&SynoToken=" + token
+          return url
+      end if
+
       url = baseUrl + "/webapi/entry.cgi?api=SYNO.VideoStation2.Poster&version=1&method=get&_sid=" + sid + "&id=" + id + "&type=tvshow_episode"
       mtime = posterMtime(item)
       if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)

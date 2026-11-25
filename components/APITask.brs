@@ -66,7 +66,8 @@ sub init()
       if json.success = true
           synoToken = ""
           if json.data.synotoken <> invalid then synoToken = json.data.synotoken
-          m.top.response = { success: true, sid: json.data.sid, synoToken: synoToken, baseUrl: baseUrl }
+          legacy = discoverLegacyVideoStation(baseUrl, json.data.sid)
+          m.top.response = { success: true, sid: json.data.sid, synoToken: synoToken, baseUrl: baseUrl, legacy: legacy }
       else
           code = 0
           if json.error <> invalid then code = int(json.error.code)
@@ -281,7 +282,9 @@ sub init()
       params = "id=" + collectionId + "&offset=0&limit=500&sort_by=title&sort_direction=asc&additional=" + additional
       url = apiUrl(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "2", "video_list", params, sid, token)
       result = httpGet(url)
-      respondWithCollectionVideos(result, baseUrl, sid, token)
+      legacy = req.legacy
+      useLegacy = legacy <> invalid and legacy.onlyLegacyVideo = true
+      respondWithCollectionVideos(result, baseUrl, sid, token, useLegacy)
   end sub
 
   sub toggleCollectionVideo(req as object)
@@ -291,7 +294,9 @@ sub init()
       if req.synoToken <> invalid then token = req.synoToken
       collectionId = idToStr(req.collectionId)
       if collectionId = "" or collectionId = "0" then collectionId = collectionIdForKey(idToStr(req.localKey))
-      if left(collectionId, 1) = "-"
+      legacy = req.legacy
+      useLegacy = legacy <> invalid and legacy.onlyLegacyVideo = true
+      if left(collectionId, 1) = "-" and not useLegacy
           resolvedCollectionId = resolveCollectionId(baseUrl, sid, token, idToStr(req.localKey), collectionId)
           if resolvedCollectionId = "" or resolvedCollectionId = "0" or left(resolvedCollectionId, 1) = "-"
               resolvedCollectionId = defaultRealCollectionIdForKey(idToStr(req.localKey))
@@ -313,6 +318,22 @@ sub init()
       method = "deletevideo"
       if req.enabled = true then method = "addvideo"
       enc = createObject("roUrlTransfer")
+      if useLegacy
+          endpoint = apiEndpoint(baseUrl, "SYNO.VideoStation.Collection", "VideoStation/collection.cgi", "", "")
+          videos = formatJSON([{ video_id: int(val(videoId)), video_type: videoType }])
+          body = "api=SYNO.VideoStation.Collection&version=2&method=" + method + "&id=" + enc.escape(collectionId) + "&video_collections=" + enc.escape(videos)
+          body = body + "&_sid=" + enc.escape(sid)
+          if token <> "" then body = body + "&SynoToken=" + enc.escape(token)
+          raw = httpPostForm(endpoint, body)
+          result = invalid
+          if raw <> invalid then result = parseJSON(raw)
+          if result <> invalid and result.success = true
+              m.top.response = { success: true, result: result, attempt: "legacy collection v2" }
+          else
+              m.top.response = { success: false, error: "Synology collection update failed" }
+          end if
+          return
+      end if
       videoTypes = collectionVideoTypeCandidates(videoType)
       lastResult = ""
       lastAttempt = ""
@@ -451,9 +472,26 @@ sub init()
           return
       end if
 
+      enc = createObject("roUrlTransfer")
+      legacy = req.legacy
+      if legacy <> invalid and legacy.onlyLegacyVideo = true
+          apiName = legacyVideoApiForMediaType(mediaType)
+          url = apiEndpoint(baseUrl, apiName, legacyVideoPathForMediaType(mediaType), "", "")
+          body = "api=" + enc.escape(apiName) + "&version=2&method=set_watched&watched=" + watchedText
+          body = body + "&id=" + enc.escape(formatJSON([int(val(videoId))])) + "&_sid=" + enc.escape(sid)
+          if token <> "" then body = body + "&SynoToken=" + enc.escape(token)
+          raw = httpPostForm(url, body)
+          result = invalid
+          if raw <> invalid then result = parseJSON(raw)
+          if result <> invalid and result.success = true
+              m.top.response = { success: true, watched: req.watched = true }
+          else
+              m.top.response = { success: false, error: "Legacy watched update failed" }
+          end if
+          return
+      end if
       apiName = v2InfoApiForMediaType(mediaType)
       url = apiEndpoint(baseUrl, apiName, "entry.cgi", sid, token)
-      enc = createObject("roUrlTransfer")
       baseBody = "api=" + enc.escape(apiName) + "&version=1&method=set_watched&watched=" + watchedText + "&id="
       idForms = [
           "%5B%22" + enc.escape(videoId) + "%22%5D",
@@ -550,7 +588,17 @@ sub init()
 
       item = invalid
       usedId = ""
+      legacy = req.legacy
+      if legacy <> invalid and legacy.onlyLegacyVideo = true
+          enc = createObject("roUrlTransfer")
+          additional = "%5B%22summary%22,%22collection%22,%22rating%22,%22extra%22,%22watched_ratio%22%5D"
+          params = "id=" + enc.escape(videoId) + "&additional=" + additional
+          endpoint = apiUrl(baseUrl, legacyVideoApiForMediaType(mediaType), legacyVideoPathForMediaType(mediaType), "2", "getinfo", params, sid, token)
+          item = collectionInfoItemFromResponse(httpGetLong(endpoint, 5000), mediaType)
+          if item <> invalid then usedId = videoId
+      end if
       for each candidateId in candidates
+          if usedId = videoId and legacy <> invalid and legacy.onlyLegacyVideo = true then exit for
           candidateItem = fetchCollectionInfoItem(baseUrl, sid, token, candidateId, mediaType)
           if candidateItem <> invalid
               if item = invalid
@@ -1851,6 +1899,32 @@ sub init()
       return respondWithCandidateSubtitle(streamUrl, streamFormatForPath(filePath), "FileStation " + left(fsPath, 80) + chr(10) + left(diagStr, 900), diag, subtitleUrl)
   end function
 
+  function discoverLegacyVideoStation(baseUrl as string, sid as string) as object
+      names = "SYNO.VideoStation.Poster,SYNO.VideoStation.Streaming,SYNO.VideoStation2.Movie,SYNO.VideoStation2.Poster,SYNO.VideoStation2.Streaming"
+      enc = createObject("roUrlTransfer")
+      url = baseUrl + "/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=" + enc.escape(names) + "&_sid=" + enc.escape(sid)
+      raw = httpGetLong(url, 3500)
+      if raw = invalid then return {}
+      result = parseJSON(raw)
+      if result = invalid or result.success <> true or result.data = invalid then return {}
+
+      legacy = {}
+      poster = result.data.lookUp("SYNO.VideoStation.Poster")
+      if poster <> invalid and result.data.lookUp("SYNO.VideoStation2.Poster") = invalid
+          legacy.posterPath = idToStr(poster.path)
+          legacy.posterVersion = "1"
+          if val(idToStr(poster.maxVersion)) >= 2 then legacy.posterVersion = "2"
+      end if
+      streaming = result.data.lookUp("SYNO.VideoStation.Streaming")
+      if streaming <> invalid and result.data.lookUp("SYNO.VideoStation2.Streaming") = invalid
+          legacy.streamPath = idToStr(streaming.path)
+          legacy.streamVersion = "1"
+          if val(idToStr(streaming.maxVersion)) >= 3 then legacy.streamVersion = "3"
+      end if
+      legacy.onlyLegacyVideo = result.data.lookUp("SYNO.VideoStation2.Movie") = invalid and legacy.streamPath <> invalid and legacy.streamPath <> ""
+      return legacy
+  end function
+
   function apiPath(baseUrl as string, apiName as string, fallback as string) as string
       if fallback <> "" then return fallback
       enc = createObject("roUrlTransfer")
@@ -2014,14 +2088,13 @@ sub init()
       return false
   end function
 
-  function tryAndroidStyleStreamOpen(baseUrl as string, sid as string, token as string, candidateId as string, version as string, forceOpenVte as string, debugName as string, diag as object) as boolean
+  function tryAndroidStyleStreamOpen(baseUrl as string, sid as string, token as string, candidateId as string, path as string, version as string, diag as object, acceptFormats = "hls, hls_remux, mp4, raw" as string) as boolean
       enc = createObject("roUrlTransfer")
-      acceptFormats = "hls, hls_remux, raw, mp4, ts, dash, webm"
-      params = "id=" + candidateId + "&accept_format=" + enc.escape(acceptFormats)
-      if forceOpenVte <> "" then params = params + "&force_open_vte=" + forceOpenVte
-      params = params + "&audio_format=ac3_copy"
+      params = "id=" + enc.escape(candidateId) + "&accept_format=" + enc.escape(acceptFormats)
+      if version = "3" then params = params + "&force_open_vte=false"
+      debugName = "legacy/android v" + version + " id=" + candidateId
 
-      openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", version, "open", params, sid, token)
+      openUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", path, version, "open", params, sid, token)
       print "STREAM_OPEN "; debugName
       r = httpGetLong(openUrl, 40000)
       if r = invalid
@@ -2045,7 +2118,7 @@ sub init()
 
       streamFormat = "hls"
       if responseFmt = "raw" or responseFmt = "mp4" then streamFormat = "mp4"
-      if responseFmt = "dash" or responseFmt = "webm" then return false
+      if responseFmt <> "hls" and responseFmt <> "hls_remux" and streamFormat <> "mp4" then return false
 
       if directUrl <> invalid and directUrl <> ""
           return respondWithCandidate(directUrl, streamFormat, debugName + " url fmt=" + responseFmt, diag)
@@ -2053,7 +2126,7 @@ sub init()
 
       streamId = streamIdFromResponse(j)
       if streamId <> ""
-          streamUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", "VideoStation/streaming.cgi", "1", "stream", "id=" + streamId + "&format=" + responseFmt, sid, token)
+          streamUrl = apiUrl(baseUrl, "SYNO.VideoStation.Streaming", path, "1", "stream", "id=" + enc.escape(streamId) + "&format=" + enc.escape(responseFmt), sid, token)
           return respondWithCandidate(streamUrl, streamFormat, debugName + " stream=" + streamId + " fmt=" + responseFmt, diag)
       end if
 
@@ -2275,8 +2348,45 @@ sub init()
       diag.push("type=" + mediaType + " vid=" + videoId + " fid=" + fileId + " mapper=" + mapperId)
       print "GET_STREAM type="; mediaType; " vid="; videoId; " fid="; fileId; " mapper="; mapperId; " tokenLen="; len(token)
 
+      legacy = req.legacy
+      if legacy <> invalid and legacy.streamPath <> invalid and legacy.streamPath <> ""
+          if mediaType = "episode" and videoId <> "" and videoId <> "0"
+              enc = createObject("roUrlTransfer")
+              params = "id=" + enc.escape(videoId) + "&additional=%5B%22file%22%5D"
+              infoUrl = apiUrl(baseUrl, "SYNO.VideoStation.TVShowEpisode", "VideoStation/tvshow_episode.cgi", "2", "getinfo", params, sid, token)
+              rawInfo = httpGetLong(infoUrl, 5000)
+              if rawInfo <> invalid
+                  episodeInfo = parseJSON(rawInfo)
+                  if episodeInfo <> invalid and episodeInfo.success = true and episodeInfo.data <> invalid
+                      episodes = episodeInfo.data.lookUp("episodes")
+                      if episodes <> invalid and episodes.count() > 0
+                          info = extractRealFileInfo(episodes[0])
+                          episodeFileId = idToStr(info.id)
+                          if episodeFileId <> "" and episodeFileId <> "0"
+                              fileId = episodeFileId
+                              if filePath = "" then filePath = idToStr(info.path)
+                              if right(lcase(filePath), 4) = ".mp4"
+                                  if tryAndroidStyleStreamOpen(baseUrl, sid, token, fileId, legacy.streamPath, legacy.streamVersion, diag, "raw") then return
+                              end if
+                              if tryAndroidStyleStreamOpen(baseUrl, sid, token, fileId, legacy.streamPath, legacy.streamVersion, diag) then return
+                          end if
+                      end if
+                  end if
+              end if
+          end if
+          if videoId <> "" and videoId <> "0"
+              if tryAndroidStyleStreamOpen(baseUrl, sid, token, videoId, legacy.streamPath, legacy.streamVersion, diag) then return
+          end if
+          if mapperId <> "" and mapperId <> "0" and mapperId <> videoId
+              if tryAndroidStyleStreamOpen(baseUrl, sid, token, mapperId, legacy.streamPath, legacy.streamVersion, diag) then return
+          end if
+      end if
+
       ' ── A: v2 getinfo → real file object, then v1/path fallbacks ─────────────
-      fileInfoV2 = getFileInfoV2(baseUrl, sid, token, videoId, mediaType)
+      fileInfoV2 = { path: invalid, id: invalid, raw: "" }
+      if legacy = invalid or legacy.onlyLegacyVideo <> true
+          fileInfoV2 = getFileInfoV2(baseUrl, sid, token, videoId, mediaType)
+      end if
       diag.push("v2info:" + left(fileInfoV2.raw, 250))
       if fileInfoV2.path <> invalid and fileInfoV2.path <> "" and filePath = "" then filePath = fileInfoV2.path
       realFileId = idToStr(fileInfoV2.id)
@@ -3206,7 +3316,7 @@ sub init()
       return json.lookUp("item")
   end function
 
-  sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string, token as string)
+  sub respondWithCollectionVideos(result as dynamic, baseUrl as string, sid as string, token as string, useLegacy as boolean)
       if result = invalid or result = ""
           m.top.response = { success: false, error: "No response from Synology collection API", items: [] }
           return
@@ -3229,7 +3339,7 @@ sub init()
       for each item in items
           normalizeCollectionVideo(item, mediaType)
           if normalizedAppVideoType(idToStr(item.lookUp("type"))) = "homevideo" then applyHomeVideoDateMap(item, dateMap)
-          enrichCollectionVideoMetadata(item, baseUrl, sid, token)
+          if not useLegacy then enrichCollectionVideoMetadata(item, baseUrl, sid, token)
           normalized.push(item)
       end for
       normalized = uniqueCollectionVideos(normalized)

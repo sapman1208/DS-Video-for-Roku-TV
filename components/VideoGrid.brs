@@ -173,6 +173,7 @@ sub init()
           task = createObject("roSGNode", "APITask")
           task.request = {
               action: "listCollectionVideos",
+              legacy: authData.legacy,
               baseUrl: authData.baseUrl,
               sid: authData.sid,
               synoToken: authData.synoToken,
@@ -2606,6 +2607,17 @@ sub init()
 	      end if
 
 	      mtime = posterMtime(item)
+      legacy = authData.legacy
+      if legacy <> invalid and legacy.posterPath <> invalid and legacy.posterPath <> ""
+          endpoint = baseUrl + "/webapi/" + legacy.posterPath
+          if left(legacy.posterPath, 1) = "/" then endpoint = baseUrl + legacy.posterPath
+          url = endpoint + "?api=SYNO.VideoStation.Poster&method=getimage&version=" + legacy.posterVersion
+          url = url + "&_sid=" + sid + "&id=" + escapeQueryValue(id) + "&type=" + mediaType
+          url = url + "&poster_mtime=" + escapeQueryValue(mtime)
+          if token <> "" then url = url + "&SynoToken=" + token
+          return url
+      end if
+
 	      if mediaType = "tvshow"
 	          url = baseUrl + "/webapi/entry.cgi?type=tvshow&id=" + id
 	          if mtime <> "" then url = url + "&mtime=" + escapeQueryValue(mtime)
